@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "osvid-9d4d6"
+  },
+  "targets": {
+    "osvid-9d4d6": {
+      "hosting": {
+        "osvid": [
+          "osvid"
+        ]
+      }
+    }
+  }
+}
