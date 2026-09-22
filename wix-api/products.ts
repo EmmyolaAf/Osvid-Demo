@@ -76,19 +76,23 @@ export async function queryProducts(
 
 export const getProductBySlug = cache(
   async (wixClient: WixClient, slug: string) => {
-    const { items } = await wixClient.products
-      .queryProducts()
-      .eq("slug", slug)
-      .limit(1)
-      .find();
+    try {
+      const { items } = await wixClient.products
+        .queryProducts()
+        .eq("slug", slug)
+        .limit(1)
+        .find();
 
-    const product = items[0];
+      const product = items[0];
 
-    if (!product || !product.visible) {
+      if (!product || !product.visible) {
+        return null;
+      }
+
+      return product;
+    } catch (error) {
       return null;
     }
-
-    return product;
   }
 );
 

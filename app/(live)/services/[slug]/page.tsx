@@ -27,6 +27,14 @@ interface Service {
   createdAt?: string;
 }
 
+export async function generateStaticParams() {
+  return [
+    { slug: "epoxy-flooring" },
+    { slug: "waterproofing-solutions" },
+    { slug: "concrete-repair" },
+  ];
+}
+
 // Generate dynamic metadata for each service page
 export async function generateMetadata({
   params,

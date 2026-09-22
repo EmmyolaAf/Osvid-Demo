@@ -9,6 +9,10 @@ import ProductDetailsClient from "./client";
 import TrustBuildingSection from "@/components/reusables/sections/TrustBuildingSection";
 import CTASection from "@/components/reusables/sections/cta";
 
+export async function generateStaticParams() {
+  return [{ slug: "osvid-bond-glue" }];
+}
+
 // Generate metadata dynamically based on the product data
 export async function generateMetadata({
   params,

@@ -1,6 +1,8 @@
 // app/api/verify-payment/route.ts
 import { NextResponse } from "next/server";
 import { Resend } from "resend";
+
+export const dynamic = "force-static";
 import {
   PaymentVerificationRequest,
   PaymentVerificationResponse,

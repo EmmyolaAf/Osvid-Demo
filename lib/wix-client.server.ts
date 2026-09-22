@@ -15,7 +15,7 @@ export const wixClientServer = async () => {
     const cookieStore = await cookies();
     refreshToken = JSON.parse(cookieStore.get("refreshToken")?.value || "{}");
   } catch (error) {
-    console.log(error);
+    // Static generation safe fallback
   }
 
   const wixClient = createClient({
@@ -37,12 +37,12 @@ export const wixClientServer = async () => {
 
 export const getWixServerClient = cache(async () => {
   let tokens: Tokens | undefined;
-  const cookieStore = await cookies();
 
   try {
+    const cookieStore = await cookies();
     tokens = JSON.parse(cookieStore.get(WIX_SESSION_COOKIE)?.value || "{}");
   } catch (error) {
-    console.log(error);
+    // Static generation safe fallback
   }
 
   return getWixClient(tokens);

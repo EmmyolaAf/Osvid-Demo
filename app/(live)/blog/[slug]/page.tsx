@@ -11,6 +11,10 @@ import BlogSection from "@/components/reusables/sections/BlogSection.server";
 
 /* eslint-disable  @typescript-eslint/no-explicit-any */
 
+export async function generateStaticParams() {
+  return [{ slug: "welcome-to-osvid" }];
+}
+
 export async function generateMetadata({
   params,
 }: {

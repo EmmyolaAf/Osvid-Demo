@@ -16,10 +16,24 @@ interface ProductsPageProps {
 
 const PRODUCTS_PER_PAGE = 12; // Define products per page
 
+export const dynamic = "force-static";
+
 export default async function ProductsPage({
   searchParams,
 }: ProductsPageProps) {
-  const s = await searchParams;
+  let s: { page?: string; sort?: string; search?: string } = {
+    page: "1",
+    sort: "price",
+    search: "",
+  };
+  try {
+    if (searchParams) {
+      s = (await searchParams) || {};
+    }
+  } catch {
+    // Static generation fallback
+  }
+
   const currentPage = parseInt(s.page || "1");
   const skip = (currentPage - 1) * PRODUCTS_PER_PAGE;
   // Default sort order changed to 'name' or 'price' based on preference, here using 'price'

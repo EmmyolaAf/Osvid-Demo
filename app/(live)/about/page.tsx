@@ -1,5 +1,3 @@
-export const dynamic = "force-dynamic";
-
 import React from "react";
 
 import { getTeam } from "@/wix-api/teams";

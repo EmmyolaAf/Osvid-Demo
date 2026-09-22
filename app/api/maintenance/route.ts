@@ -1,6 +1,8 @@
 // app/api/maintenance/route.ts
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-static";
+
 export async function GET() {
   return NextResponse.json({
     maintenanceMode: process.env.MAINTENANCE_MODE === "true",

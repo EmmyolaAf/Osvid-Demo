@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 
+export const dynamic = "force-static";
+
 // Optional: You can move this to a separate file like `types/checkout.ts`
 const CheckoutSchema = z.object({
   cartId: z.string().min(1, "Cart ID is required"),

@@ -2,6 +2,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getBlogPosts } from "@/wix-api/blog";
 
+export const dynamic = "force-static";
+
 export async function GET(request: NextRequest) {
   try {
     // Get query parameters

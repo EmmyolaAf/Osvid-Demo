@@ -20,6 +20,10 @@ import { ProductCategory } from "@/types";
 import ProductCategoryCard from "@/components/reusables/cards/ProductCategoryCard";
 import { Button } from "@/components/ui/button";
 
+export async function generateStaticParams() {
+  return [{ categorySlug: "adhesives" }, { categorySlug: "coatings" }];
+}
+
 // Generate dynamic metadata for each product category page
 export async function generateMetadata({
   params,
