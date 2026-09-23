@@ -4,7 +4,7 @@ import Link from "next/link";
 import React, { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { Button } from "../ui/button";
-import { MapPin, PhoneCall, Menu, X } from "lucide-react";
+import { MapPin, PhoneCall, Menu, X, User, LayoutDashboard, LogIn, ShoppingBag } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import companyData from "@/data/company";
@@ -14,11 +14,13 @@ import {
   SocialIconMap,
 } from "@/helpers/getSocialMediaLink";
 import { CartTrigger } from "../reusables/cart";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const pathname = usePathname();
+  const { user, userProfile, isStaff } = useAuth();
 
   const menu = [
     { name: "Home", link: "/" },
@@ -143,6 +145,52 @@ export default function Header() {
 
           {/* Right Side Actions */}
           <div className="flex items-center gap-3">
+            {user ? (
+              <div className="flex items-center gap-2">
+                {isStaff ? (
+                  <Link href="/dashboard" className="hidden sm:block">
+                    <Button
+                      size="sm"
+                      className="h-9 px-3.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-1.5 shadow-sm"
+                    >
+                      <LayoutDashboard size={14} />
+                      <span>Staff Dashboard</span>
+                    </Button>
+                  </Link>
+                ) : (
+                  <Link href="/account/orders" className="hidden sm:block">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 px-3 rounded-lg text-xs font-semibold text-slate-700 hover:text-orange-600 flex items-center gap-1.5"
+                    >
+                      <ShoppingBag size={14} />
+                      <span>Orders</span>
+                    </Button>
+                  </Link>
+                )}
+
+                <Link
+                  href="/account"
+                  className="w-9 h-9 rounded-full bg-gradient-to-tr from-orange-600 to-amber-500 text-white font-bold flex items-center justify-center text-xs shadow-sm hover:scale-105 transition-transform"
+                  title="My Account"
+                >
+                  {userProfile?.displayName?.charAt(0).toUpperCase() || "U"}
+                </Link>
+              </div>
+            ) : (
+              <Link href="/login" className="hidden sm:block">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 px-3.5 rounded-lg text-xs font-semibold border-slate-200 text-slate-700 hover:text-orange-600 hover:border-orange-500 flex items-center gap-1.5"
+                >
+                  <LogIn size={14} />
+                  <span>Sign In</span>
+                </Button>
+              </Link>
+            )}
+
             <Link href="#getQuote" className="hidden md:block">
               <Button className="h-10 px-5 rounded-lg font-medium bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-700 hover:to-orange-600 text-white shadow-sm">
                 Get a Quote
@@ -199,7 +247,53 @@ export default function Header() {
                 </div>
 
                 <div className="overflow-y-auto flex-1">
+                  {/* Mobile User Profile Section */}
+                  <div className="p-4 border-b bg-slate-50">
+                    {user ? (
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-orange-600 text-white font-bold flex items-center justify-center text-sm">
+                            {userProfile?.displayName?.charAt(0).toUpperCase() || "U"}
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-slate-900">{userProfile?.displayName || "User"}</p>
+                            <p className="text-[11px] text-slate-500">{user.email}</p>
+                          </div>
+                        </div>
+                        <Link href="/account" onClick={toggleMenu}>
+                          <Button size="sm" variant="outline" className="text-xs h-8">
+                            Account
+                          </Button>
+                        </Link>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <Link href="/login" onClick={toggleMenu} className="flex-1">
+                          <Button size="sm" className="w-full bg-orange-600 hover:bg-orange-700 text-white text-xs">
+                            Sign In
+                          </Button>
+                        </Link>
+                        <Link href="/register" onClick={toggleMenu} className="flex-1">
+                          <Button size="sm" variant="outline" className="w-full text-xs">
+                            Register
+                          </Button>
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+
                   <nav className="flex flex-col p-4 gap-1">
+                    {isStaff && (
+                      <Link
+                        href="/dashboard"
+                        onClick={toggleMenu}
+                        className="px-4 py-3 rounded-lg text-base font-bold bg-slate-900 text-white mb-2 flex items-center gap-2"
+                      >
+                        <LayoutDashboard size={18} />
+                        <span>Staff Dashboard</span>
+                      </Link>
+                    )}
+
                     {menu.map((item) => {
                       const isActive =
                         pathname === "/"

@@ -5,6 +5,7 @@ import { clashDisplay } from "@/fonts";
 import companyData from "@/data/company";
 import "keen-slider/keen-slider.min.css";
 import InstantPreloader from "@/components/reusables/InstantPreloader";
+import { AuthProvider } from "@/contexts/AuthContext";
 
 export const metadata: Metadata = {
   title: companyData.openGraph.title,
@@ -32,8 +33,10 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <body className={`${clashDisplay.variable} antialiased bg-white`}>
-        <InstantPreloader />
-        {children}
+        <AuthProvider>
+          <InstantPreloader />
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );

@@ -12,22 +12,34 @@ import "swiper/css/effect-fade";
 import Link from "next/link";
 import { formatUniversalPhoneNumber } from "@/helpers/formatPhoneNumber";
 import companyData from "@/data/company";
+import { getSiteContent } from "@/lib/firebase/content";
+import { SiteContent, DEFAULT_SITE_CONTENT } from "@/types/content";
 
 export default function HeroSection() {
   const [, setActiveIndex] = useState(0);
   const [currentRealIndex, setCurrentRealIndex] = useState(0);
   const [contentIsVisible, setContentIsVisible] = useState(true);
   const isAnimatingRef = useRef(false);
+  const [siteContent, setSiteContent] = useState<SiteContent>(DEFAULT_SITE_CONTENT);
+
+  useEffect(() => {
+    getSiteContent().then(setSiteContent);
+
+    const handleUpdate = (e: any) => {
+      if (e.detail) setSiteContent(e.detail);
+    };
+    window.addEventListener("osvid_content_updated", handleUpdate);
+    return () => window.removeEventListener("osvid_content_updated", handleUpdate);
+  }, []);
 
   const slides = [
     {
       image: "/images/bgs/new-hero-2.webp",
-      heading: "Premium Surface Solutions for Modern Projects",
-      tagline: "Expert Chemical & Surface Applications",
-      caption:
-        "Transform your spaces with industry-leading materials and professional installation that stands the test of time.",
-      ctaText: "Get a Free Consultation",
-      ctaLink: "/contact",
+      heading: `${siteContent.hero.titlePrimary} ${siteContent.hero.titleSecondary}`,
+      tagline: siteContent.hero.badge,
+      caption: siteContent.hero.description,
+      ctaText: siteContent.hero.primaryButtonText,
+      ctaLink: siteContent.hero.primaryButtonLink,
     },
     {
       image: "/images/bgs/new-hero.webp",
@@ -35,8 +47,8 @@ export default function HeroSection() {
       tagline: "Commercial & Residential Excellence",
       caption:
         "From polished concrete to decorative Increte floors, our solutions combine aesthetics with unmatched performance.",
-      ctaText: "See Our Portfolio",
-      ctaLink: "/portfolio",
+      ctaText: siteContent.hero.secondaryButtonText || "See Our Portfolio",
+      ctaLink: siteContent.hero.secondaryButtonLink || "/portfolio",
     },
     {
       image: "/images/ceramic-flooring.jpg",

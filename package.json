@@ -38,6 +38,8 @@
     "dompurify": "^3.2.6",
     "embla-carousel": "^8.6.0",
     "embla-carousel-react": "^8.6.0",
+    "firebase": "^12.19.0",
+    "firebase-admin": "^14.4.0",
     "framer-motion": "^12.6.3",
     "html-react-parser": "^5.2.5",
     "html-to-text": "^9.0.5",
