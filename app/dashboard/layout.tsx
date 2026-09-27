@@ -7,7 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import SuspensionBarrier from "@/components/auth/SuspensionBarrier";
-import { getSubscriptionStatus, getBusinessSubscription } from "@/lib/firebase/subscription";
+import { getSubscriptionStatus } from "@/lib/firebase/subscription";
 import { BusinessSubscription } from "@/types/auth";
 import {
   LayoutDashboard,
@@ -27,7 +27,6 @@ import {
   Tag,
   UserCheck,
   AlertTriangle,
-  Building2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
@@ -37,7 +36,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [subscription, setSubscription] = useState<BusinessSubscription | null>(null);
   const pathname = usePathname();
   const router = useRouter();
-  const { userProfile, role, logout, isSuperAdmin, isAdmin, isManager } = useAuth();
+  const { userProfile, role, logout, isSuperAdmin, isAdmin } = useAuth();
 
   useEffect(() => {
     async function checkSub() {
@@ -48,6 +47,37 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
     checkSub();
   }, []);
+
+  // Close sidebar on pathname change
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [pathname]);
+
+  // Lock body scroll on mobile when sidebar drawer is open
+  useEffect(() => {
+    if (sidebarOpen) {
+      document.body.style.overflow = "hidden";
+      document.body.style.touchAction = "none";
+    } else {
+      document.body.style.overflow = "";
+      document.body.style.touchAction = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+      document.body.style.touchAction = "";
+    };
+  }, [sidebarOpen]);
+
+  // Close on ESC key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && sidebarOpen) {
+        setSidebarOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [sidebarOpen]);
 
   const handleSignOut = async () => {
     await logout();
@@ -68,7 +98,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // Build granular navigation items strictly separated by role
   const navItems: NavItem[] = isSuperAdmin
     ? [
-        // Super Admin gets strictly Executive Governance modules
         {
           title: "Enterprise Governance",
           href: "/dashboard/super-admin",
@@ -79,7 +108,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         },
       ]
     : [
-        // Tenant Admins and Managers get Store Business Operations
         {
           title: "Overview",
           href: "/dashboard",
@@ -167,10 +195,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const roleInfo = getRoleBadge();
   const RoleIcon = roleInfo.icon;
 
-  // Intercept if hosting is suspended and current user is not Super Admin
   const isSuspendedForUser = Boolean(subscription?.isSuspended && !isSuperAdmin);
 
-  // Super Admin has a dedicated full-scale Landlord Command Center interface
+  // Super Admin dedicated view
   if (isSuperAdmin || pathname.startsWith("/dashboard/super-admin")) {
     return (
       <ProtectedRoute allowedRoles={["super_admin"]}>
@@ -188,8 +215,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <SuspensionBarrier subscription={subscription} />
       ) : (
         <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row text-slate-800">
-          {/* Mobile Header */}
-          <div className="lg:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between sticky top-0 z-40">
+          {/* Mobile Top App Bar */}
+          <header className="lg:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between sticky top-0 z-40 shadow-xs">
             <Link href="/dashboard" className="flex items-center">
               <Image
                 src="/images/logo.webp"
@@ -197,56 +224,72 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 width={120}
                 height={36}
                 className="h-8 w-auto object-contain"
+                priority
               />
             </Link>
             <div className="flex items-center gap-2">
               <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${roleInfo.bg} flex items-center gap-1`}>
                 <RoleIcon size={12} />
-                {roleInfo.label}
+                <span className="truncate max-w-[100px]">{roleInfo.label}</span>
               </span>
               <button
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="p-2 rounded-lg hover:bg-slate-100 text-slate-700"
+                onClick={() => setSidebarOpen((prev) => !prev)}
+                className="p-2 rounded-xl hover:bg-orange-50 text-slate-700 hover:text-orange-600 transition-colors"
+                aria-label="Toggle navigation drawer"
+                aria-expanded={sidebarOpen}
               >
                 {sidebarOpen ? <X size={22} /> : <Menu size={22} />}
               </button>
             </div>
-          </div>
+          </header>
 
-          {/* Sidebar */}
+          {/* Mobile Backdrop Overlay */}
+          {sidebarOpen && (
+            <div
+              className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs lg:hidden transition-opacity"
+              onClick={() => setSidebarOpen(false)}
+              aria-hidden="true"
+            />
+          )}
+
+          {/* Sidebar Drawer */}
           <aside
-            className={`fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-slate-200 flex flex-col justify-between transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 ${
-              sidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
+            className={`fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] bg-white border-r border-slate-200 flex flex-col justify-between transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 h-dvh lg:h-screen shadow-2xl lg:shadow-none overflow-hidden ${
+              sidebarOpen ? "translate-x-0" : "-translate-x-full"
             }`}
           >
-            <div className="p-6">
-              {/* Brand Logo */}
-              <div className="flex items-center justify-between mb-8">
-                <Link href="/dashboard" className="flex items-center">
+            {/* Scrollable Nav Content */}
+            <div className="p-5 sm:p-6 overflow-y-auto flex-1 overscroll-contain">
+              {/* Brand Header */}
+              <div className="flex items-center justify-between mb-6">
+                <Link href="/dashboard" onClick={() => setSidebarOpen(false)} className="flex items-center">
                   <Image
                     src="/images/logo.webp"
                     alt="OSVID Chemicals"
                     width={140}
                     height={42}
-                    className="h-10 w-auto object-contain"
+                    className="h-9 w-auto object-contain"
                   />
                 </Link>
                 <button
                   onClick={() => setSidebarOpen(false)}
-                  className="lg:hidden p-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
+                  className="lg:hidden w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-colors"
+                  aria-label="Close menu"
                 >
-                  <X size={20} />
+                  <X size={18} />
                 </button>
               </div>
 
               {/* User Profile Card */}
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 mb-6 shadow-sm">
+              <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-3.5 mb-5 shadow-xs">
                 <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-2xl font-bold flex items-center justify-center text-sm shadow-sm ${
-                    isSuperAdmin
-                      ? "bg-gradient-to-tr from-purple-700 to-indigo-600 text-white"
-                      : "bg-gradient-to-tr from-orange-600 to-amber-500 text-white"
-                  }`}>
+                  <div
+                    className={`w-10 h-10 rounded-2xl font-bold flex items-center justify-center text-sm shadow-xs shrink-0 ${
+                      isSuperAdmin
+                        ? "bg-gradient-to-tr from-purple-700 to-indigo-600 text-white"
+                        : "bg-gradient-to-tr from-orange-600 to-amber-500 text-white"
+                    }`}
+                  >
                     {userProfile?.displayName?.charAt(0).toUpperCase() || "U"}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -261,7 +304,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <div className="mt-2.5 pt-2.5 border-t border-slate-200/80 flex items-center justify-between">
                   <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${roleInfo.bg} flex items-center gap-1`}>
                     <RoleIcon size={12} />
-                    {roleInfo.label}
+                    <span className="truncate max-w-[120px]">{roleInfo.label}</span>
                   </span>
                   <span className="text-[11px] text-emerald-600 font-medium flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -270,9 +313,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 </div>
               </div>
 
-              {/* Navigation Menu */}
+              {/* Navigation Links */}
               <div className="space-y-1">
-                <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400 px-3 mb-2">
+                <p className="text-[10px] uppercase tracking-wider font-bold text-slate-400 px-3 mb-2">
                   Management Modules
                 </p>
                 {visibleNav.map((item) => {
@@ -286,7 +329,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       key={item.href}
                       href={item.href}
                       onClick={() => setSidebarOpen(false)}
-                      className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                      className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-medium transition-all ${
                         isActive
                           ? item.accent
                             ? "bg-purple-700 text-white shadow-md shadow-purple-700/20 font-semibold"
@@ -329,7 +372,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
 
             {/* Bottom Actions */}
-            <div className="p-4 border-t border-slate-200 space-y-2">
+            <div className="p-4 border-t border-slate-200 space-y-2 bg-white shrink-0">
               <Link
                 href="/"
                 target="_blank"
