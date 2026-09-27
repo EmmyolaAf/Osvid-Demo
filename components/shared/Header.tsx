@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { usePathname } from "next/navigation";
 import { Button } from "../ui/button";
 import {
@@ -14,8 +15,8 @@ import {
   ShoppingBag,
   User,
   ChevronRight,
+  UserPlus,
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import companyData from "@/data/company";
 import { formatUniversalPhoneNumber } from "@/helpers/formatPhoneNumber";
@@ -29,6 +30,7 @@ import { useAuth } from "@/contexts/AuthContext";
 export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
   const { user, userProfile, isStaff } = useAuth();
 
@@ -44,6 +46,11 @@ export default function Header() {
 
   const toggleMenu = () => setIsMenuOpen((prev) => !prev);
   const closeMenu = () => setIsMenuOpen(false);
+
+  // Client-side mount flag for React Portal
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Scroll detection for sticky header backdrop styling
   useEffect(() => {
@@ -89,7 +96,7 @@ export default function Header() {
     <>
       {/* Top Bar */}
       <div className="bg-osvid-lime text-gray-100 py-2">
-        <div className="px-4 container md:px-12 flex items-center justify-between gap-4">
+        <div className="px-4 container md:px-12 flex items-center justify-between gap-4 mx-auto">
           <div className="flex items-center gap-3">
             {Object.entries(companyData.socialMedia).map(
               ([platform, username]) => {
@@ -140,7 +147,7 @@ export default function Header() {
           isScrolled ? "bg-white/95 backdrop-blur-md shadow-sm" : "bg-white"
         }`}
       >
-        <div className="container px-4 md:px-12 flex items-center justify-between py-3">
+        <div className="container px-4 md:px-12 flex items-center justify-between py-3 mx-auto">
           {/* Logo */}
           <Link href="/" className="flex items-center">
             <Image
@@ -237,43 +244,47 @@ export default function Header() {
             {/* Mobile Menu Hamburger Trigger */}
             <button
               onClick={toggleMenu}
-              className="lg:hidden p-2 rounded-xl hover:bg-orange-50 text-slate-700 hover:text-orange-600 transition-colors"
+              type="button"
+              className="lg:hidden p-2.5 rounded-xl bg-slate-50 hover:bg-orange-50 text-slate-700 hover:text-orange-600 transition-colors border border-slate-200/80 active:scale-95"
               aria-label="Toggle navigation menu"
               aria-expanded={isMenuOpen}
             >
-              <Menu size={26} />
+              <Menu size={24} />
             </button>
           </div>
         </div>
       </header>
 
       {/* ======================================================== */}
-      {/* MOBILE FULL-SCREEN DRAWER (OUTSIDE HEADER TO PREVENT CLIPPING) */}
+      {/* REBUILT MOBILE PORTAL DRAWER (MOUNTED TO BODY VIA REACT PORTAL) */}
       {/* ======================================================== */}
-      <AnimatePresence>
-        {isMenuOpen && (
-          <div className="fixed inset-0 z-[999] lg:hidden">
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.25 }}
-              className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm"
+      {mounted &&
+        createPortal(
+          <div
+            className={`fixed inset-0 z-[99999] lg:hidden transition-all duration-300 ease-in-out ${
+              isMenuOpen
+                ? "opacity-100 pointer-events-auto visible"
+                : "opacity-0 pointer-events-none invisible"
+            }`}
+            aria-hidden={!isMenuOpen}
+          >
+            {/* Dark Backdrop Overlay */}
+            <div
+              className={`fixed inset-0 bg-slate-950/70 backdrop-blur-xs transition-opacity duration-300 ${
+                isMenuOpen ? "opacity-100" : "opacity-0"
+              }`}
               onClick={closeMenu}
               aria-hidden="true"
             />
 
-            {/* Drawer Sidebar */}
-            <motion.div
-              initial={{ x: "-100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "-100%" }}
-              transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="fixed top-0 left-0 bottom-0 w-[85vw] max-w-sm h-dvh bg-white shadow-2xl flex flex-col z-[1000] overflow-hidden"
+            {/* Drawer Sidebar Container */}
+            <div
+              className={`fixed top-0 left-0 bottom-0 w-[85vw] max-w-sm h-[100dvh] bg-white shadow-2xl flex flex-col z-[100000] overflow-hidden transform transition-transform duration-300 ease-out ${
+                isMenuOpen ? "translate-x-0" : "-translate-x-full"
+              }`}
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Drawer Header */}
+              {/* Drawer Top Header */}
               <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white shrink-0">
                 <Link href="/" onClick={closeMenu} className="flex items-center">
                   <Image
@@ -281,64 +292,28 @@ export default function Header() {
                     alt="Osvid Logo"
                     width={130}
                     height={44}
-                    className="h-10 w-auto object-contain"
+                    className="h-9 w-auto object-contain"
                   />
                 </Link>
                 <button
                   onClick={closeMenu}
-                  className="w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors"
+                  type="button"
+                  className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors active:scale-95"
                   aria-label="Close menu"
                 >
                   <X size={20} />
                 </button>
               </div>
 
-              {/* Drawer Body (Scrollable) */}
-              <div className="overflow-y-auto flex-1 overscroll-contain">
-                {/* User Profile / Auth Banner */}
-                <div className="p-4 border-b border-slate-100 bg-slate-50">
-                  {user ? (
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-orange-600 to-amber-500 text-white font-bold flex items-center justify-center text-sm shadow-sm">
-                          {userProfile?.displayName?.charAt(0).toUpperCase() || "U"}
-                        </div>
-                        <div className="overflow-hidden">
-                          <p className="text-sm font-bold text-slate-900 truncate">
-                            {userProfile?.displayName || "Valued Customer"}
-                          </p>
-                          <p className="text-[11px] text-slate-500 truncate">{user.email}</p>
-                        </div>
-                      </div>
-                      <Link href="/account" onClick={closeMenu}>
-                        <Button size="sm" variant="outline" className="text-xs h-8 rounded-lg">
-                          Account
-                        </Button>
-                      </Link>
-                    </div>
-                  ) : (
-                    <div className="flex gap-2">
-                      <Link href="/login" onClick={closeMenu} className="flex-1">
-                        <Button size="sm" className="w-full bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-xl h-9">
-                          <LogIn size={14} className="mr-1.5" /> Sign In
-                        </Button>
-                      </Link>
-                      <Link href="/register" onClick={closeMenu} className="flex-1">
-                        <Button size="sm" variant="outline" className="w-full text-xs font-semibold rounded-xl h-9">
-                          Register
-                        </Button>
-                      </Link>
-                    </div>
-                  )}
-                </div>
-
-                {/* Staff Dashboard Button if authorized */}
-                {isStaff && (
-                  <div className="p-4 pb-0">
+              {/* Drawer Scrollable Content Area */}
+              <div className="overflow-y-auto flex-1 overscroll-contain flex flex-col justify-between">
+                {/* Navigation Links */}
+                <div className="p-4 space-y-1">
+                  {isStaff && (
                     <Link
                       href="/dashboard"
                       onClick={closeMenu}
-                      className="px-4 py-3 rounded-xl text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white flex items-center justify-between shadow-sm transition-colors"
+                      className="px-4 py-3 rounded-xl text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white flex items-center justify-between shadow-sm transition-colors mb-2"
                     >
                       <div className="flex items-center gap-2">
                         <LayoutDashboard size={18} className="text-orange-400" />
@@ -346,11 +321,8 @@ export default function Header() {
                       </div>
                       <ChevronRight size={16} className="text-slate-400" />
                     </Link>
-                  </div>
-                )}
+                  )}
 
-                {/* Navigation Links */}
-                <nav className="p-4 space-y-1">
                   {menu.map((item) => {
                     const isActive =
                       pathname === "/"
@@ -376,29 +348,68 @@ export default function Header() {
                       </Link>
                     );
                   })}
-                </nav>
+                </div>
 
-                {/* Contact & Quote Details */}
-                <div className="p-4 border-t border-slate-100 space-y-3">
-                  <div className="space-y-2">
-                    <div className="flex items-start gap-2.5 p-3 bg-slate-50 rounded-xl">
-                      <MapPin size={16} className="text-orange-600 mt-0.5 shrink-0" />
-                      <span className="text-xs text-slate-600 leading-relaxed">
-                        {companyData.address}
-                      </span>
+                {/* Bottom Section: Sign In / Register directly above Request a Quote */}
+                <div className="p-4 border-t border-slate-100 space-y-3 bg-slate-50/50 mt-auto">
+                  {/* Account / Auth Actions */}
+                  {user ? (
+                    <div className="bg-white border border-slate-200 p-3 rounded-2xl flex items-center justify-between shadow-xs">
+                      <div className="flex items-center gap-2.5 overflow-hidden">
+                        <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-orange-600 to-amber-500 text-white font-bold flex items-center justify-center text-xs shadow-xs shrink-0">
+                          {userProfile?.displayName?.charAt(0).toUpperCase() || "U"}
+                        </div>
+                        <div className="overflow-hidden min-w-0">
+                          <p className="text-xs font-bold text-slate-900 truncate">
+                            {userProfile?.displayName || "Valued Customer"}
+                          </p>
+                          <p className="text-[10px] text-slate-500 truncate">{user.email}</p>
+                        </div>
+                      </div>
+                      <Link href="/account" onClick={closeMenu} className="shrink-0">
+                        <Button size="sm" variant="outline" className="text-xs h-7 px-2.5 rounded-lg">
+                          Account
+                        </Button>
+                      </Link>
                     </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                      <Link href="/login" onClick={closeMenu}>
+                        <Button
+                          size="sm"
+                          className="w-full bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-xl h-10 shadow-sm"
+                        >
+                          <LogIn size={14} className="mr-1.5" /> Sign In
+                        </Button>
+                      </Link>
+                      <Link href="/register" onClick={closeMenu}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full text-xs font-semibold rounded-xl h-10 border-slate-200 bg-white"
+                        >
+                          <UserPlus size={14} className="mr-1.5" /> Register
+                        </Button>
+                      </Link>
+                    </div>
+                  )}
 
+                  {/* Contact Info Snippets */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center gap-2 px-2 py-1 text-slate-600 text-xs">
+                      <MapPin size={14} className="text-orange-600 shrink-0" />
+                      <span className="truncate text-[11px]">{companyData.address}</span>
+                    </div>
                     <Link
                       href={`tel:${companyData.phone}`}
-                      className="flex items-center gap-2.5 p-3 bg-slate-50 hover:bg-orange-50 rounded-xl transition-colors"
+                      className="flex items-center gap-2 px-2 py-1 text-slate-700 text-xs font-medium hover:text-orange-600 transition-colors"
                     >
-                      <PhoneCall size={16} className="text-orange-600 shrink-0" />
-                      <span className="text-xs font-semibold text-slate-700">
-                        {formatUniversalPhoneNumber(companyData.phone)}
-                      </span>
+                      <PhoneCall size={14} className="text-orange-600 shrink-0" />
+                      <span className="text-[11px]">{formatUniversalPhoneNumber(companyData.phone)}</span>
                     </Link>
                   </div>
 
+                  {/* Get a Quote Action */}
                   <Link href="#getQuote" onClick={closeMenu} className="block pt-1">
                     <Button className="w-full h-11 rounded-xl bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-700 hover:to-orange-600 text-white font-bold text-sm shadow-md shadow-orange-600/20">
                       Get a Quote
@@ -406,10 +417,10 @@ export default function Header() {
                   </Link>
                 </div>
               </div>
-            </motion.div>
-          </div>
+            </div>
+          </div>,
+          document.body
         )}
-      </AnimatePresence>
     </>
   );
 }
