@@ -23,6 +23,18 @@ interface ProductCategoryDetailPageProps {
   params: Promise<{ categorySlug: string }>;
 }
 
+export async function generateStaticParams() {
+  try {
+    const categoriesRes = await getProductCategories();
+    if (!categoriesRes.success || !categoriesRes.data) return [];
+    return categoriesRes.data.map((cat) => ({
+      categorySlug: cat.slug || cat._id,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export async function generateMetadata({
   params,
 }: ProductCategoryDetailPageProps): Promise<Metadata> {

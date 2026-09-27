@@ -11,6 +11,16 @@ interface BlogPostPageProps {
   params: Promise<{ slug: string }>;
 }
 
+export async function generateStaticParams() {
+  try {
+    const result = await getBlogPosts();
+    if (!result.success || !result.data) return [];
+    return result.data.map((post) => ({ slug: post.slug || post.id }));
+  } catch {
+    return [];
+  }
+}
+
 export async function generateMetadata({
   params,
 }: BlogPostPageProps): Promise<Metadata> {

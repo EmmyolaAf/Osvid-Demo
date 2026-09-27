@@ -22,6 +22,16 @@ interface ServiceDetailPageProps {
   params: Promise<{ slug: string }>;
 }
 
+export async function generateStaticParams() {
+  try {
+    const result = await getServices();
+    if (!result.success || !result.data) return [];
+    return result.data.map((service) => ({ slug: service.slug || service._id }));
+  } catch {
+    return [];
+  }
+}
+
 export async function generateMetadata({
   params,
 }: ServiceDetailPageProps): Promise<Metadata> {
