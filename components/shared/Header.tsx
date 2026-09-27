@@ -4,7 +4,17 @@ import Link from "next/link";
 import React, { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { Button } from "../ui/button";
-import { MapPin, PhoneCall, Menu, X, User, LayoutDashboard, LogIn, ShoppingBag } from "lucide-react";
+import {
+  MapPin,
+  PhoneCall,
+  Menu,
+  X,
+  LayoutDashboard,
+  LogIn,
+  ShoppingBag,
+  User,
+  ChevronRight,
+} from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import companyData from "@/data/company";
@@ -33,24 +43,52 @@ export default function Header() {
   ];
 
   const toggleMenu = () => setIsMenuOpen((prev) => !prev);
+  const closeMenu = () => setIsMenuOpen(false);
 
+  // Scroll detection for sticky header backdrop styling
   useEffect(() => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 10);
     };
-    window.addEventListener("scroll", handleScroll);
+    window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
+  // Automatically close mobile menu when user navigates
+  useEffect(() => {
+    setIsMenuOpen(false);
+  }, [pathname]);
+
+  // Lock body scroll when mobile menu is open
+  useEffect(() => {
+    if (isMenuOpen) {
+      document.body.style.overflow = "hidden";
+      document.body.style.touchAction = "none";
+    } else {
+      document.body.style.overflow = "";
+      document.body.style.touchAction = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+      document.body.style.touchAction = "";
+    };
+  }, [isMenuOpen]);
+
+  // Handle ESC key press to close menu
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isMenuOpen) {
+        closeMenu();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isMenuOpen]);
 
   return (
     <>
       {/* Top Bar */}
-      <motion.div
-        className="bg-osvid-lime text-gray-100 py-2"
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.1 }}
-      >
+      <div className="bg-osvid-lime text-gray-100 py-2">
         <div className="px-4 container md:px-12 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             {Object.entries(companyData.socialMedia).map(
@@ -78,13 +116,13 @@ export default function Header() {
 
           <div className="hidden text-sm lg:flex items-center gap-6">
             <div className="flex items-center gap-2">
-              <MapPin size={16} className="text-osvid-blue" />
+              <MapPin size={16} className="text-osvid-blue shrink-0" />
               <span className="text-xs line-clamp-1 text-orange-50 hover:text-orange-200 transition-colors">
                 {companyData.address}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <PhoneCall size={16} className="text-osvid-blue" />
+              <PhoneCall size={16} className="text-osvid-blue shrink-0" />
               <Link
                 href={`tel:${companyData.phone}`}
                 className="text-xs text-orange-50 hover:text-orange-200 transition-colors"
@@ -94,16 +132,13 @@ export default function Header() {
             </div>
           </div>
         </div>
-      </motion.div>
+      </div>
 
       {/* Main Header */}
-      <motion.header
-        className={`sticky top-0 left-0 w-full z-50 transition-all duration-300 ${
+      <header
+        className={`sticky top-0 left-0 w-full z-40 transition-all duration-300 ${
           isScrolled ? "bg-white/95 backdrop-blur-md shadow-sm" : "bg-white"
         }`}
-        initial={{ y: -40, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.4 }}
       >
         <div className="container px-4 md:px-12 flex items-center justify-between py-3">
           {/* Logo */}
@@ -113,7 +148,7 @@ export default function Header() {
               alt="Osvid Logo"
               width={150}
               height={50}
-              className="h-12 w-auto object-contain md:h-14"
+              className="h-11 md:h-14 w-auto object-contain"
               priority
             />
           </Link>
@@ -144,7 +179,7 @@ export default function Header() {
           </nav>
 
           {/* Right Side Actions */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             {user ? (
               <div className="flex items-center gap-2">
                 {isStaff ? (
@@ -199,155 +234,182 @@ export default function Header() {
 
             <CartTrigger />
 
+            {/* Mobile Menu Hamburger Trigger */}
             <button
               onClick={toggleMenu}
-              className="lg:hidden p-2 rounded-lg hover:bg-gray-100"
-              aria-label="Menu"
+              className="lg:hidden p-2 rounded-xl hover:bg-orange-50 text-slate-700 hover:text-orange-600 transition-colors"
+              aria-label="Toggle navigation menu"
+              aria-expanded={isMenuOpen}
             >
-              <Menu size={24} className="text-gray-700" />
+              <Menu size={26} />
             </button>
           </div>
         </div>
+      </header>
 
-        {/* Mobile Menu */}
-        <AnimatePresence>
-          {isMenuOpen && (
+      {/* ======================================================== */}
+      {/* MOBILE FULL-SCREEN DRAWER (OUTSIDE HEADER TO PREVENT CLIPPING) */}
+      {/* ======================================================== */}
+      <AnimatePresence>
+        {isMenuOpen && (
+          <div className="fixed inset-0 z-[999] lg:hidden">
+            {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 top-0 left-0 bg-black/60 z-[100] lg:hidden"
-              onClick={toggleMenu}
+              transition={{ duration: 0.25 }}
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm"
+              onClick={closeMenu}
+              aria-hidden="true"
+            />
+
+            {/* Drawer Sidebar */}
+            <motion.div
+              initial={{ x: "-100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "-100%" }}
+              transition={{ type: "spring", damping: 28, stiffness: 300 }}
+              className="fixed top-0 left-0 bottom-0 w-[85vw] max-w-sm h-dvh bg-white shadow-2xl flex flex-col z-[1000] overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
             >
-              <motion.div
-                initial={{ x: "-100%" }}
-                animate={{ x: 0 }}
-                exit={{ x: "-100%" }}
-                transition={{ type: "spring", damping: 25 }}
-                className="bg-white w-80 h-full flex flex-col"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="p-4 border-b flex justify-between items-center">
-                  <Link href="/" onClick={toggleMenu}>
-                    <Image
-                      src="/images/logo.webp"
-                      alt="Osvid Logo"
-                      width={120}
-                      height={40}
-                      className="h-10 w-auto object-contain"
-                    />
-                  </Link>
-                  <button
-                    onClick={toggleMenu}
-                    className="p-2 rounded-full hover:bg-gray-100"
-                    aria-label="Close menu"
-                  >
-                    <X size={24} className="text-gray-600" />
-                  </button>
-                </div>
+              {/* Drawer Header */}
+              <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white shrink-0">
+                <Link href="/" onClick={closeMenu} className="flex items-center">
+                  <Image
+                    src="/images/logo.webp"
+                    alt="Osvid Logo"
+                    width={130}
+                    height={44}
+                    className="h-10 w-auto object-contain"
+                  />
+                </Link>
+                <button
+                  onClick={closeMenu}
+                  className="w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors"
+                  aria-label="Close menu"
+                >
+                  <X size={20} />
+                </button>
+              </div>
 
-                <div className="overflow-y-auto flex-1">
-                  {/* Mobile User Profile Section */}
-                  <div className="p-4 border-b bg-slate-50">
-                    {user ? (
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-orange-600 text-white font-bold flex items-center justify-center text-sm">
-                            {userProfile?.displayName?.charAt(0).toUpperCase() || "U"}
-                          </div>
-                          <div>
-                            <p className="text-sm font-bold text-slate-900">{userProfile?.displayName || "User"}</p>
-                            <p className="text-[11px] text-slate-500">{user.email}</p>
-                          </div>
+              {/* Drawer Body (Scrollable) */}
+              <div className="overflow-y-auto flex-1 overscroll-contain">
+                {/* User Profile / Auth Banner */}
+                <div className="p-4 border-b border-slate-100 bg-slate-50">
+                  {user ? (
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-orange-600 to-amber-500 text-white font-bold flex items-center justify-center text-sm shadow-sm">
+                          {userProfile?.displayName?.charAt(0).toUpperCase() || "U"}
                         </div>
-                        <Link href="/account" onClick={toggleMenu}>
-                          <Button size="sm" variant="outline" className="text-xs h-8">
-                            Account
-                          </Button>
-                        </Link>
+                        <div className="overflow-hidden">
+                          <p className="text-sm font-bold text-slate-900 truncate">
+                            {userProfile?.displayName || "Valued Customer"}
+                          </p>
+                          <p className="text-[11px] text-slate-500 truncate">{user.email}</p>
+                        </div>
                       </div>
-                    ) : (
-                      <div className="flex gap-2">
-                        <Link href="/login" onClick={toggleMenu} className="flex-1">
-                          <Button size="sm" className="w-full bg-orange-600 hover:bg-orange-700 text-white text-xs">
-                            Sign In
-                          </Button>
-                        </Link>
-                        <Link href="/register" onClick={toggleMenu} className="flex-1">
-                          <Button size="sm" variant="outline" className="w-full text-xs">
-                            Register
-                          </Button>
-                        </Link>
-                      </div>
-                    )}
-                  </div>
-
-                  <nav className="flex flex-col p-4 gap-1">
-                    {isStaff && (
-                      <Link
-                        href="/dashboard"
-                        onClick={toggleMenu}
-                        className="px-4 py-3 rounded-lg text-base font-bold bg-slate-900 text-white mb-2 flex items-center gap-2"
-                      >
-                        <LayoutDashboard size={18} />
-                        <span>Staff Dashboard</span>
-                      </Link>
-                    )}
-
-                    {menu.map((item) => {
-                      const isActive =
-                        pathname === "/"
-                          ? item.link === "/"
-                          : pathname.startsWith(item.link) && item.link !== "/";
-
-                      return (
-                        <Link
-                          key={item.name}
-                          href={item.link}
-                          onClick={toggleMenu}
-                          className={`px-4 py-3 rounded-lg text-base font-medium ${
-                            isActive
-                              ? "bg-orange-50 text-orange-600"
-                              : "text-gray-700 hover:bg-gray-50"
-                          }`}
-                        >
-                          {item.name}
-                        </Link>
-                      );
-                    })}
-                  </nav>
-
-                  <div className="p-4 border-t">
-                    <div className="flex flex-col gap-3 mb-6">
-                      <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                        <MapPin size={18} className="text-orange-500" />
-                        <span className="text-sm text-gray-700">
-                          {companyData.address}
-                        </span>
-                      </div>
-                      <Link
-                        href={`tel:${companyData.phone}`}
-                        className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg"
-                      >
-                        <PhoneCall size={18} className="text-orange-500" />
-                        <span className="text-sm text-gray-700">
-                          {formatUniversalPhoneNumber(companyData.phone)}
-                        </span>
+                      <Link href="/account" onClick={closeMenu}>
+                        <Button size="sm" variant="outline" className="text-xs h-8 rounded-lg">
+                          Account
+                        </Button>
                       </Link>
                     </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Link href="/login" onClick={closeMenu} className="flex-1">
+                        <Button size="sm" className="w-full bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-xl h-9">
+                          <LogIn size={14} className="mr-1.5" /> Sign In
+                        </Button>
+                      </Link>
+                      <Link href="/register" onClick={closeMenu} className="flex-1">
+                        <Button size="sm" variant="outline" className="w-full text-xs font-semibold rounded-xl h-9">
+                          Register
+                        </Button>
+                      </Link>
+                    </div>
+                  )}
+                </div>
 
-                    <Link href="#getQuote" onClick={toggleMenu}>
-                      <Button className="w-full h-12 rounded-lg bg-gradient-to-r from-orange-600 to-orange-500 text-white font-medium">
-                        Get a Quote
-                      </Button>
+                {/* Staff Dashboard Button if authorized */}
+                {isStaff && (
+                  <div className="p-4 pb-0">
+                    <Link
+                      href="/dashboard"
+                      onClick={closeMenu}
+                      className="px-4 py-3 rounded-xl text-sm font-bold bg-slate-900 hover:bg-slate-800 text-white flex items-center justify-between shadow-sm transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <LayoutDashboard size={18} className="text-orange-400" />
+                        <span>Staff Dashboard</span>
+                      </div>
+                      <ChevronRight size={16} className="text-slate-400" />
                     </Link>
                   </div>
+                )}
+
+                {/* Navigation Links */}
+                <nav className="p-4 space-y-1">
+                  {menu.map((item) => {
+                    const isActive =
+                      pathname === "/"
+                        ? item.link === "/"
+                        : pathname.startsWith(item.link) && item.link !== "/";
+
+                    return (
+                      <Link
+                        key={item.name}
+                        href={item.link}
+                        onClick={closeMenu}
+                        className={`flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all ${
+                          isActive
+                            ? "bg-orange-50 text-orange-600 font-bold"
+                            : "text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+                        }`}
+                      >
+                        <span>{item.name}</span>
+                        <ChevronRight
+                          size={16}
+                          className={isActive ? "text-orange-600" : "text-slate-300"}
+                        />
+                      </Link>
+                    );
+                  })}
+                </nav>
+
+                {/* Contact & Quote Details */}
+                <div className="p-4 border-t border-slate-100 space-y-3">
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-2.5 p-3 bg-slate-50 rounded-xl">
+                      <MapPin size={16} className="text-orange-600 mt-0.5 shrink-0" />
+                      <span className="text-xs text-slate-600 leading-relaxed">
+                        {companyData.address}
+                      </span>
+                    </div>
+
+                    <Link
+                      href={`tel:${companyData.phone}`}
+                      className="flex items-center gap-2.5 p-3 bg-slate-50 hover:bg-orange-50 rounded-xl transition-colors"
+                    >
+                      <PhoneCall size={16} className="text-orange-600 shrink-0" />
+                      <span className="text-xs font-semibold text-slate-700">
+                        {formatUniversalPhoneNumber(companyData.phone)}
+                      </span>
+                    </Link>
+                  </div>
+
+                  <Link href="#getQuote" onClick={closeMenu} className="block pt-1">
+                    <Button className="w-full h-11 rounded-xl bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-700 hover:to-orange-600 text-white font-bold text-sm shadow-md shadow-orange-600/20">
+                      Get a Quote
+                    </Button>
+                  </Link>
                 </div>
-              </motion.div>
+              </div>
             </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.header>
+          </div>
+        )}
+      </AnimatePresence>
     </>
   );
 }
