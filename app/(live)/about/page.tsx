@@ -1,6 +1,6 @@
 import React from "react";
 
-import { getTeam } from "@/wix-api/teams";
+import { getTeamMembers } from "@/lib/firebase/storefront";
 import companyData from "@/data/company";
 import CTASection from "@/components/reusables/sections/cta";
 import PageHeader from "@/components/reusables/PageHeader";
@@ -11,7 +11,8 @@ import HistorySectionAbout from "@/components/reusables/sections/about/HistorySe
 import TeamSectionAbout from "@/components/reusables/sections/about/TeamSection.about";
 
 export default async function AboutPage() {
-  const teamMembers = await getTeam();
+  const teamRes = await getTeamMembers();
+  const teamMembers = teamRes.success ? teamRes.data : [];
 
   return (
     <main>

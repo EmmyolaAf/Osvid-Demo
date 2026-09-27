@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
-import emailjs from "@emailjs/browser";
+import React, { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
-import { Loader2, CheckCircle, AlertCircle } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, Send } from "lucide-react";
+import { submitContactForm } from "@/lib/firebase/storefront";
+import { toast } from "sonner";
 
 export default function ContactForm() {
   const formRef = useRef<HTMLFormElement>(null);
@@ -20,166 +21,211 @@ export default function ContactForm() {
 
     // Name validation
     if (!formData.get("name")?.toString().trim()) {
-      newErrors.name = "Name is required";
+      newErrors.name = "Full Name is required";
     }
 
     // Email validation
     const email = formData.get("email")?.toString().trim() || "";
     if (!email) {
-      newErrors.email = "Email is required";
+      newErrors.email = "Email address is required";
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      newErrors.email = "Please enter a valid email";
+      newErrors.email = "Please enter a valid email address";
     }
 
     // Message validation
-    if (!formData.get("message")?.toString().trim()) {
-      newErrors.message = "Message is required";
-    } else if ((formData.get("message")?.toString().trim() || "").length < 10) {
-      newErrors.message = "Message should be at least 10 characters";
+    const message = formData.get("message")?.toString().trim() || "";
+    if (!message) {
+      newErrors.message = "Message or project inquiry is required";
+    } else if (message.length < 10) {
+      newErrors.message = "Message should be at least 10 characters long";
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const sendEmail = async (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!validateForm()) return;
+    if (!validateForm()) {
+      toast.error("Please fill in all required fields accurately.");
+      return;
+    }
 
     setStatus("sending");
     setFeedback("");
 
+    const formData = new FormData(formRef.current!);
+    const name = formData.get("name")?.toString().trim() || "";
+    const email = formData.get("email")?.toString().trim() || "";
+    const phone = formData.get("phone")?.toString().trim() || "";
+    const subject = formData.get("subject")?.toString().trim() || "";
+    const message = formData.get("message")?.toString().trim() || "";
+
     try {
-      await emailjs.sendForm(
-        process.env.NEXT_PUBLIC_EMAILJS_SERVICE_ID!,
-        process.env.NEXT_PUBLIC_EMAILJS_TEMPLATE_ID!,
-        formRef.current!,
-        process.env.NEXT_PUBLIC_EMAILJS_PUBLIC_KEY!
-      );
+      const result = await submitContactForm({
+        name,
+        email,
+        phone,
+        subject,
+        message,
+      });
 
-      setStatus("success");
-      setFeedback("Your message has been sent successfully!");
-      formRef.current?.reset();
-
-      // Reset success message after 5 seconds
-      setTimeout(() => {
-        if (status === "success") {
-          setStatus("idle");
-          setFeedback("");
-        }
-      }, 5000);
-    } catch (error) {
-      console.error("Email sending error:", error);
+      if (result.success) {
+        setStatus("success");
+        setFeedback("Your inquiry has been received! Our technical team will reach out shortly.");
+        toast.success("Message submitted successfully!", {
+          description: "Our chemical engineering specialists will contact you within 24 hours.",
+        });
+        formRef.current?.reset();
+      } else {
+        setStatus("error");
+        setFeedback(result.error || "Failed to submit message. Please try again.");
+        toast.error(result.error || "Failed to submit message.");
+      }
+    } catch (err: any) {
+      console.error("Contact form error:", err);
       setStatus("error");
-      setFeedback("Oops! Something went wrong. Please try again later.");
+      setFeedback("Something went wrong while transmitting your message. Please reach us via WhatsApp.");
+      toast.error("Network error while submitting contact message.");
     }
   };
 
   const inputClasses = (field: string) =>
-    `w-full px-4 py-3 rounded-lg border ${
+    `w-full px-4 py-3.5 rounded-2xl border bg-slate-50/50 text-slate-900 text-sm ${
       errors[field]
-        ? "border-red-500 focus:border-red-500"
-        : "border-gray-300 focus:border-orange-500"
-    } focus:outline-none focus:ring-2 ${
-      errors[field] ? "focus:ring-red-200" : "focus:ring-orange-200"
-    } transition-all duration-200`;
+        ? "border-red-500 focus:border-red-500 focus:ring-red-100"
+        : "border-slate-200 focus:border-orange-500 focus:ring-orange-100"
+    } focus:outline-none focus:ring-4 transition-all duration-200 placeholder:text-slate-400 font-medium`;
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
+      transition={{ duration: 0.4 }}
       className="w-full"
     >
       <form
         ref={formRef}
-        onSubmit={sendEmail}
-        className="flex flex-col gap-6 max-w-xl w-full mx-auto"
+        onSubmit={handleFormSubmit}
+        className="flex flex-col gap-4 max-w-xl w-full mx-auto"
         noValidate
       >
-        <div>
-          <input
-            type="text"
-            name="name"
-            placeholder="Your Name*"
-            aria-label="Your Name"
-            className={inputClasses("name")}
-            aria-invalid={!!errors.name}
-            aria-describedby={errors.name ? "name-error" : undefined}
-          />
-          {errors.name && (
-            <p id="name-error" className="mt-1 text-sm text-red-500">
-              {errors.name}
-            </p>
-          )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-bold uppercase text-slate-700 mb-1.5">
+              Full Name *
+            </label>
+            <input
+              type="text"
+              name="name"
+              placeholder="e.g. Engr. Babatunde Adeyemi"
+              aria-label="Your Name"
+              className={inputClasses("name")}
+              aria-invalid={!!errors.name}
+            />
+            {errors.name && (
+              <p className="mt-1 text-xs text-red-500 font-medium">{errors.name}</p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase text-slate-700 mb-1.5">
+              Email Address *
+            </label>
+            <input
+              type="email"
+              name="email"
+              placeholder="name@company.com"
+              aria-label="Your Email"
+              className={inputClasses("email")}
+              aria-invalid={!!errors.email}
+            />
+            {errors.email && (
+              <p className="mt-1 text-xs text-red-500 font-medium">{errors.email}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-bold uppercase text-slate-700 mb-1.5">
+              Phone / WhatsApp Number
+            </label>
+            <input
+              type="tel"
+              name="phone"
+              placeholder="+234 800 000 0000"
+              aria-label="Your Phone"
+              className={inputClasses("phone")}
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase text-slate-700 mb-1.5">
+              Inquiry Subject
+            </label>
+            <input
+              type="text"
+              name="subject"
+              placeholder="e.g. Bulk Epoxy Quote"
+              aria-label="Subject"
+              className={inputClasses("subject")}
+            />
+          </div>
         </div>
 
         <div>
-          <input
-            type="email"
-            name="email"
-            placeholder="Your Email*"
-            aria-label="Your Email"
-            className={inputClasses("email")}
-            aria-invalid={!!errors.email}
-            aria-describedby={errors.email ? "email-error" : undefined}
-          />
-          {errors.email && (
-            <p id="email-error" className="mt-1 text-sm text-red-500">
-              {errors.email}
-            </p>
-          )}
-        </div>
-
-        <div>
+          <label className="block text-xs font-bold uppercase text-slate-700 mb-1.5">
+            Message & Technical Requirements *
+          </label>
           <textarea
             name="message"
-            placeholder="Your Message*"
+            placeholder="Please detail your surface area dimensions, chemical formulation requirements, or project scope..."
             aria-label="Your Message"
             rows={5}
             className={inputClasses("message")}
             aria-invalid={!!errors.message}
-            aria-describedby={errors.message ? "message-error" : undefined}
           />
           {errors.message && (
-            <p id="message-error" className="mt-1 text-sm text-red-500">
-              {errors.message}
-            </p>
+            <p className="mt-1 text-xs text-red-500 font-medium">{errors.message}</p>
           )}
         </div>
 
         <Button
           type="submit"
           disabled={status === "sending"}
-          className="py-6 mt-2 bg-osvid-orange hover:bg-orange-700 text-white font-bold text-base w-full transition-colors duration-300 relative"
+          className="py-6 mt-2 bg-orange-600 hover:bg-orange-700 text-white font-bold text-sm w-full rounded-2xl shadow-lg shadow-orange-600/20 transition-all gap-2"
         >
           {status === "sending" ? (
             <>
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-              Sending...
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Submitting Message...
             </>
           ) : (
-            "Send Message"
+            <>
+              <Send className="h-4 w-4" />
+              Send Technical Inquiry
+            </>
           )}
         </Button>
 
         {feedback && (
           <motion.div
-            initial={{ opacity: 0, y: -10 }}
+            initial={{ opacity: 0, y: -5 }}
             animate={{ opacity: 1, y: 0 }}
-            className={`p-4 rounded-lg flex items-start gap-3 ${
+            className={`p-4 rounded-2xl flex items-start gap-3 border ${
               status === "success"
-                ? "bg-green-50 text-green-800"
-                : "bg-red-50 text-red-800"
+                ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+                : "bg-red-50 border-red-200 text-red-900"
             }`}
           >
             {status === "success" ? (
-              <CheckCircle className="h-5 w-5 mt-0.5 flex-shrink-0" />
+              <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
             ) : (
-              <AlertCircle className="h-5 w-5 mt-0.5 flex-shrink-0" />
+              <AlertCircle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
             )}
-            <p className="text-sm">{feedback}</p>
+            <p className="text-xs font-medium leading-relaxed">{feedback}</p>
           </motion.div>
         )}
       </form>

@@ -23,35 +23,51 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const redirectUrl = searchParams.get("redirect");
 
-  const handleRedirect = (targetEmail?: string) => {
+  const handleRedirect = (targetProfile?: any) => {
     if (redirectUrl) {
       router.push(redirectUrl);
       return;
     }
-    const clean = (targetEmail || email).trim().toLowerCase();
-    if (clean === "abolarinwaemmanuelfree@gmail.com" || role === "super_admin") {
+    const userRole = targetProfile?.role || role;
+    const userEmail = (targetProfile?.email || email).trim().toLowerCase();
+
+    // 1. Platform Super Admin -> Landlord Command Hub
+    if (userRole === "super_admin" || userEmail === "abolarinwaemmanuelfree@gmail.com") {
       router.push("/dashboard/super-admin");
       return;
     }
-    router.push("/dashboard");
+
+    // 2. Tenant Store Administrator -> Admin Store Management Dashboard
+    if (userRole === "admin") {
+      router.push("/dashboard");
+      return;
+    }
+
+    // 3. Operations Manager -> Manager Staff & Operations Hub
+    if (userRole === "manager") {
+      router.push("/dashboard/managers");
+      return;
+    }
+
+    // 4. Regular User / Customer -> Customer Account Hub
+    router.push("/account");
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
-      toast.error("Please fill in all fields");
+      toast.error("Please enter both email and password.");
       return;
     }
 
     try {
       setLoading(true);
-      await login(email, password);
+      const profile = await login(email, password);
       toast.success("Welcome back to OSVID!");
-      setTimeout(() => handleRedirect(email), 300);
+      handleRedirect(profile);
     } catch (err: any) {
-      console.error(err);
+      console.error("Login submission error:", err);
       toast.error(err.message || "Failed to sign in. Please check your credentials.");
-    } finally {
       setLoading(false);
     }
   };

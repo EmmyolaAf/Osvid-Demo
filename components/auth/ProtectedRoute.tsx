@@ -60,8 +60,12 @@ export default function ProtectedRoute({
           <Link href="/">
             <Button variant="outline">Return to Homepage</Button>
           </Link>
-          {role !== "user" && (
-            <Link href="/dashboard">
+          {role === "user" ? (
+            <Link href="/account">
+              <Button className="bg-orange-600 hover:bg-orange-700 text-white">Go to My Account</Button>
+            </Link>
+          ) : (
+            <Link href={role === "super_admin" ? "/dashboard/super-admin" : "/dashboard"}>
               <Button className="bg-orange-600 hover:bg-orange-700 text-white">Go to Dashboard</Button>
             </Link>
           )}

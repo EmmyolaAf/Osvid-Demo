@@ -1,6 +1,5 @@
-// app/api/related-posts/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { getBlogPosts } from "@/wix-api/blog";
+import { getBlogPosts } from "@/lib/firebase/storefront";
 
 export const dynamic = "force-static";
 
@@ -14,7 +13,8 @@ export async function GET(request: NextRequest) {
     const tags = tagsParam ? tagsParam.split(",") : [];
 
     // Fetch all blog posts
-    const allPosts = await getBlogPosts();
+    const postsRes = await getBlogPosts();
+    const allPosts = postsRes.success ? postsRes.data : [];
 
     // Filter out the current post and find related posts
     const filteredPosts = allPosts

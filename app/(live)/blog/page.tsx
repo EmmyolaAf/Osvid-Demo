@@ -1,117 +1,143 @@
-// app/blog/page.tsx
+// app/(live)/blog/page.tsx
 import { Metadata } from "next";
 import Link from "next/link";
-import {
-  getBlogPosts,
-  getRecentBlogPosts,
-  getBlogCategories,
-} from "@/wix-api/blog";
+import { getBlogPosts } from "@/lib/firebase/storefront";
 import PageHeader from "@/components/reusables/PageHeader";
 import BlogCard from "@/components/reusables/cards/BlogCard";
-
-// Assuming you have a default placeholder if a post lacks an image
+import { AlertCircle, BookOpen, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = {
-  title: "Blog | Osvid Limited",
+  title: "Chemical Insights & Blog | OSVID CHEMICALS LTD.",
   description:
-    "Latest articles and insights on construction chemicals and flooring solutions from Osvid Limited.",
+    "Technical articles, application guides, and expert chemical insights from OSVID CHEMICALS LTD.",
 };
 
 export default async function BlogPage() {
-  // Fetch all blog posts for the main list, and data for the sidebar concurrently
-  const [allPosts, recentPostsData, categoriesData] = await Promise.all([
-    getBlogPosts(), // This should ideally be paginated
-    getRecentBlogPosts(5), // Fetch top 5 recent posts for the sidebar
-    getBlogCategories(), // Fetch all categories for the sidebar
-  ]);
+  const result = await getBlogPosts();
+  const allPosts = result.success ? result.data : [];
 
-  const recentPosts = recentPostsData || [];
-  const categories = categoriesData || [];
+  // Extract unique categories and counts
+  const categoryMap = new Map<string, number>();
+  allPosts.forEach((p) => {
+    const cat = p.category || "General Insights";
+    categoryMap.set(cat, (categoryMap.get(cat) || 0) + 1);
+  });
+  const categories = Array.from(categoryMap.entries()).map(([name, count]) => ({
+    name,
+    count,
+  }));
+
+  const recentPosts = allPosts.slice(0, 5);
 
   return (
-    <main>
-      <PageHeader title="Blog" />
+    <main className="min-h-screen bg-slate-50/50">
+      <PageHeader
+        title="Technical Chemical Blog & Insights"
+        description="Learn industry best practices for surface excellence, epoxy application, and chemical safety."
+        breadcrumbs={[
+          { label: "Home", href: "/" },
+          { label: "Blog", href: "/blog" },
+        ]}
+      />
 
-      <section className="py-16 md:py-20">
-        <div className="container mx-auto px-4 md:px-12 flex flex-col md:flex-row gap-8">
+      <section className="py-12 md:py-16">
+        <div className="container mx-auto px-4 sm:px-6 flex flex-col lg:flex-row gap-10">
           {/* Main Blog Post Listing Area */}
-          <div className="w-full md:w-2/3">
-            {allPosts.length > 0 ? (
-              <div className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-2">
+          <div className="w-full lg:w-2/3 space-y-8">
+            {!result.success ? (
+              <div className="bg-red-50 border border-red-200 rounded-3xl p-8 text-center shadow-sm">
+                <AlertCircle className="w-10 h-10 text-red-600 mx-auto mb-3" />
+                <h3 className="text-base font-bold text-red-900 mb-1">
+                  Unable to Load Blog Articles
+                </h3>
+                <p className="text-xs text-red-700 mb-4">{result.error}</p>
+                <Link href="/blog">
+                  <Button className="bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs">
+                    <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                    Retry
+                  </Button>
+                </Link>
+              </div>
+            ) : allPosts.length === 0 ? (
+              <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center shadow-sm">
+                <BookOpen className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <h3 className="text-lg font-bold text-slate-800 mb-1">
+                  No Blog Posts Published Yet
+                </h3>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto mb-6">
+                  Our laboratory and engineering team are preparing new technical guides and application manuals.
+                </p>
+                <Link href="/shop">
+                  <Button className="bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-semibold">
+                    Browse Chemical Catalog
+                  </Button>
+                </Link>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {allPosts.map((post) => (
-                  // Render BlogCard for each post
                   <BlogCard key={post.id || post.slug} post={post} />
                 ))}
               </div>
-            ) : (
-              <p className="text-center text-gray-600">No blog posts found.</p>
             )}
-
-            {/* TODO: Add Pagination UI here */}
           </div>
 
-          {/* Sidebar Area (reusable from single post page) */}
-          <aside className="w-full md:w-1/3 space-y-8 mt-8 md:mt-0">
-            {/* Search Bar */}
-            <div className="p-4 bg-white rounded-lg shadow-md">
-              <h3 className="text-xl font-semibold mb-4">Search</h3>
-              <form action="/blog/search" method="GET">
-                <div className="flex">
-                  <input
-                    type="search"
-                    name="q"
-                    placeholder="Search articles..."
-                    className="flex-grow p-2 border border-gray-300 rounded-l-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <button
-                    type="submit"
-                    className="bg-blue-600 text-white p-2 rounded-r-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    Search
-                  </button>
-                </div>
-              </form>
-            </div>
-
+          {/* Sidebar Area */}
+          <aside className="w-full lg:w-1/3 space-y-6">
             {/* Recent Articles */}
-            <div className="p-4 bg-white rounded-lg shadow-md">
-              <h3 className="text-xl font-semibold mb-4">Recent Articles</h3>
+            <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm space-y-4">
+              <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider text-orange-600">
+                Recent Insights
+              </h3>
               {recentPosts.length > 0 ? (
-                <ul>
+                <ul className="divide-y divide-slate-100 text-xs">
                   {recentPosts.map((rp) => (
-                    <li key={rp.slug} className="mb-2">
+                    <li key={rp.slug} className="py-3 first:pt-0 last:pb-0">
                       <Link
                         href={`/blog/${rp.slug}`}
-                        className="text-blue-600 hover:underline"
+                        className="font-bold text-slate-800 hover:text-orange-600 transition-colors line-clamp-2"
                       >
                         {rp.title}
                       </Link>
+                      <span className="text-[11px] text-slate-400 mt-1 block">
+                        {rp.publishDate
+                          ? new Date(rp.publishDate).toLocaleDateString("en-NG", {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })
+                          : "Published"}
+                      </span>
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className="text-gray-600">No recent articles found.</p>
+                <p className="text-xs text-slate-400">No recent articles found.</p>
               )}
             </div>
 
             {/* Categories */}
-            <div className="p-4 bg-white rounded-lg shadow-md">
-              <h3 className="text-xl font-semibold mb-4">Categories</h3>
+            <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-sm space-y-3">
+              <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider text-orange-600">
+                Article Categories
+              </h3>
               {categories.length > 0 ? (
-                <ul>
-                  {categories.map((cat) => (
-                    <li key={cat.slug} className="mb-2">
-                      <Link
-                        href={`/blog/category/${cat.slug}`}
-                        className="text-blue-600 hover:underline"
-                      >
-                        {cat.name} ({cat.count || 0})
-                      </Link>
+                <ul className="space-y-1.5 text-xs">
+                  {categories.map((cat, idx) => (
+                    <li
+                      key={idx}
+                      className="flex items-center justify-between py-1 text-slate-700 font-medium"
+                    >
+                      <span>{cat.name}</span>
+                      <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                        {cat.count}
+                      </span>
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className="text-gray-600">No categories found.</p>
+                <p className="text-xs text-slate-400">No categories found.</p>
               )}
             </div>
           </aside>

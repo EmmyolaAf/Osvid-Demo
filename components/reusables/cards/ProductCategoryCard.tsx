@@ -3,10 +3,9 @@
 
 import React from "react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button"; // Assuming this path is correct
+import { Button } from "@/components/ui/button";
 import { ProductCategory } from "@/types";
 import Image from "next/image";
-import { getWixStaticImageUrl } from "@/utils/wixImageUtils";
 
 interface ProductCategoryCardProps {
   category: ProductCategory;
@@ -18,17 +17,13 @@ export default function ProductCategoryCard({
   // Construct the URL for the category detail page
   const categoryDetailUrl = `/products/${category.slug}`;
 
-  // console.log(category);
-
-  console.log(getWixStaticImageUrl(category.imageUrl));
-
   return (
     <div className="group relative block w-full rounded-lg overflow-hidden h-max shadow-lg hover:shadow-xl transition-shadow duration-300 ease-in-out cursor-pointer border border-gray-200 bg-white">
       {/* The Link wraps the content that should lead to the detail page */}
 
       <Image
         src={
-          getWixStaticImageUrl(category.imageUrl) ||
+          category.imageUrl ||
           "/images/default-category-image.webp"
         } // Fallback image
         alt={category.title}

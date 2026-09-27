@@ -4,7 +4,6 @@ import React, { useState } from "react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Star, ShoppingCart, Loader2, Check } from "lucide-react";
-import { media as wixMedia } from "@wix/sdk";
 import Link from "next/link";
 import { FadeInAnimationWrapper } from "../custom-animation-wrapper";
 import formatCurrency from "@/helpers/formatCurrency";
@@ -38,9 +37,7 @@ export default function ProductCard({
   const [justAdded, setJustAdded] = useState(false);
   const { cart, addToCart } = useCart();
 
-  const mainImage = product.image
-    ? wixMedia.getScaledToFillImageUrl(product.image, 800, 800, {})
-    : "/images/placeholder-product.jpg";
+  const mainImage = product.image || "/images/placeholder-product.jpg";
 
   const hasDiscount =
     product.discountPrice !== undefined &&

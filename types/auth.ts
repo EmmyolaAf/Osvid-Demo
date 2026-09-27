@@ -27,6 +27,7 @@ export interface BusinessSubscription {
   suspendedReason?: string;
   hostingPlan: "standard" | "professional" | "enterprise";
   hostingExpiryDate: string;
+  gracePeriodDays?: number;
   lastPaymentDate?: string;
   renewalAmountNgn: number;
   showWarning: boolean;
@@ -137,6 +138,18 @@ export interface Order {
   updatedAt: string;
 }
 
+export interface ProductCategory {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  imageUrl?: string;
+  isActive: boolean;
+  productCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -146,12 +159,17 @@ export interface Product {
   discountPrice?: number;
   stockQuantity: number;
   category: string;
+  categorySlug?: string;
   imageUrl: string;
   galleryImages?: string[];
   unit?: string;
   sku?: string;
   isFeatured?: boolean;
+  features?: string[];
+  specifications?: Record<string, string>;
+  suggestedProductIds?: string[];
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }
+

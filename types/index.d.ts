@@ -96,10 +96,8 @@ export type Collection = {
 // All collections
 export type CollectionsType = Collection[];
 
-// types/Cart.type.ts
-import { currentCart } from "@wix/ecom";
-
-interface AugmentedCartProperties {
+export interface AugmentedCart {
+  items: CartItem[];
   subtotal?: {
     amount?: number;
     formattedAmount?: string;
@@ -110,22 +108,7 @@ interface AugmentedCartProperties {
     formattedAmount?: string;
     formattedConvertedAmount?: string;
   };
-  // Add other properties you expect from the fetched cart data
-  // e.g., discounts, tax, etc.
 }
-
-export interface AugmentedCart
-  extends currentCart.Cart,
-    AugmentedCartProperties {}
-
-// Optional: If line items also need augmentation beyond the base type
-// interface AugmentedCartLineItem extends currentCart.LineItem {
-//    // Add properties here if needed
-// }
-// Update AugmentedCart to use AugmentedCartLineItem if needed
-// export interface AugmentedCart extends currentCart.Cart, AugmentedCartProperties {
-//     lineItems?: AugmentedCartLineItem[];
-// }
 
 export interface Service {
   _id: string;

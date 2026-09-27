@@ -1,12 +1,10 @@
 import { TeamMember } from "@/types";
-import { getWixStaticImageUrl } from "@/utils/wixImageUtils";
 import Image from "next/image";
 import { motion } from "framer-motion";
 
 export default function TeamMemberCard({ name, role, imageUrl }: TeamMember) {
   // Fallback for imageUrl if it's not provided
-  const finalImageUrl =
-    getWixStaticImageUrl(imageUrl) || "/images/team-placeholder.jpg"; // Use a professional placeholder
+  const finalImageUrl = imageUrl || "/images/team-placeholder.jpg";
 
   return (
     <motion.div

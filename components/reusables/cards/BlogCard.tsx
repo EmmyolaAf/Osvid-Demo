@@ -5,8 +5,7 @@ import { useState } from "react";
 import Link from "next/link"; // Import Link for internal navigation
 import Image from "next/image"; // Import Next.js Image component
 import { motion } from "framer-motion";
-import { BlogPost } from "@/types"; // Assuming BlogPost type is defined here or imported from types.ts
-import { getWixStaticImageUrl } from "@/utils/wixImageUtils";
+import { BlogPost } from "@/types";
 
 interface BlogCardProps {
   post: BlogPost;
@@ -16,8 +15,7 @@ export default function BlogCard({ post }: BlogCardProps) {
   const [isHovered, setIsHovered] = useState(false);
 
   // Fallback for featured image if none is provided
-  const imageUrl =
-    getWixStaticImageUrl(post.featuredImage) || "/images/placeholder-blog.jpg"; // Provide a local placeholder image path
+  const imageUrl = post.featuredImage || "/images/placeholder-blog.jpg";
 
   return (
     <motion.div

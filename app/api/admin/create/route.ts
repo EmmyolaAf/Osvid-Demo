@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { DEFAULT_MANAGER_PERMISSIONS } from "@/types/auth";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { email, password, displayName, phoneNumber, businessName } = body;
+    const { email, password, displayName, phoneNumber, businessName, customTitle, role, permissions } = body;
 
     if (!email || !displayName) {
       return NextResponse.json(
@@ -14,42 +15,64 @@ export async function POST(req: NextRequest) {
     }
 
     const cleanEmail = email.trim().toLowerCase();
-    const userPassword = password || "OsvidAdmin2026!";
-    const adminName = displayName.trim();
+    const assignedRole = role === "manager" ? "manager" : "admin";
+    const userPassword = password || (assignedRole === "manager" ? "OsvidManager2026!" : "OsvidAdmin2026!");
+    const userName = displayName.trim();
+    const title = customTitle || businessName || (assignedRole === "manager" ? "Operations Manager" : "Tenant Store Account");
 
-    let uid = `adm_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const assignedPermissions = permissions || (assignedRole === "manager" ? DEFAULT_MANAGER_PERMISSIONS : {
+      canManageProducts: true,
+      canManageOrders: true,
+      canViewFinancials: true,
+      canManageWebsite: true,
+      canManageCustomers: true,
+      canManageDiscounts: true,
+    });
 
-    // Try creating user in Firebase Auth
+    let uid = `user_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    // 1. Create or update user in Firebase Auth
     try {
       const userRecord = await adminAuth.createUser({
         email: cleanEmail,
         password: userPassword,
-        displayName: adminName,
+        displayName: userName,
         emailVerified: true,
       });
       uid = userRecord.uid;
-      console.log(`Created live Firebase Auth user for Admin: ${cleanEmail} (UID: ${uid})`);
     } catch (authErr: any) {
       if (authErr.code === "auth/email-already-exists") {
-        // User already exists in Auth, fetch and update
         const existing = await adminAuth.getUserByEmail(cleanEmail);
         uid = existing.uid;
         if (password) {
-          await adminAuth.updateUser(uid, { password: userPassword, displayName: adminName });
+          await adminAuth.updateUser(uid, { password: userPassword, displayName: userName });
         }
       } else {
-        console.warn("Firebase Auth Admin creation warning:", authErr.message);
+        console.warn("Firebase Auth creation warning:", authErr.message);
       }
     }
 
-    // Save/update Firestore profile
+    // 2. Set custom claims in Firebase Auth
+    try {
+      await adminAuth.setCustomUserClaims(uid, {
+        role: assignedRole,
+        customTitle: title,
+        phoneNumber: phoneNumber || "",
+        permissions: assignedPermissions,
+      });
+    } catch (claimErr: any) {
+      console.warn("Could not set custom claims:", claimErr.message);
+    }
+
+    // 3. Save profile in Firestore users collection
     const profileData = {
       uid,
       email: cleanEmail,
-      displayName: adminName,
+      displayName: userName,
       phoneNumber: phoneNumber || "",
-      customTitle: businessName || "Business Administrator",
-      role: "admin",
+      customTitle: title,
+      role: assignedRole,
+      permissions: assignedPermissions,
       isActive: true,
       createdAt: new Date().toISOString(),
       lastLoginAt: new Date().toISOString(),
@@ -63,14 +86,15 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Administrator "${adminName}" created successfully!`,
+      message: `${assignedRole === "manager" ? "Manager" : "Administrator"} "${userName}" created successfully!`,
       user: profileData,
     });
   } catch (err: any) {
-    console.error("API create admin error:", err);
+    console.error("API create user error:", err);
     return NextResponse.json(
-      { error: err.message || "Failed to create administrator" },
+      { error: err.message || "Failed to create account" },
       { status: 500 }
     );
   }
 }
+

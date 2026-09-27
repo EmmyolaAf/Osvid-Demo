@@ -1,31 +1,34 @@
-// src/app/shop/page.tsx
+// src/app/(live)/shop/page.tsx
 import PageHeader from "@/components/reusables/PageHeader";
-import { wixClientServer } from "@/lib/wix-client.server";
+import { getProducts } from "@/lib/firebase/storefront";
 import ShopClientPage from "./ShopClientPage";
+import { AlertCircle, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
 
-/* eslint-disable  @typescript-eslint/no-explicit-any */
-
-// Define types for search parameters
 interface ProductsPageProps {
   searchParams: Promise<{
     page?: string;
     sort?: string;
-    search?: string; // Added search param type
+    search?: string;
+    category?: string;
   }>;
 }
 
-const PRODUCTS_PER_PAGE = 12; // Define products per page
+const PRODUCTS_PER_PAGE = 12;
 
 export const dynamic = "force-static";
 
 export default async function ProductsPage({
   searchParams,
 }: ProductsPageProps) {
-  let s: { page?: string; sort?: string; search?: string } = {
+  let s: { page?: string; sort?: string; search?: string; category?: string } = {
     page: "1",
     sort: "price",
     search: "",
+    category: "",
   };
+
   try {
     if (searchParams) {
       s = (await searchParams) || {};
@@ -34,88 +37,109 @@ export default async function ProductsPage({
     // Static generation fallback
   }
 
-  const currentPage = parseInt(s.page || "1");
-  const skip = (currentPage - 1) * PRODUCTS_PER_PAGE;
-  // Default sort order changed to 'name' or 'price' based on preference, here using 'price'
+  const currentPage = parseInt(s.page || "1", 10);
   const sortOrder = s.sort || "price";
-  const searchTerm = s.search || ""; // Get search term from URL
+  const searchTerm = (s.search || "").toLowerCase().trim();
+  const categoryFilter = s.category || "";
 
-  const wixClient = await wixClientServer();
+  // Fetch active products from Firestore
+  const result = await getProducts(categoryFilter || undefined);
 
-  let queryBuilder = wixClient.products
-    .queryProducts()
-    .limit(PRODUCTS_PER_PAGE)
-    .skip(skip);
-
-  // Add search filter if a search term is present
-  if (searchTerm) {
-    queryBuilder = queryBuilder.hasSome("name", [searchTerm]);
-  }
-
-  switch (sortOrder) {
-    case "popularity":
-      // No direct 'popularity' sort in Wix via given fields. Using 'lastUpdated' as a logical fallback.
-      queryBuilder = queryBuilder.descending("lastUpdated");
-      break;
-    case "rating":
-      // No direct 'rating' sort in Wix via given fields. Using 'lastUpdated' as a logical fallback.
-      queryBuilder = queryBuilder.descending("lastUpdated");
-      break;
-    case "date": // Sort by latest (creation date) - using 'lastUpdated' as per valid fields
-      queryBuilder = queryBuilder.descending("lastUpdated");
-      break;
-    case "price": // Sort by price: low to high - using 'price' as it's a valid field
-      queryBuilder = queryBuilder.ascending("price");
-      break;
-    case "price-desc": // Sort by price: high to low - using 'price' as it's a valid field
-      queryBuilder = queryBuilder.descending("price");
-      break;
-    case "name-asc": // New option: Sort by name A-Z
-      queryBuilder = queryBuilder.ascending("name");
-      break;
-    case "name-desc": // New option: Sort by name Z-A
-      queryBuilder = queryBuilder.descending("name");
-      break;
-    default:
-      queryBuilder = queryBuilder.ascending("price"); // Default: price low to high
-  }
-
-  let productsData: any[] = [];
-  let totalProducts = 0;
-
-  try {
-    const res = await queryBuilder.find(); // Execute the query
-    productsData = res.items.map((item: any) => ({
-      _id: item._id,
-      name: item.name,
-      price: item.priceData?.price,
-      discountPrice: item.priceData?.discountedPrice,
-      image: item.media?.mainMedia?.image?.url,
-      slug: item.slug,
-    }));
-    totalProducts = res.totalCount || 0;
-
-    console.log(productsData);
-  } catch (error: any) {
-    console.error("Failed to fetch products:", error);
-    const errorMessage = "Failed to load products. Please try again later.";
-    // More specific error handling if needed based on error.details
-
+  if (!result.success) {
     return (
-      <main>
-        <PageHeader title="Shop" />
-        <section className="container py-12">
-          <p className="text-center text-red-600 text-lg">{errorMessage}</p>
+      <main className="min-h-[70vh]">
+        <PageHeader
+          title="Shop"
+          description="Browse our collection of industrial chemicals and solutions."
+          breadcrumbs={[
+            { label: "Home", href: "/" },
+            { label: "Shop", href: "/shop" },
+          ]}
+        />
+        <section className="container mx-auto py-16 px-4">
+          <div className="max-w-md mx-auto bg-red-50 border border-red-200 rounded-2xl p-8 text-center shadow-sm">
+            <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <h2 className="text-xl font-bold text-red-900 mb-2">
+              Unable to Load Chemical Catalog
+            </h2>
+            <p className="text-sm text-red-700 mb-6 leading-relaxed">
+              {result.error ||
+                "A network error occurred while retrieving products from the database."}
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <Link href="/shop">
+                <Button className="w-full bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold gap-2">
+                  <RefreshCw className="w-4 h-4" />
+                  Try Again
+                </Button>
+              </Link>
+              <Link href="/">
+                <Button
+                  variant="outline"
+                  className="w-full border-red-300 text-red-800 hover:bg-red-100 rounded-xl text-sm"
+                >
+                  Return to Home
+                </Button>
+              </Link>
+            </div>
+          </div>
         </section>
       </main>
     );
   }
 
+  let allProducts = result.data || [];
+
+  // Filter by search keyword
+  if (searchTerm) {
+    allProducts = allProducts.filter(
+      (p) =>
+        p.name.toLowerCase().includes(searchTerm) ||
+        p.description?.toLowerCase().includes(searchTerm) ||
+        p.category?.toLowerCase().includes(searchTerm)
+    );
+  }
+
+  // Sort products
+  allProducts.sort((a, b) => {
+    switch (sortOrder) {
+      case "price":
+        return (a.price || 0) - (b.price || 0);
+      case "price-desc":
+        return (b.price || 0) - (a.price || 0);
+      case "name-asc":
+        return a.name.localeCompare(b.name);
+      case "name-desc":
+        return b.name.localeCompare(a.name);
+      case "date":
+      default:
+        return (
+          new Date(b.createdAt || 0).getTime() -
+          new Date(a.createdAt || 0).getTime()
+        );
+    }
+  });
+
+  const totalProducts = allProducts.length;
+  const skip = (currentPage - 1) * PRODUCTS_PER_PAGE;
+  const paginatedProducts = allProducts.slice(skip, skip + PRODUCTS_PER_PAGE);
+
+  const productsData = paginatedProducts.map((p) => ({
+    _id: p.id,
+    name: p.name,
+    price: p.price,
+    discountPrice: p.discountPrice,
+    image: p.imageUrl,
+    slug: p.slug,
+  }));
+
   return (
     <main>
       <PageHeader
-        title="Shop "
-        description="Browse our collection, choose your quantity, and order today!"
+        title="Chemical Catalog & Shop"
+        description="Browse our high-performance industrial chemicals, adhesives, and surface solutions."
         breadcrumbs={[
           {
             label: "Home",
@@ -133,7 +157,7 @@ export default async function ProductsPage({
         productsPerPage={PRODUCTS_PER_PAGE}
         currentPage={currentPage}
         currentSort={sortOrder}
-        currentSearch={searchTerm} // Pass search term to client component
+        currentSearch={searchTerm}
       />
     </main>
   );

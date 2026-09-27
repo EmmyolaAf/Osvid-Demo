@@ -1,348 +1,342 @@
 "use client";
 
-import Badge from "@/components/ui/badge";
+import React, { useState } from "react";
+import Image from "next/image";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { checkInStock, findVariant } from "@/lib/utils";
-import { products } from "@wix/stores";
-import { ShoppingCart } from "lucide-react";
-import { useState } from "react";
-import ProductOptions from "./ProductOptions";
-import ProductPrice from "./ProductPrice";
-import companyData from "@/data/company";
+import { Product } from "@/types/auth";
+import {
+  ShoppingCart,
+  CheckCircle2,
+  AlertTriangle,
+  Package,
+  ShieldCheck,
+  Truck,
+  Sparkles,
+  PhoneCall,
+} from "lucide-react";
 import formatCurrency from "@/helpers/formatCurrency";
 import { useCart } from "@/providers/CartProvider";
 import { toast } from "sonner";
 import { BulkDiscount } from "@/components/reusables/CompactBulkOrder";
+import companyData from "@/data/company";
+import BackInStockNotificationButton from "@/components/reusables/BackInStockNotificationButton";
 
-interface ProductDetailsProps {
-  product: products.Product;
+interface ProductDetailsClientProps {
+  product: Product;
 }
 
-export default function ProductDetails({ product }: ProductDetailsProps) {
+export default function ProductDetailsClient({
+  product,
+}: ProductDetailsClientProps) {
   const { addToCart, openCart } = useCart();
-  // const { toast } = useToast();
   const [quantity, setQuantity] = useState(1);
   const [activeImage, setActiveImage] = useState(
-    product.media?.mainMedia?.image?.url || ""
+    product.imageUrl || "/images/placeholder.webp"
   );
   const [isAddingToCart, setIsAddingToCart] = useState(false);
 
-  const [selectedOptions, setSelectedOptions] = useState<
-    Record<string, string>
-  >(
-    product.productOptions
-      ?.map((option) => ({
-        [option.name || ""]: option.choices?.[0].description || "",
-      }))
-      ?.reduce((acc, curr) => ({ ...acc, ...curr }), {}) || {}
-  );
+  const inStock = product.stockQuantity > 0 && product.isActive;
+  const isLowStock = inStock && product.stockQuantity <= 10;
+  const hasDiscount =
+    product.discountPrice !== undefined &&
+    product.discountPrice > 0 &&
+    product.discountPrice < product.price;
 
-  const selectedVariant = findVariant(product, selectedOptions);
-  const inStock = checkInStock(product, selectedOptions);
-
-  const availableQuantity =
-    selectedVariant?.stock?.quantity ?? product.stock?.quantity;
-
-  const availableQuantityExceeded =
-    !!availableQuantity && quantity > availableQuantity;
+  const currentPrice = hasDiscount ? product.discountPrice! : product.price;
+  const discountPercent = hasDiscount
+    ? Math.round(((product.price - product.discountPrice!) / product.price) * 100)
+    : 0;
 
   const handleQuantityChange = (delta: number) => {
-    setQuantity((prevQuantity) => {
-      const newQuantity = prevQuantity + delta;
-      if (newQuantity < 1) return 1;
-      if (availableQuantity && newQuantity > availableQuantity) {
-        return availableQuantity;
+    setQuantity((prev) => {
+      const next = prev + delta;
+      if (next < 1) return 1;
+      if (inStock && next > product.stockQuantity) {
+        return product.stockQuantity;
       }
-      return newQuantity;
+      return next;
     });
   };
 
   const handleAddToCart = () => {
     if (!inStock) {
-      toast.warning("Out of Stock");
+      toast.warning("This item is currently out of stock.");
       return;
     }
 
     setIsAddingToCart(true);
 
     try {
-      // Prepare cart item data
-      const cartItem = {
-        id: product._id!,
-        name: product.name!,
-        imageUrl: product.media?.mainMedia?.image?.url || "",
-        variant: selectedVariant
-          ? Object.values(selectedOptions).join(", ")
-          : undefined,
-        priceData: {
-          price: product.priceData?.price || 0,
-          currency: product.priceData?.currency || "NGN",
-          formatted: {
-            price: formatCurrency(
-              product.priceData?.currency || "NGN",
-              product.priceData?.price || 0
-            ),
+      addToCart(
+        {
+          id: product.id,
+          name: product.name,
+          imageUrl: product.imageUrl || "/images/placeholder.webp",
+          variant: product.unit ? `Unit: ${product.unit}` : undefined,
+          priceData: {
+            price: product.price,
+            discountedPrice: product.discountPrice,
+            currency: "NGN",
+            formatted: {
+              price: formatCurrency("NGN", product.price),
+              discountedPrice: product.discountPrice
+                ? formatCurrency("NGN", product.discountPrice)
+                : undefined,
+            },
           },
         },
-      };
+        quantity
+      );
 
-      addToCart(cartItem, quantity);
-      openCart(); // Optional: Open cart drawer after adding
-
-      toast.success("Added to Cart");
-    } catch (error) {
-      console.error(error);
-
-      toast.error("Failed to add item to cart");
+      openCart();
+      toast.success(`Added ${quantity}x ${product.name} to cart.`);
+    } catch (err) {
+      console.error("Cart addition error:", err);
+      toast.error("Failed to add product to cart. Please try again.");
     } finally {
       setIsAddingToCart(false);
     }
   };
 
-  // WhatsApp Message Generation
-  const productOwnerWhatsAppNumber = companyData.whatsapp.replace(/\D/g, "");
-  const productOwnerWhatsAppNumberWithCountryCode = `234${productOwnerWhatsAppNumber}`;
-  const whatsappMessage = `Hello, I'm interested in your product: ${
-    product.name
-  }.
-Price: ${formatCurrency("NGN", product.priceData?.price ?? 0)}.
-Quantity: ${quantity}.
-${
-  selectedVariant
-    ? `Selected Variant: ${Object.values(selectedOptions).join(", ")}.`
-    : ""
-}
-Product Link: ${process.env.NEXT_PUBLIC_SITE_URL}/shop/${product.slug}`;
+  // WhatsApp Sales Inquiry link
+  const cleanPhone = companyData.whatsapp.replace(/\D/g, "");
+  const waUrl = `https://wa.me/234${cleanPhone}?text=${encodeURIComponent(
+    `Hello OSVID Sales, I would like to inquire about ${product.name} (Price: ${formatCurrency(
+      "NGN",
+      currentPrice
+    )}, Quantity: ${quantity} ${product.unit || "units"}).`
+  )}`;
 
-  const encodedMessage = encodeURIComponent(whatsappMessage);
-  const whatsappLink = `https://wa.me/${productOwnerWhatsAppNumberWithCountryCode}?text=${encodedMessage}`;
+  const allImages = [
+    product.imageUrl || "/images/placeholder.webp",
+    ...(product.galleryImages || []),
+  ].filter(Boolean);
 
   return (
-    <div className="flex flex-col gap-10 md:flex-row lg:gap-20 container py-8">
-      {/* Product Images - Left Column */}
-      <div className="md:w-6/12 w-full flex flex-col-reverse md:flex-row gap-4">
-        {/* Thumbnail Gallery */}
-        {product.media?.items && product.media.items.length > 1 && (
-          <div className="flex md:flex-col gap-2 overflow-x-auto md:overflow-y-auto pb-2 md:pb-0 scrollbar-hide flex-shrink-0">
-            {product.media.items.map((mediaItem, index) => {
-              const imageUrl = mediaItem.image?.url;
-              if (!imageUrl) return null;
-
-              return (
-                <img
-                  key={mediaItem._id || index}
-                  src={imageUrl}
-                  alt={`${product.name} thumbnail ${index + 1}`}
-                  className={`w-20 h-20 object-cover rounded-md cursor-pointer border-2 transition-all duration-200 ${
-                    activeImage === imageUrl
-                      ? "border-osvid-blue"
-                      : "border-transparent hover:border-gray-300"
-                  }`}
-                  onClick={() => setActiveImage(imageUrl)}
-                />
-              );
-            })}
-          </div>
-        )}
-
-        {/* Main Product Image */}
-        <div className="flex-1 h-96 md:h-[36rem] relative overflow-hidden rounded-lg shadow-lg">
-          {activeImage ? (
-            <img
-              src={activeImage}
-              alt={product.name ?? "Product Image"}
-              className="w-full h-full object-contain"
-            />
-          ) : product.media?.mainMedia?.image?.url ? (
-            <img
-              src={product.media.mainMedia.image.url}
-              alt={product.name ?? "Product Image"}
-              className="w-full h-full object-contain"
-            />
-          ) : (
-            <div className="w-full h-full bg-gray-100 flex items-center justify-center text-gray-400">
-              No Image Available
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-start">
+      {/* Product Media - Left Column */}
+      <div className="lg:col-span-6 space-y-4">
+        {/* Main Image Frame */}
+        <div className="relative aspect-square w-full rounded-3xl overflow-hidden bg-slate-100 border border-slate-200/80 shadow-sm flex items-center justify-center group">
+          <Image
+            src={activeImage}
+            alt={product.name}
+            fill
+            sizes="(max-width: 1024px) 100vw, 50vw"
+            className="object-cover object-center transition-transform duration-500 group-hover:scale-105"
+            priority
+          />
+          {hasDiscount && (
+            <div className="absolute top-4 left-4 bg-orange-600 text-white font-extrabold text-xs px-3 py-1.5 rounded-full shadow-md">
+              SAVE {discountPercent}%
+            </div>
+          )}
+          {product.isFeatured && (
+            <div className="absolute top-4 right-4 bg-slate-900/90 backdrop-blur-md text-amber-300 font-bold text-xs px-3 py-1.5 rounded-full border border-amber-300/30 flex items-center gap-1 shadow-md">
+              <Sparkles size={13} />
+              Featured
             </div>
           )}
         </div>
+
+        {/* Thumbnail Carousel / List */}
+        {allImages.length > 1 && (
+          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+            {allImages.map((imgUrl, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => setActiveImage(imgUrl)}
+                className={`relative w-20 h-20 rounded-2xl overflow-hidden border-2 transition-all shrink-0 ${
+                  activeImage === imgUrl
+                    ? "border-orange-600 ring-2 ring-orange-500/20"
+                    : "border-slate-200 hover:border-slate-400"
+                }`}
+              >
+                <Image
+                  src={imgUrl}
+                  alt={`${product.name} thumbnail ${idx + 1}`}
+                  fill
+                  sizes="80px"
+                  className="object-cover"
+                />
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Product Details - Right Column */}
-      <div className="basis-3/5 space-y-6">
-        <div className="space-y-3">
-          <h1 className="text-3xl font-bold lg:text-4xl text-gray-900">
+      {/* Product Information & Purchase - Right Column */}
+      <div className="lg:col-span-6 space-y-6">
+        <div>
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-100 text-orange-800 text-xs font-bold uppercase tracking-wider mb-3">
+            <Package size={13} />
+            {product.category || "Industrial Chemicals"}
+          </div>
+          <h1 className="text-2xl sm:text-4xl font-black text-slate-900 tracking-tight leading-tight">
             {product.name}
           </h1>
-          {product.brand && (
-            <p className="text-muted-foreground text-lg font-medium">
-              Brand: {product.brand}
+          {product.sku && (
+            <p className="text-xs text-slate-400 font-mono mt-1">
+              SKU: {product.sku}
             </p>
           )}
-          {product.ribbon && (
-            <Badge className="inline-block px-3 py-1 bg-osvid-orange text-white rounded-full text-sm">
-              {product.ribbon}
-            </Badge>
+        </div>
+
+        {/* Pricing Block */}
+        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-baseline gap-3">
+          <span className="text-3xl sm:text-4xl font-black text-orange-600">
+            {formatCurrency("NGN", currentPrice)}
+          </span>
+          {hasDiscount && (
+            <span className="text-lg text-slate-400 line-through font-semibold">
+              {formatCurrency("NGN", product.price)}
+            </span>
+          )}
+          {product.unit && (
+            <span className="text-xs text-slate-500 font-medium ml-auto">
+              Per {product.unit}
+            </span>
           )}
         </div>
 
+        {/* Stock Status Badge */}
+        <div className="flex items-center gap-2 text-xs font-semibold">
+          {inStock ? (
+            <div className="flex items-center gap-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-full">
+              <CheckCircle2 size={15} />
+              <span>In Stock ({product.stockQuantity} available)</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-rose-700 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-full">
+              <AlertTriangle size={15} />
+              <span>Currently Out of Stock</span>
+            </div>
+          )}
+          {isLowStock && (
+            <span className="text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1.5 rounded-full">
+              Low Stock Alert
+            </span>
+          )}
+        </div>
+
+        {/* Description */}
         {product.description && (
-          <div
-            dangerouslySetInnerHTML={{ __html: product.description }}
-            className="prose dark:prose-invert text-gray-700 leading-relaxed max-w-none"
-          />
+          <div className="prose prose-sm text-slate-600 leading-relaxed max-w-none border-t border-b border-slate-100 py-4">
+            <p>{product.description}</p>
+          </div>
         )}
 
-        <ProductPrice product={product} selectedVariant={selectedVariant} />
-
-        <ProductOptions
-          product={product}
-          selectedOptions={selectedOptions}
-          setSelectedOptions={setSelectedOptions}
-        />
-
-        {/* Quantity Selector */}
-        <div className="space-y-1.5">
-          <Label htmlFor="quantity" className="text-lg font-semibold">
-            Quantity
-          </Label>
-          <div className="flex items-center gap-2.5">
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => handleQuantityChange(-1)}
-              disabled={quantity <= 1}
-            >
-              -
-            </Button>
-            <Input
-              name="quantity"
-              type="number"
-              value={quantity}
-              onChange={(e) => {
-                const value = Math.max(1, Number(e.target.value));
-                setQuantity(
-                  availableQuantity ? Math.min(value, availableQuantity) : value
-                );
-              }}
-              className="w-24 text-center text-lg font-semibold"
-              disabled={!inStock}
-              min={1}
-              max={availableQuantity || undefined}
-            />
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => handleQuantityChange(1)}
-              disabled={!!availableQuantity && quantity >= availableQuantity}
-            >
-              +
-            </Button>
-            {!!availableQuantity &&
-              (availableQuantityExceeded || availableQuantity < 10) && (
-                <span
-                  className={`text-sm font-medium ${
-                    availableQuantityExceeded
-                      ? "text-red-600"
-                      : "text-orange-600"
-                  }`}
-                >
-                  Only {availableQuantity} left in stock!
+        {/* Quantity Controls & Add to Cart */}
+        {inStock ? (
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                Purchase Quantity ({product.unit || "Units"})
+              </Label>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center border border-slate-200 rounded-2xl bg-white p-1 shadow-sm">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleQuantityChange(-1)}
+                    disabled={quantity <= 1}
+                    className="h-10 w-10 rounded-xl text-slate-700 font-bold"
+                  >
+                    -
+                  </Button>
+                  <Input
+                    type="number"
+                    value={quantity}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val) && val >= 1) {
+                        setQuantity(Math.min(val, product.stockQuantity));
+                      }
+                    }}
+                    min={1}
+                    max={product.stockQuantity}
+                    className="w-16 text-center font-bold text-base border-0 focus-visible:ring-0 shadow-none"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleQuantityChange(1)}
+                    disabled={quantity >= product.stockQuantity}
+                    className="h-10 w-10 rounded-xl text-slate-700 font-bold"
+                  >
+                    +
+                  </Button>
+                </div>
+                <span className="text-xs text-slate-500">
+                  Total:{" "}
+                  <strong className="text-slate-900">
+                    {formatCurrency("NGN", currentPrice * quantity)}
+                  </strong>
                 </span>
-              )}
-            {!inStock && (
-              <span className="text-destructive font-semibold">
-                Out of Stock
-              </span>
-            )}
-          </div>
-        </div>
+              </div>
+            </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-col sm:flex-row gap-4 pt-2">
-          <Button
-            size="lg"
-            className="flex-1 py-6 text-lg"
-            onClick={handleAddToCart}
-            disabled={!inStock || isAddingToCart}
-          >
-            {isAddingToCart ? (
-              <span className="flex items-center gap-2">
-                <svg
-                  className="animate-spin h-5 w-5"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
+            <div className="flex flex-col sm:flex-row gap-3 pt-2">
+              <Button
+                size="lg"
+                onClick={handleAddToCart}
+                disabled={isAddingToCart}
+                className="flex-1 bg-orange-600 hover:bg-orange-700 text-white font-bold py-6 rounded-2xl shadow-lg shadow-orange-600/20 text-sm gap-2 transition-all"
+              >
+                <ShoppingCart size={18} />
+                {isAddingToCart ? "Adding to Cart..." : "Add to Order"}
+              </Button>
+
+              <a
+                href={waUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1"
+              >
+                <Button
+                  variant="outline"
+                  size="lg"
+                  className="w-full border-slate-300 hover:bg-slate-50 text-slate-800 font-bold py-6 rounded-2xl text-sm gap-2"
                 >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  ></circle>
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-                Adding...
-              </span>
-            ) : (
-              <span className="flex items-center gap-2">
-                <ShoppingCart className="h-5 w-5" />
-                {inStock ? "Add to Cart" : "Out of Stock"}
-              </span>
-            )}
-          </Button>
-
-          <Button
-            variant="outline"
-            size="lg"
-            className="flex-1 py-6 text-lg"
-            asChild
-          >
-            <a href={whatsappLink} target="_blank" rel="noopener noreferrer">
-              Contact via WhatsApp
-            </a>
-          </Button>
-        </div>
-
-        {/* Additional Product Information */}
-        {/* {!!product.additionalInfoSections?.length && (
-          <div className="space-y-4 mt-8">
-            <span className="flex items-center gap-2 text-base text-gray-700 font-semibold">
-              <InfoIcon className="size-5 text-osvid-blue" />
-              <span>Additional Product Information</span>
-            </span>
-            <Accordion type="multiple" className="w-full">
-              {product.additionalInfoSections.map((section, index) => (
-                <AccordionItem
-                  value={section.title || `section-${index}`}
-                  key={section.title || `section-${index}`}
-                  className="border-b border-gray-200"
-                >
-                  <AccordionTrigger className="text-lg font-medium text-gray-800 hover:no-underline py-4">
-                    {section.title}
-                  </AccordionTrigger>
-                  <AccordionContent>
-                    <div
-                      dangerouslySetInnerHTML={{
-                        __html: section.description || "",
-                      }}
-                      className="prose text-base text-gray-700 dark:prose-invert max-w-none pt-2 pb-4"
-                    />
-                  </AccordionContent>
-                </AccordionItem>
-              ))}
-            </Accordion>
+                  <PhoneCall size={18} className="text-emerald-600" />
+                  Direct WhatsApp Order
+                </Button>
+              </a>
+            </div>
           </div>
-        )} */}
+        ) : (
+          <div className="space-y-4 pt-2">
+            <BackInStockNotificationButton
+              product={
+                {
+                  _id: product.id,
+                  name: product.name,
+                  slug: product.slug,
+                } as any
+              }
+              selectedOptions={{}}
+              className="w-full py-6 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-bold text-sm"
+            />
+          </div>
+        )}
 
+        {/* Bulk Wholesale Discount Callout */}
         <BulkDiscount percentage={10} minItems={5} />
+
+        {/* Assurance Guarantees */}
+        <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-100 text-xs text-slate-600">
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={18} className="text-orange-600 shrink-0" />
+            <span>Industrial Quality Tested</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Truck size={18} className="text-orange-600 shrink-0" />
+            <span>Nationwide Nigerian Dispatch</span>
+          </div>
+        </div>
       </div>
     </div>
   );

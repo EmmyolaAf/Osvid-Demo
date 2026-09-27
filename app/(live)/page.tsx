@@ -1,5 +1,4 @@
 import dynamic from "next/dynamic";
-
 import HeroSection from "@/components/reusables/sections/hero-section";
 
 const FoundationSection = dynamic(
@@ -15,15 +14,19 @@ const ServicesOneSection = dynamic(
 import { Suspense } from "react";
 import { Loader } from "@/components/reusables/loader";
 import WhyChooseOsvid from "@/components/reusables/sections/why-choose-us";
-import { getServices } from "@/wix-api/services";
-import { getTestimonials } from "@/wix-api/testimonials";
+import { getServices, getTestimonials } from "@/lib/firebase/storefront";
 import CTASection from "@/components/reusables/sections/cta";
 import TestimonialsSection from "@/components/reusables/sections/TestimonialsSection";
 import BlogSection from "@/components/reusables/sections/BlogSection.server";
 
 export default async function Home() {
-  const services = await getServices();
-  const testimonials = await getTestimonials();
+  const [servicesRes, testimonialsRes] = await Promise.all([
+    getServices(),
+    getTestimonials(),
+  ]);
+
+  const services = servicesRes.success ? servicesRes.data : [];
+  const testimonials = testimonialsRes.success ? testimonialsRes.data : [];
 
   return (
     <main>
@@ -40,7 +43,7 @@ export default async function Home() {
         className="min-h-[calc(100vh-6rem)] text-white bg-gray-950 bg-blend-overlay bg-fixed"
       >
         <div className="container py-12 md:py-20 mx-auto flex flex-col justify-center items-center gap-6 md:gap-12">
-          <div className="text-center flex flex-col gap-8  max-w-5xl">
+          <div className="text-center flex flex-col gap-8 max-w-5xl">
             <h2 className="text-lg text-orange-500 font-semibold uppercase mx-auto w-max border-y py-2 border-orange-600">
               OUR SERVICES
             </h2>

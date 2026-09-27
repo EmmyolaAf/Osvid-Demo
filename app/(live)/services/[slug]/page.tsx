@@ -1,5 +1,5 @@
-// app/services/[slug]/page.tsx.
-import { getServices } from "@/wix-api/services";
+// app/(live)/services/[slug]/page.tsx
+import { getServices, getServiceBySlug } from "@/lib/firebase/storefront";
 import Image from "next/image";
 import { notFound } from "next/navigation";
 import { Metadata } from "next";
@@ -14,104 +14,91 @@ import {
 import companyData from "@/data/company";
 import ServiceCategoryCard from "@/components/reusables/cards/ServiceCategoryCard";
 import CTASection from "@/components/reusables/sections/cta";
-// You might need to import 'clsx' or 'cva' for conditional class names if not already globally available
-// import clsx from 'clsx'; // If you use it for active link styling
+import { Service } from "@/types";
+import { AlertCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
-// Type definition for service (ensure it matches your actual Service type)
-interface Service {
-  _id: string;
-  title: string;
-  slug: string;
-  description: string;
-  image?: string;
-  createdAt?: string;
+interface ServiceDetailPageProps {
+  params: Promise<{ slug: string }>;
 }
 
-export async function generateStaticParams() {
-  return [
-    { slug: "epoxy-flooring" },
-    { slug: "waterproofing-solutions" },
-    { slug: "concrete-repair" },
-  ];
-}
-
-// Generate dynamic metadata for each service page
 export async function generateMetadata({
   params,
 }: ServiceDetailPageProps): Promise<Metadata> {
   const { slug } = await params;
-  const services: Service[] = await getServices();
-  const service = services.find((s) => s.slug === slug);
+  const result = await getServiceBySlug(slug);
 
-  if (!service) {
+  if (!result.success || !result.data) {
     return {
-      title: "Service Not Found",
-      description: "The requested service could not be found.",
+      title: "Service Not Found | OSVID CHEMICALS LTD.",
+      description: "Industrial chemical and surface engineering solutions.",
     };
   }
 
+  const service = result.data;
+
   return {
-    title: `${service.title} | OSVID CHEMICALS LTD.`,
+    title: `${service.title} | OSVID CHEMICALS LTD. Services`,
     description: service.description
       ? service.description.substring(0, 160).replace(/<[^>]*>?/gm, "") + "..."
-      : `Learn more about ${service.title} services provided by OSVID CHEMICALS LTD.`,
+      : `Learn more about ${service.title} specialized chemical application services.`,
     openGraph: {
       images: service.image ? [service.image] : [],
     },
   };
 }
 
-type ServiceDetailPageProps = {
-  params: Promise<{ slug: string }>;
-};
-
 export default async function ServiceDetailPage({
   params,
 }: ServiceDetailPageProps) {
   const { slug } = await params;
 
-  // Fetch all services for the sidebar and the current service
-  const allServices: Service[] = await getServices();
-  const service = allServices.find((s) => s.slug === slug);
+  // Fetch all services for sidebar navigation
+  const allServicesRes = await getServices();
+  const allServices: Service[] = allServicesRes.success ? allServicesRes.data : [];
 
-  if (!service) return notFound();
+  // Fetch current service details
+  const serviceRes = await getServiceBySlug(slug);
+
+  if (!serviceRes.success || !serviceRes.data) {
+    const matched = allServices.find((s) => s.slug === slug);
+    if (!matched) return notFound();
+  }
+
+  const service = serviceRes.data || allServices.find((s) => s.slug === slug)!;
 
   // Determine previous and next service for navigation
   const currentIndex = allServices.findIndex((s) => s.slug === slug);
   const prevService = currentIndex > 0 ? allServices[currentIndex - 1] : null;
   const nextService =
-    currentIndex < allServices.length - 1
+    currentIndex >= 0 && currentIndex < allServices.length - 1
       ? allServices[currentIndex + 1]
       : null;
 
-  // Filter out the current service for "More Services" section
   const otherServices = allServices.filter((s) => s.slug !== slug);
-  const relatedServices = otherServices.slice(0, 3); // Display up to 3 other services
+  const relatedServices = otherServices.slice(0, 3);
 
-  // Fallback image if service.image is not provided
-  const heroImageUrl = service.image || "/images/bgs/default-service-hero.jpg"; // Path to a default hero image
+  const heroImageUrl = service.image || "/images/bgs/default-service-hero.jpg";
 
   return (
-    <main className="min-h-screen">
-      <div className="container py-8 md:py-12 px-4 md:px-14 flex flex-col md:flex-row gap-12">
+    <main className="min-h-screen bg-slate-50/50">
+      <div className="container mx-auto py-8 md:py-12 px-4 md:px-14 flex flex-col md:flex-row gap-12">
         {/* Left Sidebar */}
-        <aside className="w-full md:w-80 lg:w-96 p-6 bg-gray-50 border-b h-max md:border-b-0 md:border-r border-gray-200 flex-shrink-0">
+        <aside className="w-full md:w-80 lg:w-96 p-6 bg-white rounded-3xl border border-slate-200 shadow-sm h-max flex-shrink-0">
           <nav className="mb-8">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">
+            <h2 className="text-xs font-black text-orange-600 uppercase tracking-wider mb-4">
               Our Services
             </h2>
-            <ul className="space-y-2">
+            <ul className="space-y-1.5">
               {allServices.map((sidebarService) => (
                 <li key={sidebarService._id}>
                   <Link
                     href={`/services/${sidebarService.slug}`}
-                    // Add conditional styling for the active link if you use a client component for navigation
-                    className={`block p-3 rounded-lg font-medium transition-colors duration-200
-                              ${
-                                sidebarService.slug === slug
-                                  ? "bg-osvid-orange text-white"
-                                  : "text-gray-700 hover:bg-osvid-orange hover:text-white"
-                              }`}
+                    className={`block px-4 py-3 rounded-2xl font-bold text-sm transition-all duration-200 ${
+                      sidebarService.slug === slug
+                        ? "bg-orange-600 text-white shadow-md shadow-orange-600/20"
+                        : "text-slate-700 hover:bg-orange-50 hover:text-orange-700"
+                    }`}
                   >
                     {sidebarService.title}
                   </Link>
@@ -120,201 +107,135 @@ export default async function ServiceDetailPage({
             </ul>
           </nav>
 
-          {/* Contact Section */}
-          <div className="bg-white p-6 rounded-lg shadow-md hidden md:block ">
-            <h3 className="text-lg font-bold text-gray-800 mb-4">Contact Us</h3>
-            <div className="flex items-center gap-3 mb-2">
-              <FaPhoneAlt className="text-osvid-orange text-lg" />
+          {/* Contact Support Box */}
+          <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/80 hidden md:block">
+            <h3 className="text-sm font-bold text-slate-900 mb-3">
+              Request Technical Consultation
+            </h3>
+            <div className="flex items-center gap-3 mb-2 text-xs">
+              <FaPhoneAlt className="text-orange-600" />
               <a
                 href={`tel:${companyData.phone}`}
-                className="text-gray-700 hover:text-osvid-orange transition-colors duration-200"
+                className="text-slate-700 hover:text-orange-600 transition-colors font-medium"
               >
                 {companyData.phone}
               </a>
             </div>
-            <div className="flex items-center gap-3 mb-2">
-              <FaEnvelope className="text-osvid-orange text-lg" />
+            <div className="flex items-center gap-3 mb-2 text-xs">
+              <FaEnvelope className="text-orange-600" />
               <a
                 href={`mailto:${companyData.email}`}
-                className="text-gray-700 hover:text-osvid-orange transition-colors duration-200"
+                className="text-slate-700 hover:text-orange-600 transition-colors font-medium truncate"
               >
                 {companyData.email}
               </a>
             </div>
-            {companyData.socialMedia?.instagram && (
-              <div className="flex items-center gap-3">
-                <FaInstagram className="text-osvid-orange text-lg" />
-                <a
-                  href={`https://instagram.com/${companyData.socialMedia.instagram.replace(
-                    "@",
-                    ""
-                  )}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-gray-700 hover:text-osvid-orange transition-colors duration-200"
-                >
-                  {companyData.socialMedia.instagram}
-                </a>
-              </div>
-            )}
-            <p className="text-gray-600 text-sm mt-4">
-              Get in touch for expert advice and solutions.
+            <p className="text-slate-500 text-[11px] mt-3">
+              Our certified chemical technicians provide on-site inspection and quote evaluations.
             </p>
           </div>
         </aside>
-        {/* Main Content Area - This will contain all your existing service page content */}
-        <div className="flex-1 overflow-x-hidden">
-          {/* Hero Section - Image with Overlay and Title */}
-          <section className="relative h-96 md:h-[60vh] flex items-center justify-center overflow-hidden">
+
+        {/* Main Content Area */}
+        <div className="flex-1 overflow-x-hidden space-y-10">
+          {/* Hero Banner */}
+          <section className="relative h-72 md:h-96 rounded-3xl overflow-hidden flex items-center justify-center shadow-md">
             <Image
               src={heroImageUrl}
-              alt={service.title || "Service background image"}
+              alt={service.title}
               fill
-              sizes="100vw"
+              sizes="(max-width: 768px) 100vw, 70vw"
               priority
               className="object-cover w-full h-full"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent via-black/40" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/50 to-black/30" />
 
-            <div className="relative z-10 text-center px-4 md:px-12 max-w-4xl">
-              <h1 className="text-4xl md:text-6xl font-extrabold text-white leading-tight drop-shadow-lg">
+            <div className="relative z-10 text-center px-4 md:px-12 max-w-2xl">
+              <span className="inline-block px-3 py-1 rounded-full bg-orange-600/90 text-white text-xs font-bold uppercase tracking-wider mb-2">
+                Technical Service
+              </span>
+              <h1 className="text-3xl md:text-5xl font-black text-white drop-shadow-md">
                 {service.title}
               </h1>
             </div>
           </section>
 
-          {/* Main Content Section */}
-          <section className="container max-w-5xl mx-auto px-4 md:px-12 py-16 space-y-12">
-            {/* Service Description Article */}
-            <article className="prose prose-lg mx-auto max-w-none text-gray-700">
+          {/* Description Section */}
+          <section className="bg-white p-6 sm:p-10 rounded-3xl border border-slate-200 shadow-sm space-y-8">
+            <article className="prose prose-slate max-w-none leading-relaxed text-slate-700 text-sm sm:text-base">
               <div dangerouslySetInnerHTML={{ __html: service.description }} />
             </article>
 
-            {/* Expertise / Partnership Callout Section */}
-            <section className="bg-orange-50 p-8 md:p-12 rounded-xl shadow-lg space-y-6">
-              <h2 className="text-2xl md:text-3xl font-bold text-osvid-orange">
-                Partner with OSVID CHEMICALS LTD. Today!
+            {/* Partnership Callout */}
+            <div className="bg-orange-50/80 border border-orange-200/80 p-6 sm:p-8 rounded-2xl space-y-4">
+              <h2 className="text-xl font-bold text-orange-950">
+                Quality Assurance & Delivery Standards
               </h2>
-              <p className="text-gray-700 leading-relaxed">
-                Whether you need expert surface finishing, reliable bulk
-                chemical supply, or technical guidance — OSVID CHEMICALS LTD. is
-                ready to serve you with quality, commitment, and innovation.
+              <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+                Every technical application executed by OSVID CHEMICALS LTD. adheres to strict ASTM chemical formulation guidelines, surface preparation standards, and humidity-controlled curing schedules.
               </p>
-              <ul className="list-disc list-inside text-gray-800 space-y-2 pl-2 text-lg">
-                <li>Quality Without Compromise</li>
-                <li>Commitment to Excellence</li>
-                <li>Innovation-Driven Solutions</li>
-                <li>Expert Technical Consultation and Support</li>
-                <li>Professional Workmanship & Top-Tier Finishing</li>
+              <ul className="list-disc list-inside text-xs sm:text-sm text-slate-700 space-y-1.5 pl-1 font-medium">
+                <li>Factory-grade pure epoxy and chemical resins</li>
+                <li>Certified technical application engineers</li>
+                <li>Durability and adhesion warranty on all completed projects</li>
+                <li>Fast turnaround with minimal operational downtime</li>
               </ul>
+            </div>
 
-              <div className="flex flex-wrap gap-6 pt-4">
-                <div className="flex items-center gap-3">
-                  <FaPhoneAlt className="text-osvid-orange text-xl" />
-                  <a
-                    href={`tel:${companyData.phone}`}
-                    className="text-gray-700 hover:text-osvid-orange transition-colors duration-200"
-                  >
-                    {companyData.phone}
-                  </a>
-                </div>
-                <div className="flex items-center gap-3">
-                  <FaEnvelope className="text-osvid-orange text-xl" />
-                  <a
-                    href={`mailto:${companyData.email}`}
-                    className="text-gray-700 hover:text-osvid-orange transition-colors duration-200"
-                  >
-                    {companyData.email}
-                  </a>
-                </div>
-                {companyData.socialMedia?.instagram && (
-                  <div className="flex items-center gap-3">
-                    <FaInstagram className="text-osvid-orange text-xl" />
-                    <a
-                      href={`https://instagram.com/${companyData.socialMedia.instagram.replace(
-                        "@",
-                        ""
-                      )}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-gray-700 hover:text-osvid-orange transition-colors duration-200"
-                    >
-                      {companyData.socialMedia.instagram}
-                    </a>
-                  </div>
-                )}
-              </div>
-            </section>
-
-            {/* Next/Previous Service Navigation */}
-            <section className="flex justify-between items-center py-8 border-t border-b border-gray-200">
+            {/* Navigation Stepper */}
+            <div className="flex justify-between items-center pt-6 border-t border-slate-200 text-xs font-bold">
               {prevService ? (
                 <Link
                   href={`/services/${prevService.slug}`}
-                  className="group flex items-center gap-2 text-osvid-orange hover:text-orange-700 transition-colors duration-200 font-semibold"
+                  className="group flex items-center gap-2 text-orange-600 hover:text-orange-700"
                 >
-                  <FaArrowLeft className="text-lg group-hover:-translate-x-1 transition-transform" />
-                  {prevService.title}
+                  <FaArrowLeft className="text-sm group-hover:-translate-x-1 transition-transform" />
+                  <span>{prevService.title}</span>
                 </Link>
               ) : (
-                <div className="opacity-50 text-gray-500 flex items-center gap-2">
-                  <FaArrowLeft className="text-lg" />
-                  No Previous Service
-                </div>
+                <div />
               )}
 
-              {nextService ? (
+              {nextService && (
                 <Link
                   href={`/services/${nextService.slug}`}
-                  className="group flex items-center gap-2 text-osvid-orange hover:text-orange-700 transition-colors duration-200 font-semibold ml-auto"
+                  className="group flex items-center gap-2 text-orange-600 hover:text-orange-700 ml-auto"
                 >
-                  {/* ml-auto pushes to right */}
-                  {nextService.title}
-                  <FaArrowRight className="text-lg group-hover:translate-x-1 transition-transform" />
+                  <span>{nextService.title}</span>
+                  <FaArrowRight className="text-sm group-hover:translate-x-1 transition-transform" />
                 </Link>
-              ) : (
-                <div className="opacity-50 text-gray-500 flex items-center gap-2 ml-auto">
-                  No Next Service
-                  <FaArrowRight className="text-lg" />
-                </div>
               )}
-            </section>
+            </div>
           </section>
         </div>
       </div>
 
-      {/* More Services Section */}
+      {/* Related Services */}
       {relatedServices.length > 0 && (
-        <section className="py-12 container">
-          <h2 className="text-3xl md:text-4xl font-bold text-center text-gray-800 mb-10">
-            Explore More Services
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <section className="py-12 container mx-auto px-4 sm:px-6">
+          <div className="max-w-2xl mb-8">
+            <h2 className="text-2xl font-black text-slate-900">
+              Other Industrial Services
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Explore our complementary surface treatments and chemical manufacturing capabilities.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {relatedServices.map((relatedService, index) => (
               <ServiceCategoryCard
                 key={relatedService._id}
-                index={index + 1} // Use a more stable ID if possible, but for related it's fine
+                index={index + 1}
                 service={relatedService}
               />
             ))}
           </div>
-          {/* Optional: Button to view all services if not all are displayed */}
-          {otherServices.length > relatedServices.length && (
-            <div className="text-center mt-12">
-              <Link
-                href="/services"
-                className="inline-flex items-center justify-center px-8 py-4 border border-transparent text-base font-medium rounded-full text-white bg-osvid-orange hover:bg-orange-700 transition-colors shadow-lg"
-              >
-                View All Services &rarr;
-              </Link>
-            </div>
-          )}
         </section>
       )}
-      {/* Reusable CTA Section */}
+
       <CTASection
-        heading="Ready for Your Next Project?"
-        subheading="Need a reliable surface expert or chemical supplier? Trust OSVID CHEMICALS LTD. — where quality meets craftsmanship."
+        heading="Ready for Your Chemical Application Project?"
+        subheading="Consult with our senior technical chemical engineers today for tailored specifications and quotes."
       />
     </main>
   );

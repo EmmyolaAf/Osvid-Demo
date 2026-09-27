@@ -7,7 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import SuspensionBarrier from "@/components/auth/SuspensionBarrier";
-import { getBusinessSubscription } from "@/lib/firebase/subscription";
+import { getSubscriptionStatus, getBusinessSubscription } from "@/lib/firebase/subscription";
 import { BusinessSubscription } from "@/types/auth";
 import {
   LayoutDashboard,
@@ -41,8 +41,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     async function checkSub() {
-      const sub = await getBusinessSubscription();
-      setSubscription(sub);
+      const res = await getSubscriptionStatus();
+      if (res.success && res.data) {
+        setSubscription(res.data as any);
+      }
     }
     checkSub();
   }, []);
@@ -167,6 +169,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   // Intercept if hosting is suspended and current user is not Super Admin
   const isSuspendedForUser = Boolean(subscription?.isSuspended && !isSuperAdmin);
+
+  // Super Admin has a dedicated full-scale Landlord Command Center interface
+  if (isSuperAdmin || pathname.startsWith("/dashboard/super-admin")) {
+    return (
+      <ProtectedRoute allowedRoles={["super_admin"]}>
+        <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-orange-600 selection:text-white">
+          {children}
+          <Toaster richColors position="top-right" />
+        </div>
+      </ProtectedRoute>
+    );
+  }
 
   return (
     <ProtectedRoute allowedRoles={["super_admin", "admin", "manager"]}>
