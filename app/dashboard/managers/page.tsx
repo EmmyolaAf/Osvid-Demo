@@ -88,16 +88,23 @@ export default function ManagersManagementPage() {
 
     try {
       setSubmitting(true);
-      await createManager({
+      const res = await createManager({
         displayName: formData.displayName,
         email: formData.email,
         phoneNumber: formData.phoneNumber,
         customTitle: formData.customTitle || "Operations Manager",
-        password: formData.password || "OsvidManager2026!",
+        password: formData.password.trim() || undefined,
         permissions: createPermissions,
       });
 
-      toast.success(`Manager account created for ${formData.displayName}!`);
+      if (res?.temporaryPassword) {
+        toast.success(
+          `Manager account created! Temporary password: ${res.temporaryPassword}`,
+          { duration: 15000 }
+        );
+      } else {
+        toast.success(`Manager account created for ${formData.displayName}!`);
+      }
       setIsCreateOpen(false);
       setFormData({
         displayName: "",

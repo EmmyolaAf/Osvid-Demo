@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
-import { requireAdminOrSuperAdmin, authErrorResponse, AuthError, isSuperAdminEmail } from "@/lib/server/auth";
+import {
+  requireAdminOrSuperAdmin,
+  authErrorResponse,
+  AuthError,
+  assertStaffEndpointTarget,
+  assertCanManageTargetStaff,
+  assertCanUpdateStaffFields,
+} from "@/lib/server/auth";
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,7 +19,13 @@ export async function POST(req: NextRequest) {
     }
 
     // Lookup target user
-    const targetUser = await adminAuth.getUser(uid);
+    let targetUser;
+    try {
+      targetUser = await adminAuth.getUser(uid);
+    } catch (e: any) {
+      return NextResponse.json({ error: `User not found: ${e.message}` }, { status: 404 });
+    }
+
     const targetClaims = (targetUser.customClaims as any) || {};
     let targetRole = targetClaims.role;
     if (!targetRole) {
@@ -20,33 +33,50 @@ export async function POST(req: NextRequest) {
       targetRole = snap.data()?.role || "user";
     }
 
-    const isTargetSuper = isSuperAdminEmail(targetUser.email) || targetRole === "super_admin";
+    // Enforce Staff Administration Target Restriction
+    assertStaffEndpointTarget(targetRole);
 
-    // 1. Never allow deactivating the platform Super Admin
-    if (isTargetSuper && !isActive) {
-      throw new AuthError("Forbidden: Cannot deactivate the primary Super Admin account", 403);
-    }
+    const targetAccount = {
+      uid,
+      email: targetUser.email,
+      role: targetRole,
+    };
 
-    // 2. Admin cannot alter status of Admin or Super Admin accounts
-    if (!caller.isSuperAdmin) {
-      if (isTargetSuper || targetRole === "admin") {
-        throw new AuthError("Forbidden: Administrators cannot alter status of Administrator accounts", 403);
-      }
-    }
+    // Enforce authoritative hierarchy and field update constraints
+    assertCanManageTargetStaff(caller, targetAccount);
+    assertCanUpdateStaffFields(caller, targetAccount, { isActive });
 
+    const previousDisabled = targetUser.disabled;
+
+    // 1. Commit status change to Firebase Auth
     try {
       await adminAuth.updateUser(uid, { disabled: !isActive });
     } catch (e: any) {
-      console.warn("Firebase Auth toggle status warning:", e.message);
+      console.error("Firebase Auth toggle status error:", e);
+      return NextResponse.json(
+        { error: `Failed to update authentication account status: ${e.message}` },
+        { status: 500 }
+      );
     }
 
+    // 2. Commit status change to Firestore users collection
     try {
       await adminDb.collection("users").doc(uid).set(
         { isActive: Boolean(isActive), updatedAt: new Date().toISOString() },
         { merge: true }
       );
     } catch (e: any) {
-      console.warn("Firestore toggle status warning:", e.message);
+      console.error("Firestore toggle status error, reverting Auth status:", e);
+      // Compensation: Revert Auth account state
+      try {
+        await adminAuth.updateUser(uid, { disabled: previousDisabled });
+      } catch (revertErr) {
+        console.error("Failed to revert Auth user disabled state:", revertErr);
+      }
+      return NextResponse.json(
+        { error: `Failed to update user status in database: ${e.message}` },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ success: true, isActive: Boolean(isActive) });

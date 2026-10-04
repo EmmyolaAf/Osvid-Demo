@@ -1,203 +1,284 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { PRIMARY_SUPER_ADMIN_EMAIL, isSuperAdminEmail } from "@/lib/server/auth";
+import {
+  PRIMARY_SUPER_ADMIN_EMAIL,
+  isSuperAdminEmail,
+  assertCanCreateStaffRole,
+  assertStaffEndpointTarget,
+  assertCanManageTargetStaff,
+  assertCanUpdateStaffFields,
+  assertCanDeleteStaff,
+  ServerAuthUser,
+  AuthError,
+  generateSecureTemporaryPassword,
+} from "@/lib/server/auth";
 
-/**
- * Simulates the server-side RBAC decision engine used in the staff administration routes.
- */
-function evaluateStaffCreation(
-  caller: { role: string; email: string; isSuperAdmin: boolean },
-  requestedRole: string,
-  requestedEmail: string
-): { allowed: boolean; assignedRole?: string; error?: string } {
-  const cleanEmail = requestedEmail.trim().toLowerCase();
-
-  // Rule 1: No one can create a super_admin or use the primary super admin email
-  if (requestedRole === "super_admin" || isSuperAdminEmail(cleanEmail)) {
-    return { allowed: false, error: "Super Admin accounts cannot be created via API" };
-  }
-
-  // Rule 2: Non-staff or managers cannot create staff
-  if (caller.role !== "admin" && caller.role !== "super_admin") {
-    return { allowed: false, error: "Unauthorized: Insufficient administrative privileges" };
-  }
-
-  // Rule 3: Admin callers may ONLY create Managers
-  if (!caller.isSuperAdmin) {
-    if (requestedRole && requestedRole !== "manager") {
-      return { allowed: false, error: "Administrators are only permitted to create Manager accounts" };
-    }
-    return { allowed: true, assignedRole: "manager" };
-  }
-
-  // Rule 4: Super Admin may create Admin or Manager
-  return { allowed: true, assignedRole: requestedRole === "manager" ? "manager" : "admin" };
-}
-
-function evaluateStaffUpdate(
-  caller: { uid: string; role: string; isSuperAdmin: boolean },
-  target: { uid: string; role: string; email: string },
-  updates: { role?: string; isActive?: boolean }
-): { allowed: boolean; error?: string } {
-  const isTargetSuper = isSuperAdminEmail(target.email) || target.role === "super_admin";
-
-  // Rule 1: Target is Super Admin
-  if (isTargetSuper) {
-    if (!caller.isSuperAdmin) {
-      return { allowed: false, error: "Administrators cannot modify Super Admin accounts" };
-    }
-    if (updates.isActive === false) {
-      return { allowed: false, error: "Cannot deactivate the primary Super Admin account" };
-    }
-    if (updates.role && updates.role !== "super_admin") {
-      return { allowed: false, error: "Cannot demote the primary Super Admin account" };
-    }
-  }
-
-  // Rule 2: Cannot grant 'super_admin' role to anyone
-  if (updates.role === "super_admin" && !isTargetSuper) {
-    return { allowed: false, error: "Cannot grant Super Admin role via update" };
-  }
-
-  // Rule 3: Admin restrictions
-  if (!caller.isSuperAdmin) {
-    // Admin cannot modify another Admin
-    if (target.role === "admin" && target.uid !== caller.uid) {
-      return { allowed: false, error: "Administrators cannot modify other Administrator accounts" };
-    }
-
-    // Admin cannot promote a Manager to Admin
-    if (target.role === "manager" && updates.role && updates.role !== "manager") {
-      return { allowed: false, error: "Administrators cannot promote Managers to Administrator" };
-    }
-  }
-
-  // Rule 4: Manager or User caller cannot update staff
-  if (caller.role !== "admin" && caller.role !== "super_admin") {
-    return { allowed: false, error: "Unauthorized" };
-  }
-
-  return { allowed: true };
-}
-
-function evaluateStaffDeletion(
-  caller: { uid: string; role: string; isSuperAdmin: boolean },
-  target: { uid: string; role: string; email: string }
-): { allowed: boolean; error?: string } {
-  // Prevent self-deletion
-  if (target.uid === caller.uid) {
-    return { allowed: false, error: "Self-deletion is not permitted" };
-  }
-
-  // Super Admin cannot be deleted
-  if (isSuperAdminEmail(target.email) || target.role === "super_admin") {
-    return { allowed: false, error: "Super Admin account cannot be deleted" };
-  }
-
-  // Caller authorization
-  if (caller.role !== "admin" && caller.role !== "super_admin") {
-    return { allowed: false, error: "Unauthorized" };
-  }
-
-  // Admin cannot delete Admin
-  if (!caller.isSuperAdmin && target.role === "admin") {
-    return { allowed: false, error: "Administrators cannot delete Administrator accounts" };
-  }
-
-  return { allowed: true };
-}
-
-// ===============================================================
-// TESTS
-// ===============================================================
-
-test("Super Admin can create an Admin and a Manager", () => {
-  const superAdminCaller = {
-    role: "super_admin",
-    email: PRIMARY_SUPER_ADMIN_EMAIL,
-    isSuperAdmin: true,
+// Helpers to create mock caller representations
+function createMockUser(params: {
+  uid: string;
+  email: string;
+  role: "super_admin" | "admin" | "manager" | "user";
+}): ServerAuthUser {
+  const isSuperAdmin = params.role === "super_admin" || isSuperAdminEmail(params.email);
+  return {
+    uid: params.uid,
+    email: params.email,
+    displayName: "Mock User",
+    role: params.role,
+    isSuperAdmin,
+    isAdmin: isSuperAdmin || params.role === "admin",
+    isManager: params.role === "manager",
+    isStaff: isSuperAdmin || params.role === "admin" || params.role === "manager",
+    isCustomer: params.role === "user",
+    isActive: true,
+    tokenClaims: { role: params.role },
   };
+}
 
-  const createAdmin = evaluateStaffCreation(superAdminCaller, "admin", "newadmin@osvid.com");
-  assert.equal(createAdmin.allowed, true);
-  assert.equal(createAdmin.assignedRole, "admin");
+const superAdminCaller = createMockUser({
+  uid: "super-1",
+  email: PRIMARY_SUPER_ADMIN_EMAIL,
+  role: "super_admin",
+});
 
-  const createMgr = evaluateStaffCreation(superAdminCaller, "manager", "newmgr@osvid.com");
-  assert.equal(createMgr.allowed, true);
-  assert.equal(createMgr.assignedRole, "manager");
+const adminCaller = createMockUser({
+  uid: "admin-1",
+  email: "admin@osvid.com",
+  role: "admin",
+});
+
+const managerCaller = createMockUser({
+  uid: "manager-1",
+  email: "manager@osvid.com",
+  role: "manager",
+});
+
+const customerCaller = createMockUser({
+  uid: "user-1",
+  email: "customer@example.com",
+  role: "user",
+});
+
+// ===============================================================
+// 1. STAFF CREATION TESTS
+// ===============================================================
+
+test("Super Admin can create an Admin and a Manager via assertCanCreateStaffRole", () => {
+  const adminRole = assertCanCreateStaffRole(superAdminCaller, "admin", "newadmin@osvid.com");
+  assert.equal(adminRole, "admin");
+
+  const managerRole = assertCanCreateStaffRole(superAdminCaller, "manager", "newmgr@osvid.com");
+  assert.equal(managerRole, "manager");
 });
 
 test("Admin can create a Manager, but CANNOT create an Admin or Super Admin", () => {
-  const adminCaller = {
-    role: "admin",
-    email: "tenantadmin@osvid.com",
-    isSuperAdmin: false,
-  };
+  // Allowed: Manager
+  const mgrRole = assertCanCreateStaffRole(adminCaller, "manager", "ops@osvid.com");
+  assert.equal(mgrRole, "manager");
 
-  // Allowed to create manager
-  const createMgr = evaluateStaffCreation(adminCaller, "manager", "ops@osvid.com");
-  assert.equal(createMgr.allowed, true);
-  assert.equal(createMgr.assignedRole, "manager");
+  // Forbidden: Admin
+  assert.throws(
+    () => assertCanCreateStaffRole(adminCaller, "admin", "otheradmin@osvid.com"),
+    (err: any) => err instanceof AuthError && err.status === 403
+  );
 
-  // Denied creating an admin
-  const createAdmin = evaluateStaffCreation(adminCaller, "admin", "otheradmin@osvid.com");
-  assert.equal(createAdmin.allowed, false);
-  assert.match(createAdmin.error || "", /only permitted to create Manager accounts/);
-
-  // Denied creating a super admin
-  const createSuper = evaluateStaffCreation(adminCaller, "super_admin", "superfake@osvid.com");
-  assert.equal(createSuper.allowed, false);
-  assert.match(createSuper.error || "", /Super Admin accounts cannot be created/);
+  // Forbidden: Super Admin
+  assert.throws(
+    () => assertCanCreateStaffRole(adminCaller, "super_admin", "fake@osvid.com"),
+    (err: any) => err instanceof AuthError && err.status === 403
+  );
 });
 
-test("Manager or Customer cannot create any staff accounts", () => {
-  const managerCaller = { role: "manager", email: "mgr@osvid.com", isSuperAdmin: false };
-  const userCaller = { role: "user", email: "user@osvid.com", isSuperAdmin: false };
+test("Super Admin cannot create account with super_admin role or using primary owner email", () => {
+  assert.throws(
+    () => assertCanCreateStaffRole(superAdminCaller, "super_admin", "another@osvid.com"),
+    (err: any) => err instanceof AuthError && err.status === 403
+  );
 
-  assert.equal(evaluateStaffCreation(managerCaller, "manager", "test@osvid.com").allowed, false);
-  assert.equal(evaluateStaffCreation(userCaller, "manager", "test@osvid.com").allowed, false);
+  assert.throws(
+    () => assertCanCreateStaffRole(superAdminCaller, "admin", PRIMARY_SUPER_ADMIN_EMAIL),
+    (err: any) => err instanceof AuthError && err.status === 403
+  );
 });
+
+test("Staff creation rejects requests attempting to create 'user' (customer) accounts", () => {
+  assert.throws(
+    () => assertCanCreateStaffRole(superAdminCaller, "user", "cust@example.com"),
+    (err: any) => err instanceof AuthError && err.status === 400
+  );
+
+  assert.throws(
+    () => assertCanCreateStaffRole(adminCaller, "user", "cust@example.com"),
+    (err: any) => err instanceof AuthError && err.status === 400
+  );
+});
+
+// ===============================================================
+// 2. STAFF TARGET RESTRICTIONS
+// ===============================================================
+
+test("assertStaffEndpointTarget strictly rejects customer accounts and allows staff", () => {
+  // Staff roles succeed
+  assert.doesNotThrow(() => assertStaffEndpointTarget("admin"));
+  assert.doesNotThrow(() => assertStaffEndpointTarget("manager"));
+  assert.doesNotThrow(() => assertStaffEndpointTarget("super_admin"));
+
+  // Customer role throws 400
+  assert.throws(
+    () => assertStaffEndpointTarget("user"),
+    (err: any) => err instanceof AuthError && err.status === 400
+  );
+
+  // Undefined or arbitrary role throws 400
+  assert.throws(
+    () => assertStaffEndpointTarget(undefined),
+    (err: any) => err instanceof AuthError && err.status === 400
+  );
+  assert.throws(
+    () => assertStaffEndpointTarget("guest"),
+    (err: any) => err instanceof AuthError && err.status === 400
+  );
+});
+
+// ===============================================================
+// 3. STAFF MANAGEMENT & HIERARCHY TESTS
+// ===============================================================
+
+test("Admin CANNOT manage other Admins or Super Admins", () => {
+  const otherAdmin = { uid: "admin-2", email: "otheradmin@osvid.com", role: "admin" };
+  const superAdminTarget = { uid: "super-1", email: PRIMARY_SUPER_ADMIN_EMAIL, role: "super_admin" };
+
+  assert.throws(
+    () => assertCanManageTargetStaff(adminCaller, otherAdmin),
+    (err: any) => err instanceof AuthError && err.status === 403
+  );
+
+  assert.throws(
+    () => assertCanManageTargetStaff(adminCaller, superAdminTarget),
+    (err: any) => err instanceof AuthError && err.status === 403
+  );
+});
+
+test("Admin CAN manage a Manager", () => {
+  const managerTarget = { uid: "manager-2", email: "warehouse@osvid.com", role: "manager" };
+  assert.doesNotThrow(() => assertCanManageTargetStaff(adminCaller, managerTarget));
+});
+
+test("Staff administration endpoints reject targeting customer accounts", () => {
+  const customerTarget = { uid: "cust-1", email: "shopper@gmail.com", role: "user" };
+
+  assert.throws(
+    () => assertCanManageTargetStaff(adminCaller, customerTarget),
+    (err: any) => err instanceof AuthError && err.status === 400
+  );
+
+  assert.throws(
+    () => assertCanManageTargetStaff(superAdminCaller, customerTarget),
+    (err: any) => err instanceof AuthError && err.status === 400
+  );
+});
+
+// ===============================================================
+// 4. STAFF FIELD UPDATES
+// ===============================================================
 
 test("Admin CANNOT promote a Manager to Admin or Super Admin", () => {
-  const adminCaller = { uid: "adm-1", role: "admin", isSuperAdmin: false };
-  const managerTarget = { uid: "mgr-1", role: "manager", email: "mgr@osvid.com" };
+  const managerTarget = { uid: "manager-2", email: "ops@osvid.com", role: "manager" };
 
-  const promoteToAdmin = evaluateStaffUpdate(adminCaller, managerTarget, { role: "admin" });
-  assert.equal(promoteToAdmin.allowed, false);
-  assert.match(promoteToAdmin.error || "", /cannot promote Managers/);
+  assert.throws(
+    () => assertCanUpdateStaffFields(adminCaller, managerTarget, { role: "admin" }),
+    (err: any) => err instanceof AuthError && err.status === 403
+  );
 
-  const promoteToSuper = evaluateStaffUpdate(adminCaller, managerTarget, { role: "super_admin" });
-  assert.equal(promoteToSuper.allowed, false);
+  assert.throws(
+    () => assertCanUpdateStaffFields(adminCaller, managerTarget, { role: "super_admin" }),
+    (err: any) => err instanceof AuthError && err.status === 403
+  );
 });
 
-test("Admin CANNOT modify or delete another Admin account", () => {
-  const adminCaller = { uid: "adm-1", role: "admin", isSuperAdmin: false };
-  const otherAdmin = { uid: "adm-2", role: "admin", email: "other@osvid.com" };
+test("Super Admin cannot be demoted or deactivated", () => {
+  const superTarget = { uid: "super-1", email: PRIMARY_SUPER_ADMIN_EMAIL, role: "super_admin" };
 
-  const updateOther = evaluateStaffUpdate(adminCaller, otherAdmin, { isActive: false });
-  assert.equal(updateOther.allowed, false);
-  assert.match(updateOther.error || "", /cannot modify other Administrator accounts/);
+  // Cannot deactivate
+  assert.throws(
+    () => assertCanUpdateStaffFields(superAdminCaller, superTarget, { isActive: false }),
+    (err: any) => err instanceof AuthError && err.status === 403
+  );
 
-  const deleteOther = evaluateStaffDeletion(adminCaller, otherAdmin);
-  assert.equal(deleteOther.allowed, false);
-  assert.match(deleteOther.error || "", /cannot delete Administrator accounts/);
+  // Cannot demote
+  assert.throws(
+    () => assertCanUpdateStaffFields(superAdminCaller, superTarget, { role: "admin" }),
+    (err: any) => err instanceof AuthError && err.status === 403
+  );
 });
 
-test("Primary Super Admin account is protected against demotion, deactivation and deletion", () => {
-  const superAdminCaller = { uid: "super-1", role: "super_admin", isSuperAdmin: true };
-  const superAdminTarget = { uid: "super-1", role: "super_admin", email: PRIMARY_SUPER_ADMIN_EMAIL };
+// ===============================================================
+// 5. STAFF DELETION
+// ===============================================================
 
-  // Cannot deactivate Super Admin
-  const deact = evaluateStaffUpdate(superAdminCaller, superAdminTarget, { isActive: false });
-  assert.equal(deact.allowed, false);
-  assert.match(deact.error || "", /Cannot deactivate/);
+test("Staff self-deletion is strictly forbidden", () => {
+  assert.throws(
+    () => assertCanDeleteStaff(adminCaller, { uid: "admin-1", email: "admin@osvid.com", role: "admin" }),
+    (err: any) => err instanceof AuthError && err.status === 400
+  );
 
-  // Cannot demote Super Admin
-  const demote = evaluateStaffUpdate(superAdminCaller, superAdminTarget, { role: "admin" });
-  assert.equal(demote.allowed, false);
-  assert.match(demote.error || "", /Cannot demote/);
+  assert.throws(
+    () => assertCanDeleteStaff(superAdminCaller, { uid: "super-1", email: PRIMARY_SUPER_ADMIN_EMAIL, role: "super_admin" }),
+    (err: any) => err instanceof AuthError && err.status === 400
+  );
+});
 
-  // Cannot delete Super Admin
-  const del = evaluateStaffDeletion(superAdminCaller, superAdminTarget);
-  assert.equal(del.allowed, false);
+test("Primary Super Admin account CANNOT be deleted by anyone", () => {
+  const superTarget = { uid: "super-1", email: PRIMARY_SUPER_ADMIN_EMAIL, role: "super_admin" };
+
+  assert.throws(
+    () => assertCanDeleteStaff(adminCaller, superTarget),
+    (err: any) => err instanceof AuthError && err.status === 403
+  );
+
+  // Even if caller had another super admin token, primary cannot be deleted
+  assert.throws(
+    () => assertCanDeleteStaff(superAdminCaller, superTarget),
+    (err: any) => err instanceof AuthError && (err.status === 400 || err.status === 403)
+  );
+});
+
+test("Admin CANNOT delete other Admins, but CAN delete Managers", () => {
+  const otherAdmin = { uid: "admin-2", email: "otheradmin@osvid.com", role: "admin" };
+  const managerTarget = { uid: "manager-3", email: "cleaner@osvid.com", role: "manager" };
+
+  assert.throws(
+    () => assertCanDeleteStaff(adminCaller, otherAdmin),
+    (err: any) => err instanceof AuthError && err.status === 403
+  );
+
+  assert.doesNotThrow(() => assertCanDeleteStaff(adminCaller, managerTarget));
+});
+
+test("Staff deletion rejects customer accounts", () => {
+  const customerTarget = { uid: "cust-9", email: "buyer@gmail.com", role: "user" };
+
+  assert.throws(
+    () => assertCanDeleteStaff(superAdminCaller, customerTarget),
+    (err: any) => err instanceof AuthError && err.status === 400
+  );
+});
+
+// ===============================================================
+// 6. TEMPORARY PASSWORD GENERATOR
+// ===============================================================
+
+test("generateSecureTemporaryPassword produces strong, non-predictable temporary passwords", () => {
+  const pwd1 = generateSecureTemporaryPassword();
+  const pwd2 = generateSecureTemporaryPassword();
+
+  assert.notEqual(pwd1, pwd2);
+  assert.ok(pwd1.length >= 12);
+  assert.notEqual(pwd1, "OsvidManager2026!");
+  assert.notEqual(pwd1, "OsvidAdmin2026!");
+  // Contains special characters and mixed case
+  assert.match(pwd1, /[A-Z]/);
+  assert.match(pwd1, /[a-z]/);
+  assert.match(pwd1, /[0-9]/);
+  assert.match(pwd1, /[!@#$%&*#]/);
 });

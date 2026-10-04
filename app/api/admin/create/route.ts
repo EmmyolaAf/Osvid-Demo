@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { DEFAULT_MANAGER_PERMISSIONS, UserRole } from "@/types/auth";
-import { requireAdminOrSuperAdmin, authErrorResponse, AuthError, isSuperAdminEmail } from "@/lib/server/auth";
+import {
+  requireAdminOrSuperAdmin,
+  authErrorResponse,
+  AuthError,
+  assertCanCreateStaffRole,
+  generateSecureTemporaryPassword,
+} from "@/lib/server/auth";
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,7 +15,16 @@ export async function POST(req: NextRequest) {
     const caller = await requireAdminOrSuperAdmin(req);
 
     const body = await req.json();
-    const { email, password, displayName, phoneNumber, businessName, customTitle, role, permissions } = body;
+    const {
+      email,
+      password,
+      displayName,
+      phoneNumber,
+      businessName,
+      customTitle,
+      role,
+      permissions,
+    } = body;
 
     if (!email || !displayName) {
       return NextResponse.json(
@@ -20,41 +35,54 @@ export async function POST(req: NextRequest) {
 
     const cleanEmail = email.trim().toLowerCase();
 
-    // Prevent anyone from creating a super_admin or creating an account with the primary super admin email
-    if (role === "super_admin" || isSuperAdminEmail(cleanEmail)) {
-      throw new AuthError("Forbidden: Super Admin accounts cannot be created via API", 403);
-    }
+    // 2. Authoritative role hierarchy check
+    const assignedRole: UserRole = assertCanCreateStaffRole(
+      caller,
+      role,
+      cleanEmail
+    );
 
-    // 2. Enforce Role Hierarchy:
-    // - Admin may ONLY create Managers
-    // - Super Admin may create Admins or Managers
-    let assignedRole: UserRole;
-    if (caller.isSuperAdmin) {
-      assignedRole = role === "manager" ? "manager" : "admin";
-    } else {
-      // Caller is Admin: must only create manager
-      if (role && role !== "manager") {
-        throw new AuthError("Forbidden: Administrators are only permitted to create Manager accounts", 403);
+    // 3. Password handling: explicit sufficiently strong password or secure temporary password
+    let userPassword = "";
+    let temporaryPasswordIssued: string | null = null;
+
+    if (password && typeof password === "string" && password.trim().length > 0) {
+      const trimmedPwd = password.trim();
+      if (trimmedPwd.length < 8) {
+        throw new AuthError(
+          "Password must be at least 8 characters long",
+          400
+        );
       }
-      assignedRole = "manager";
+      userPassword = trimmedPwd;
+    } else {
+      userPassword = generateSecureTemporaryPassword();
+      temporaryPasswordIssued = userPassword;
     }
 
-    const userPassword = password || (assignedRole === "manager" ? "OsvidManager2026!" : "OsvidAdmin2026!");
     const userName = displayName.trim();
-    const title = customTitle || businessName || (assignedRole === "manager" ? "Operations Manager" : "Tenant Store Account");
+    const title =
+      customTitle ||
+      businessName ||
+      (assignedRole === "manager"
+        ? "Operations Manager"
+        : "Tenant Store Account");
 
-    const assignedPermissions = permissions || (assignedRole === "manager" ? DEFAULT_MANAGER_PERMISSIONS : {
-      canManageProducts: true,
-      canManageOrders: true,
-      canViewFinancials: true,
-      canManageWebsite: true,
-      canManageCustomers: true,
-      canManageDiscounts: true,
-    });
+    const assignedPermissions =
+      permissions ||
+      (assignedRole === "manager"
+        ? DEFAULT_MANAGER_PERMISSIONS
+        : {
+            canManageProducts: true,
+            canManageOrders: true,
+            canViewFinancials: true,
+            canManageWebsite: true,
+            canManageCustomers: true,
+            canManageDiscounts: true,
+          });
 
-    let uid = `user_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-
-    // 3. Create or update user in Firebase Auth
+    // 4. Create user in Firebase Auth (fail-closed, no fabricated UID)
+    let uid: string;
     try {
       const userRecord = await adminAuth.createUser({
         email: cleanEmail,
@@ -64,18 +92,16 @@ export async function POST(req: NextRequest) {
       });
       uid = userRecord.uid;
     } catch (authErr: any) {
-      if (authErr.code === "auth/email-already-exists") {
-        const existing = await adminAuth.getUserByEmail(cleanEmail);
-        uid = existing.uid;
-        if (password) {
-          await adminAuth.updateUser(uid, { password: userPassword, displayName: userName });
-        }
-      } else {
-        console.warn("Firebase Auth creation warning:", authErr.message);
-      }
+      console.error("Firebase Auth creation error:", authErr);
+      return NextResponse.json(
+        {
+          error: `Failed to create authentication user: ${authErr.message}`,
+        },
+        { status: authErr.code === "auth/email-already-exists" ? 409 : 500 }
+      );
     }
 
-    // 4. Set custom claims in Firebase Auth
+    // 5. Set custom claims in Firebase Auth (with compensation on failure)
     try {
       await adminAuth.setCustomUserClaims(uid, {
         role: assignedRole,
@@ -84,10 +110,21 @@ export async function POST(req: NextRequest) {
         permissions: assignedPermissions,
       });
     } catch (claimErr: any) {
-      console.warn("Could not set custom claims:", claimErr.message);
+      console.error("Failed to set custom claims, compensating:", claimErr);
+      try {
+        await adminAuth.deleteUser(uid);
+      } catch (compensationErr) {
+        console.error("Compensation delete failed:", compensationErr);
+      }
+      return NextResponse.json(
+        {
+          error: `Failed to initialize user authorization claims: ${claimErr.message}`,
+        },
+        { status: 500 }
+      );
     }
 
-    // 5. Save profile in Firestore users collection
+    // 6. Save profile in Firestore users collection (with compensation on failure)
     const profileData = {
       uid,
       email: cleanEmail,
@@ -103,15 +140,31 @@ export async function POST(req: NextRequest) {
     };
 
     try {
-      await adminDb.collection("users").doc(uid).set(profileData, { merge: true });
+      await adminDb.collection("users").doc(uid).set(profileData);
     } catch (dbErr: any) {
-      console.warn("Firestore Admin save warning:", dbErr.message);
+      console.error("Firestore Admin profile save error, compensating:", dbErr);
+      try {
+        await adminAuth.deleteUser(uid);
+      } catch (compensationErr) {
+        console.error("Compensation delete failed:", compensationErr);
+      }
+      return NextResponse.json(
+        {
+          error: `Failed to establish user profile in database: ${dbErr.message}`,
+        },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({
       success: true,
-      message: `${assignedRole === "manager" ? "Manager" : "Administrator"} "${userName}" created successfully!`,
+      message: `${
+        assignedRole === "manager" ? "Manager" : "Administrator"
+      } "${userName}" created successfully!`,
       user: profileData,
+      ...(temporaryPasswordIssued
+        ? { temporaryPassword: temporaryPasswordIssued }
+        : {}),
     });
   } catch (err: any) {
     console.error("API create user error:", err);

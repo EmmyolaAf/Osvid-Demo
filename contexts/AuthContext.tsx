@@ -43,7 +43,9 @@ interface AuthContextType {
   register: (email: string, pass: string, name: string, phone?: string) => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
-  createManager: (data: ManagerCreateInput) => Promise<void>;
+  createManager: (
+    data: ManagerCreateInput
+  ) => Promise<{ user: UserProfile; temporaryPassword?: string }>;
   updateUserRole: (uid: string, newRole: UserRole) => Promise<void>;
   toggleUserStatus: (uid: string, isActive: boolean) => Promise<void>;
   deleteUser: (uid: string) => Promise<void>;
@@ -220,7 +222,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       },
       body: JSON.stringify({
         email: data.email.trim().toLowerCase(),
-        password: data.password || "OsvidManager2026!",
+        password: data.password?.trim() || undefined,
         displayName: data.displayName.trim(),
         phoneNumber: data.phoneNumber || "",
         customTitle: data.customTitle || "Operations Manager",
@@ -241,7 +243,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error(result.error || "Failed to create manager account");
     }
 
-    return result.user;
+    return {
+      user: result.user,
+      temporaryPassword: result.temporaryPassword,
+    };
   }, [userProfile]);
 
   const updateUserRole = useCallback(async (uid: string, newRole: UserRole) => {

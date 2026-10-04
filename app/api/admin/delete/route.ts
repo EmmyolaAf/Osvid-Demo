@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
-import { requireAdminOrSuperAdmin, authErrorResponse, AuthError, isSuperAdminEmail } from "@/lib/server/auth";
+import {
+  requireAdminOrSuperAdmin,
+  authErrorResponse,
+  AuthError,
+  assertCanDeleteStaff,
+} from "@/lib/server/auth";
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,17 +16,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "User UID is required" }, { status: 400 });
     }
 
-    // Prevent self-deletion via administrative endpoint
-    if (uid === caller.uid) {
-      throw new AuthError("Forbidden: Self-deletion is not permitted", 400);
-    }
-
     // Lookup target user
     let targetUser;
     try {
       targetUser = await adminAuth.getUser(uid);
     } catch (e: any) {
-      return NextResponse.json({ error: `User not found: ${e.message}` }, { status: 404 });
+      // If not in Auth, check if in Firestore
+      const snap = await adminDb.collection("users").doc(uid).get();
+      if (!snap.exists) {
+        return NextResponse.json({ error: `User not found: ${e.message}` }, { status: 404 });
+      }
+      targetUser = {
+        uid,
+        email: snap.data()?.email,
+        customClaims: { role: snap.data()?.role },
+      };
     }
 
     const targetClaims = (targetUser.customClaims as any) || {};
@@ -31,33 +40,58 @@ export async function POST(req: NextRequest) {
       targetRole = snap.data()?.role || "user";
     }
 
-    const isTargetSuper = isSuperAdminEmail(targetUser.email) || targetRole === "super_admin";
+    // Enforce hierarchy and deletion rules
+    assertCanDeleteStaff(caller, {
+      uid,
+      email: targetUser.email,
+      role: targetRole,
+    });
 
-    // 1. Super Admin cannot be deleted
-    if (isTargetSuper) {
-      throw new AuthError("Forbidden: The primary Super Admin account cannot be deleted", 403);
-    }
+    let authDeleted = false;
+    let firestoreDeleted = false;
+    let authError: string | null = null;
+    let firestoreError: string | null = null;
 
-    // 2. Admin cannot delete another Admin or Super Admin
-    if (!caller.isSuperAdmin) {
-      if (targetRole === "admin") {
-        throw new AuthError("Forbidden: Administrators cannot delete other Administrator accounts", 403);
+    try {
+      await adminAuth.deleteUser(uid);
+      authDeleted = true;
+    } catch (e: any) {
+      if (e.code === "auth/user-not-found") {
+        authDeleted = true; // Safely idempotent / retryable
+      } else {
+        authError = e.message;
+        console.error("Firebase Auth delete user error:", e);
       }
     }
 
     try {
-      await adminAuth.deleteUser(uid);
-    } catch (e: any) {
-      console.warn("Firebase Auth delete user warning:", e.message);
-    }
-
-    try {
       await adminDb.collection("users").doc(uid).delete();
+      firestoreDeleted = true;
     } catch (e: any) {
-      console.warn("Firestore delete user warning:", e.message);
+      firestoreError = e.message;
+      console.error("Firestore delete user error:", e);
     }
 
-    return NextResponse.json({ success: true, message: "User deleted successfully" });
+    if (!authDeleted || !firestoreDeleted) {
+      return NextResponse.json(
+        {
+          error: "Deletion operation failed or partially succeeded",
+          details: {
+            authDeleted,
+            firestoreDeleted,
+            authError,
+            firestoreError,
+          },
+          retryable: true,
+        },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: "Staff account deleted successfully",
+    });
   } catch (err: any) {
     return authErrorResponse(err);
   }

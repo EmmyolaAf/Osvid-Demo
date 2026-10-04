@@ -106,7 +106,7 @@ export default function SuperAdminDashboard() {
   const [newAdminEmail, setNewAdminEmail] = useState("");
   const [newAdminName, setNewAdminName] = useState("");
   const [newAdminBusiness, setNewAdminBusiness] = useState("Tenant Store Account");
-  const [newAdminPassword, setNewAdminPassword] = useState("OsvidAdmin2026!");
+  const [newAdminPassword, setNewAdminPassword] = useState("");
   const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [newAdminPhone, setNewAdminPhone] = useState("");
 
@@ -223,7 +223,7 @@ export default function SuperAdminDashboard() {
           email: newAdminEmail.trim().toLowerCase(),
           displayName: newAdminName.trim(),
           businessName: newAdminBusiness.trim() || "Tenant Store Account",
-          password: newAdminPassword || "OsvidAdmin2026!",
+          password: newAdminPassword.trim() || undefined,
           phoneNumber: newAdminPhone.trim(),
         }),
       });
@@ -242,13 +242,20 @@ export default function SuperAdminDashboard() {
         }
       }
 
-      toast.success(`Tenant Store Account "${newAdminName}" created with full administrative permissions!`);
+      if (data.temporaryPassword) {
+        toast.success(
+          `Tenant Administrator created! Temporary password: ${data.temporaryPassword}`,
+          { duration: 15000 }
+        );
+      } else {
+        toast.success(`Tenant Store Account "${newAdminName}" created with full administrative permissions!`);
+      }
       setIsAddAdminOpen(false);
       setNewAdminEmail("");
       setNewAdminName("");
       setNewAdminPhone("");
       setNewAdminBusiness("Tenant Store Account");
-      setNewAdminPassword("OsvidAdmin2026!");
+      setNewAdminPassword("");
       await loadData();
     } catch (e: any) {
       toast.error(e.message || "Failed to create administrator");
@@ -1475,14 +1482,13 @@ export default function SuperAdminDashboard() {
               </div>
 
               <div>
-                <Label className="text-xs font-bold text-slate-700 uppercase">Admin Initial Password *</Label>
+                <Label className="text-xs font-bold text-slate-700 uppercase">Admin Initial Password (optional)</Label>
                 <div className="relative mt-1">
                   <Input
                     type={showAdminPassword ? "text" : "password"}
                     value={newAdminPassword}
                     onChange={(e) => setNewAdminPassword(e.target.value)}
-                    placeholder="e.g. OsvidAdmin2026!"
-                    required
+                    placeholder="Leave blank for secure auto-generated password"
                     className="pr-10 h-10 bg-slate-50 border-slate-200 text-slate-900 rounded-xl font-mono text-xs"
                   />
                   <button

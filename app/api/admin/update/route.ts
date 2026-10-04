@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
-import { requireAdminOrSuperAdmin, authErrorResponse, AuthError, isSuperAdminEmail } from "@/lib/server/auth";
+import {
+  requireAdminOrSuperAdmin,
+  authErrorResponse,
+  AuthError,
+  isSuperAdminEmail,
+  assertStaffEndpointTarget,
+  assertCanManageTargetStaff,
+  assertCanUpdateStaffFields,
+} from "@/lib/server/auth";
 
 export async function POST(req: NextRequest) {
   try {
@@ -8,7 +16,17 @@ export async function POST(req: NextRequest) {
     const caller = await requireAdminOrSuperAdmin(req);
 
     const body = await req.json();
-    const { uid, email, password, displayName, phoneNumber, businessName, isActive, permissions, role } = body;
+    const {
+      uid,
+      email,
+      password,
+      displayName,
+      phoneNumber,
+      businessName,
+      isActive,
+      permissions,
+      role,
+    } = body;
 
     if (!uid) {
       return NextResponse.json(
@@ -39,50 +57,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const isTargetSuperAdmin = isSuperAdminEmail(targetAuthUser.email) || targetRole === "super_admin";
+    // 3. Enforce Staff Administration Target Restriction
+    // Target must be a staff account (admin, manager, super_admin); cannot manage ordinary customers
+    assertStaffEndpointTarget(targetRole);
 
-    // 3. Enforce Hierarchy & Protection Constraints:
-    // A. Protect Super Admin:
-    if (isTargetSuperAdmin) {
-      if (!caller.isSuperAdmin) {
-        throw new AuthError("Forbidden: Administrators cannot modify Super Admin accounts", 403);
-      }
-      // Accidental demotion / deactivation prevention for platform owner
-      if (isActive === false) {
-        throw new AuthError("Forbidden: Cannot deactivate the primary Super Admin account", 403);
-      }
-      if (role && role !== "super_admin") {
-        throw new AuthError("Forbidden: Cannot demote the primary Super Admin account", 403);
-      }
-    }
+    const targetAccount = {
+      uid,
+      email: targetAuthUser.email,
+      role: targetRole,
+    };
 
-    // B. Prevent assigning 'super_admin' role to anyone
-    if (role === "super_admin" && !isTargetSuperAdmin) {
-      throw new AuthError("Forbidden: Cannot grant Super Admin role via update", 403);
-    }
+    // 4. Enforce authoritative hierarchy and field update constraints
+    assertCanManageTargetStaff(caller, targetAccount);
+    assertCanUpdateStaffFields(caller, targetAccount, { role, isActive });
 
-    // C. Rules for Admin callers:
-    if (!caller.isSuperAdmin) {
-      // Admin cannot modify an Admin account (unless self-editing permitted details without privilege escalation)
-      if (targetRole === "admin" && uid !== caller.uid) {
-        throw new AuthError("Forbidden: Administrators cannot modify other Administrator accounts", 403);
-      }
-
-      // Admin modifying self: cannot change their own role, status, or permissions
-      if (uid === caller.uid) {
-        if (role && role !== "admin") {
-          throw new AuthError("Forbidden: Cannot alter your own administrative role", 403);
-        }
-        if (isActive !== undefined && !isActive) {
-          throw new AuthError("Forbidden: Cannot deactivate your own administrator account", 403);
-        }
-      }
-
-      // Admin modifying staff: cannot promote manager to admin
-      if (targetRole === "manager" && role && role !== "manager") {
-        throw new AuthError("Forbidden: Administrators cannot promote Managers to Administrator", 403);
-      }
-    }
+    const isTargetSuperAdmin =
+      isSuperAdminEmail(targetAuthUser.email) || targetRole === "super_admin";
 
     // Determine final effective role for target
     const finalRole = isTargetSuperAdmin
@@ -93,62 +83,97 @@ export async function POST(req: NextRequest) {
 
     const authUpdates: any = {};
     if (email) authUpdates.email = email.trim().toLowerCase();
-    if (password && password.trim().length >= 6) authUpdates.password = password.trim();
+    if (password && typeof password === "string" && password.trim().length > 0) {
+      const trimmedPwd = password.trim();
+      if (trimmedPwd.length < 8) {
+        throw new AuthError("Password must be at least 8 characters long", 400);
+      }
+      authUpdates.password = trimmedPwd;
+    }
     if (displayName) authUpdates.displayName = displayName.trim();
     if (isActive !== undefined) authUpdates.disabled = !isActive;
 
-    // 4. Commit core credentials to Firebase Auth
+    // 5. Commit core credentials to Firebase Auth
     if (Object.keys(authUpdates).length > 0) {
       try {
         await adminAuth.updateUser(uid, authUpdates);
       } catch (authErr: any) {
         console.error("Firebase Auth credential update error:", authErr);
         return NextResponse.json(
-          { error: `Firebase Auth error: ${authErr.message || "Failed to update authentication credentials"}` },
+          {
+            error: `Firebase Auth error: ${
+              authErr.message || "Failed to update authentication credentials"
+            }`,
+          },
           { status: 500 }
         );
       }
     }
 
-    // 5. Update custom claims in Firebase Auth
+    // 6. Update custom claims in Firebase Auth (fail-closed, do not swallow)
     const updatedClaims = {
       ...existingClaims,
       role: finalRole,
-      customTitle: businessName?.trim() || existingClaims.customTitle || (finalRole === "manager" ? "Operations Manager" : "Tenant Store Account"),
-      phoneNumber: phoneNumber !== undefined ? phoneNumber.trim() : existingClaims.phoneNumber || "",
-      permissions: permissions || existingClaims.permissions || (finalRole === "manager" ? {
-        canManageProducts: true,
-        canManageOrders: true,
-        canViewFinancials: false,
-        canManageWebsite: false,
-        canManageCustomers: true,
-        canManageDiscounts: false,
-      } : {
-        canManageProducts: true,
-        canManageOrders: true,
-        canViewFinancials: true,
-        canManageWebsite: true,
-        canManageCustomers: true,
-        canManageDiscounts: true,
-      }),
+      customTitle:
+        businessName?.trim() ||
+        existingClaims.customTitle ||
+        (finalRole === "manager"
+          ? "Operations Manager"
+          : "Tenant Store Account"),
+      phoneNumber:
+        phoneNumber !== undefined
+          ? phoneNumber.trim()
+          : existingClaims.phoneNumber || "",
+      permissions:
+        permissions ||
+        existingClaims.permissions ||
+        (finalRole === "manager"
+          ? {
+              canManageProducts: true,
+              canManageOrders: true,
+              canViewFinancials: false,
+              canManageWebsite: false,
+              canManageCustomers: true,
+              canManageDiscounts: false,
+            }
+          : {
+              canManageProducts: true,
+              canManageOrders: true,
+              canViewFinancials: true,
+              canManageWebsite: true,
+              canManageCustomers: true,
+              canManageDiscounts: true,
+            }),
     };
 
     try {
       await adminAuth.setCustomUserClaims(uid, updatedClaims);
     } catch (claimErr: any) {
-      console.warn("Custom claims write warning:", claimErr.message);
+      console.error("Custom claims write error:", claimErr);
+      return NextResponse.json(
+        {
+          error: `Failed to persist custom authorization claims: ${claimErr.message}`,
+        },
+        { status: 500 }
+      );
     }
 
-    // 6. Persist in Firestore users collection
+    // 7. Persist in Firestore users collection (fail-closed, do not swallow)
     const profileUpdates: any = {
       uid,
       email: email ? email.trim().toLowerCase() : targetAuthUser.email,
-      displayName: displayName ? displayName.trim() : (targetAuthUser.displayName || displayName),
-      phoneNumber: phoneNumber !== undefined ? phoneNumber.trim() : updatedClaims.phoneNumber,
+      displayName: displayName
+        ? displayName.trim()
+        : targetAuthUser.displayName || displayName,
+      phoneNumber:
+        phoneNumber !== undefined
+          ? phoneNumber.trim()
+          : updatedClaims.phoneNumber,
       customTitle: updatedClaims.customTitle,
       role: finalRole,
       permissions: updatedClaims.permissions,
-      isActive: isActive !== undefined ? Boolean(isActive) : !targetAuthUser.disabled,
+      isActive:
+        isActive !== undefined ? Boolean(isActive) : !targetAuthUser.disabled,
       updatedAt: new Date().toISOString(),
     };
 
@@ -160,10 +185,16 @@ export async function POST(req: NextRequest) {
     try {
       await adminDb.collection("users").doc(uid).set(profileUpdates, { merge: true });
     } catch (dbErr: any) {
-      console.warn("Firestore database write warning:", dbErr.message);
+      console.error("Firestore database write error:", dbErr);
+      return NextResponse.json(
+        {
+          error: `Failed to persist updated user profile in database: ${dbErr.message}`,
+        },
+        { status: 500 }
+      );
     }
 
-    // 7. Retrieve confirmed state from Firebase Auth
+    // 8. Retrieve confirmed state from Firebase Auth
     const finalAuthUser = await adminAuth.getUser(uid);
     const confirmedProfile = {
       uid: finalAuthUser.uid,
@@ -179,7 +210,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Account "${confirmedProfile.displayName || confirmedProfile.email}" updated successfully!`,
+      message: `Account "${
+        confirmedProfile.displayName || confirmedProfile.email
+      }" updated successfully!`,
       user: confirmedProfile,
     });
   } catch (err: any) {

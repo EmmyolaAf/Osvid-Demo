@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { UserProfile } from "@/types/auth";
-import { requireAdminOrSuperAdmin, authErrorResponse, PRIMARY_SUPER_ADMIN_EMAIL } from "@/lib/server/auth";
+import {
+  requireAdminOrSuperAdmin,
+  authErrorResponse,
+  PRIMARY_SUPER_ADMIN_EMAIL,
+} from "@/lib/server/auth";
 
 export async function GET(req: NextRequest) {
   try {
     const caller = await requireAdminOrSuperAdmin(req);
-    const adminMap = new Map<string, UserProfile>();
+    const staffMap = new Map<string, UserProfile>();
 
-
-    // 1. Fetch from Firestore `users` collection (if available)
+    // 1. Fetch from Firestore `users` collection
     try {
       const snap = await adminDb.collection("users").get();
       snap.forEach((doc) => {
@@ -20,19 +23,29 @@ export async function GET(req: NextRequest) {
           data.email.trim().toLowerCase() !== PRIMARY_SUPER_ADMIN_EMAIL.toLowerCase() &&
           data.role !== "super_admin"
         ) {
-          adminMap.set(data.email.toLowerCase(), {
-            ...data,
-            uid: doc.id,
-            role: data.role || "admin",
-            customTitle: data.customTitle || "Tenant Store Account",
-          });
+          // Only include recognized staff roles: admin or manager
+          if (data.role === "admin" || data.role === "manager") {
+            // Admin caller can only see managers
+            if (!caller.isSuperAdmin && data.role !== "manager") {
+              return;
+            }
+
+            staffMap.set(data.email.toLowerCase(), {
+              ...data,
+              uid: doc.id,
+              role: data.role,
+              customTitle:
+                data.customTitle ||
+                (data.role === "manager" ? "Operations Manager" : "Tenant Store Account"),
+            });
+          }
         }
       });
     } catch (dbErr: any) {
       console.warn("adminDb list query warning:", dbErr.message);
     }
 
-    // 2. Fetch all users from Firebase Auth
+    // 2. Fetch from Firebase Auth to ensure freshly provisioned staff are represented
     try {
       const authUsers = await adminAuth.listUsers(100);
       for (const u of authUsers.users) {
@@ -41,50 +54,67 @@ export async function GET(req: NextRequest) {
           u.email.toLowerCase() !== PRIMARY_SUPER_ADMIN_EMAIL.toLowerCase()
         ) {
           const emailKey = u.email.toLowerCase();
-          const existing = adminMap.get(emailKey);
+          const existing = staffMap.get(emailKey);
           const claims = (u.customClaims as any) || {};
+          const effectiveRole = claims.role || existing?.role;
 
-          const profile: UserProfile = {
-            uid: u.uid,
-            email: u.email,
-            displayName: u.displayName || existing?.displayName || u.email.split("@")[0],
-            phoneNumber: claims.phoneNumber || u.phoneNumber || existing?.phoneNumber || "",
-            customTitle: claims.customTitle || existing?.customTitle || "Tenant Store Account",
-            role: claims.role || existing?.role || "admin",
-            permissions: claims.permissions || existing?.permissions || {
-              canManageProducts: true,
-              canManageOrders: true,
-              canViewFinancials: true,
-              canManageWebsite: true,
-              canManageCustomers: true,
-              canManageDiscounts: true,
-            },
-            isActive: !u.disabled,
-            createdAt: u.metadata?.creationTime || existing?.createdAt || new Date().toISOString(),
-            lastLoginAt: u.metadata?.lastSignInTime || existing?.lastLoginAt || new Date().toISOString(),
-          };
+          // Only include recognized staff roles: admin or manager
+          if (effectiveRole === "admin" || effectiveRole === "manager") {
+            // Admin caller can only see managers
+            if (!caller.isSuperAdmin && effectiveRole !== "manager") {
+              continue;
+            }
 
-          adminMap.set(emailKey, profile);
+            const profile: UserProfile = {
+              uid: u.uid,
+              email: u.email,
+              displayName:
+                u.displayName || existing?.displayName || u.email.split("@")[0],
+              phoneNumber:
+                claims.phoneNumber || u.phoneNumber || existing?.phoneNumber || "",
+              customTitle:
+                claims.customTitle ||
+                existing?.customTitle ||
+                (effectiveRole === "manager"
+                  ? "Operations Manager"
+                  : "Tenant Store Account"),
+              role: effectiveRole,
+              permissions: claims.permissions || existing?.permissions || {
+                canManageProducts: true,
+                canManageOrders: true,
+                canViewFinancials: effectiveRole === "admin",
+                canManageWebsite: effectiveRole === "admin",
+                canManageCustomers: true,
+                canManageDiscounts: effectiveRole === "admin",
+              },
+              isActive: !u.disabled,
+              createdAt:
+                u.metadata?.creationTime ||
+                existing?.createdAt ||
+                new Date().toISOString(),
+              lastLoginAt:
+                u.metadata?.lastSignInTime ||
+                existing?.lastLoginAt ||
+                new Date().toISOString(),
+            };
 
-          // Background sync to Firestore
-          try {
-            adminDb.collection("users").doc(u.uid).set(profile, { merge: true }).catch(() => {});
-          } catch (e) {}
+            staffMap.set(emailKey, profile);
+          }
         }
       }
     } catch (authErr: any) {
       console.warn("adminAuth listUsers warning:", authErr.message);
     }
 
-    const tenantAdmins = Array.from(adminMap.values()).sort(
+    const tenantStaff = Array.from(staffMap.values()).sort(
       (a, b) =>
         new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
     );
 
     return NextResponse.json({
       success: true,
-      admins: tenantAdmins,
-      total: tenantAdmins.length,
+      admins: tenantStaff,
+      total: tenantStaff.length,
     });
   } catch (err: any) {
     console.error("API get admin list error:", err);

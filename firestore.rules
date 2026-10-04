@@ -12,7 +12,8 @@ service cloud.firestore {
 
     function isSuperAdmin() {
       return isAuthenticated() && (
-        request.auth.token.email == 'abolarinwaemmanuelfree@gmail.com' ||
+        (request.auth.token.email != null &&
+         request.auth.token.email.lower() == 'abolarinwaemmanuelfree@gmail.com') ||
         request.auth.token.role == 'super_admin'
       );
     }
@@ -72,14 +73,22 @@ service cloud.firestore {
         isSuperAdmin()
       );
 
-      // Updates: Customers can update self, but CANNOT alter role/permissions/isActive
-      // Admins can update managers
-      // Super Admin can update anyone
+      // Updates:
+      // Customers can update self via field-level allowlist, strictly protecting server-owned fields.
+      // Admins can update managers.
+      // Super Admin can update accounts.
       allow update: if isAuthenticated() && (
         (request.auth.uid == userId &&
-         request.resource.data.role == resource.data.role &&
-         (!('permissions' in request.resource.data) || request.resource.data.permissions == resource.data.permissions) &&
-         (!('isActive' in request.resource.data) || request.resource.data.isActive == resource.data.isActive))
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+           'displayName', 'firstName', 'lastName', 'fullName',
+           'phoneNumber', 'photoURL', 'avatar',
+           'addresses', 'shippingAddress', 'billingAddress',
+           'preferences', 'updatedAt', 'lastLoginAt', 'email'
+         ]) &&
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+           'role', 'permissions', 'isActive', 'createdBy', 'createdAt',
+           'totalOrders', 'totalSpent', 'lastOrderDate', 'subscription'
+         ]))
         ||
         (isAdmin() &&
          resource.data.role == 'manager' &&
@@ -122,12 +131,11 @@ service cloud.firestore {
         )
       );
 
-      // Public / Customer order creation: must initialize with pending statuses
-      allow create: if request.resource.data.paymentStatus == 'pending'
-                    && request.resource.data.orderStatus == 'pending';
+      // Deny direct client order creation entirely.
+      // All orders are securely verified and written server-side by the Firebase Admin SDK.
+      allow create: if false;
 
       // Updates: only staff with order management permission
-      // (Payment verification runs via server-side Admin SDK)
       allow update: if hasManagerPermission('canManageOrders');
 
       allow delete: if isAdmin();
@@ -145,8 +153,9 @@ service cloud.firestore {
     // 5. SYSTEM SETTINGS & LEASE CONTROL (LANDLORD)
     // ===============================================================
     match /system_settings/{settingId} {
-      // Public / Staff read for runtime suspension and warning banners
-      allow read: if true;
+      // Accessible to staff to evaluate lease status and display warnings/suspension
+      // Excludes unauthenticated public visitors from seeing provider billing/renewal amounts
+      allow read: if isStaff() || isSuperAdmin();
 
       // STRICT PROTECTION: Only Super Admin landlord can modify licensing/killswitch
       allow write: if isSuperAdmin();
