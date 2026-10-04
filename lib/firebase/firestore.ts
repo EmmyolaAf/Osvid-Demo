@@ -13,7 +13,7 @@ import {
   serverTimestamp,
   Timestamp,
 } from "firebase/firestore";
-import { db } from "./client";
+import { auth, db } from "./client";
 import {
   UserProfile,
   UserRole,
@@ -97,7 +97,11 @@ export async function getTenantAdministrators(): Promise<UserProfile[]> {
   // 1. Try server-side consolidated discovery API
   if (typeof window !== "undefined") {
     try {
-      const res = await fetch(`/api/admin/list?t=${Date.now()}`, { cache: "no-store" });
+      const token = await auth.currentUser?.getIdToken();
+      const res = await fetch(`/api/admin/list?t=${Date.now()}`, {
+        cache: "no-store",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.admins)) {
@@ -687,6 +691,34 @@ export async function updateManagerProfile(
   uid: string,
   data: Partial<UserProfile>
 ): Promise<void> {
+  if (typeof window !== "undefined") {
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (token) {
+        const res = await fetch("/api/admin/update", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            uid,
+            displayName: data.displayName,
+            phoneNumber: data.phoneNumber,
+            businessName: data.customTitle,
+            permissions: data.permissions,
+            role: "manager",
+          }),
+        });
+        if (res.ok) {
+          return;
+        }
+      }
+    } catch (apiErr) {
+      console.warn("API update fallback to direct Firestore:", apiErr);
+    }
+  }
+
   try {
     const docRef = doc(db, "users", uid);
     await updateDoc(docRef, {

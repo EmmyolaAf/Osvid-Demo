@@ -1,0 +1,198 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // AUTHORIZATION HELPERS
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == 'abolarinwaemmanuelfree@gmail.com' ||
+        request.auth.token.role == 'super_admin'
+      );
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isSuperAdmin() || (
+        isAuthenticated() && (
+          request.auth.token.role == 'admin' ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+           getUserData().role == 'admin')
+        )
+      );
+    }
+
+    function isManager() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'manager' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         getUserData().role == 'manager')
+      );
+    }
+
+    function isStaff() {
+      return isAdmin() || isManager();
+    }
+
+    function hasManagerPermission(perm) {
+      return isAdmin() || (
+        isManager() && (
+          request.auth.token.permissions[perm] == true ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+           getUserData().permissions[perm] == true)
+        )
+      );
+    }
+
+    // ===============================================================
+    // 1. USERS & RBAC COLLECTION
+    // ===============================================================
+    match /users/{userId} {
+      // User can read self; Staff can read directory for operations
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        isStaff()
+      );
+
+      // Customer account creation on register: strictly role 'user'
+      allow create: if isAuthenticated() && (
+        (request.auth.uid == userId &&
+         request.resource.data.role == 'user' &&
+         !('permissions' in request.resource.data))
+        ||
+        isSuperAdmin()
+      );
+
+      // Updates: Customers can update self, but CANNOT alter role/permissions/isActive
+      // Admins can update managers
+      // Super Admin can update anyone
+      allow update: if isAuthenticated() && (
+        (request.auth.uid == userId &&
+         request.resource.data.role == resource.data.role &&
+         (!('permissions' in request.resource.data) || request.resource.data.permissions == resource.data.permissions) &&
+         (!('isActive' in request.resource.data) || request.resource.data.isActive == resource.data.isActive))
+        ||
+        (isAdmin() &&
+         resource.data.role == 'manager' &&
+         request.resource.data.role == 'manager')
+        ||
+        isSuperAdmin()
+      );
+
+      // Staff deletion is restricted to Super Admin (or server Admin SDK)
+      allow delete: if isSuperAdmin();
+    }
+
+    // ===============================================================
+    // 2. PRODUCT CATALOG & CATEGORIES
+    // ===============================================================
+    match /products/{productId} {
+      allow read: if true; // Public catalog
+      allow write: if hasManagerPermission('canManageProducts');
+    }
+
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if hasManagerPermission('canManageProducts');
+    }
+
+    match /product_categories/{categoryId} {
+      allow read: if true;
+      allow write: if hasManagerPermission('canManageProducts');
+    }
+
+    // ===============================================================
+    // 3. ORDERS & COMMERCE
+    // ===============================================================
+    match /orders/{orderId} {
+      // Customer reads their own orders; Staff reads all orders
+      allow read: if isStaff() || (
+        isAuthenticated() && (
+          resource.data.userId == request.auth.uid ||
+          resource.data.customerEmail == request.auth.token.email
+        )
+      );
+
+      // Public / Customer order creation: must initialize with pending statuses
+      allow create: if request.resource.data.paymentStatus == 'pending'
+                    && request.resource.data.orderStatus == 'pending';
+
+      // Updates: only staff with order management permission
+      // (Payment verification runs via server-side Admin SDK)
+      allow update: if hasManagerPermission('canManageOrders');
+
+      allow delete: if isAdmin();
+    }
+
+    // ===============================================================
+    // 4. DISCOUNTS & PROMOTIONS
+    // ===============================================================
+    match /discounts/{discountId} {
+      allow read: if true; // Public checkout code validation
+      allow write: if hasManagerPermission('canManageDiscounts');
+    }
+
+    // ===============================================================
+    // 5. SYSTEM SETTINGS & LEASE CONTROL (LANDLORD)
+    // ===============================================================
+    match /system_settings/{settingId} {
+      // Public / Staff read for runtime suspension and warning banners
+      allow read: if true;
+
+      // STRICT PROTECTION: Only Super Admin landlord can modify licensing/killswitch
+      allow write: if isSuperAdmin();
+    }
+
+    // ===============================================================
+    // 6. CMS & WEBSITE CONTENT
+    // ===============================================================
+    match /site_content/{contentId} {
+      allow read: if true;
+      allow write: if hasManagerPermission('canManageWebsite');
+    }
+
+    match /services/{serviceId} {
+      allow read: if true;
+      allow write: if hasManagerPermission('canManageWebsite');
+    }
+
+    match /blog_posts/{postId} {
+      allow read: if true;
+      allow write: if hasManagerPermission('canManageWebsite');
+    }
+
+    match /testimonials/{id} {
+      allow read: if true;
+      allow write: if hasManagerPermission('canManageWebsite');
+    }
+
+    match /teams/{id} {
+      allow read: if true;
+      allow write: if hasManagerPermission('canManageWebsite');
+    }
+
+    // ===============================================================
+    // 7. INQUIRIES & ALERTS
+    // ===============================================================
+    match /contact_submissions/{submissionId} {
+      allow create: if true;
+      allow read, delete: if hasManagerPermission('canManageCustomers');
+      allow update: if hasManagerPermission('canManageCustomers');
+    }
+
+    match /back_in_stock_requests/{requestId} {
+      allow create: if true;
+      allow read, delete: if hasManagerPermission('canManageProducts');
+      allow update: if hasManagerPermission('canManageProducts');
+    }
+  }
+}

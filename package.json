@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build && node scripts/sync-out.js",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/run-tests.mjs"
   },
   "dependencies": {
     "@emailjs/browser": "^4.4.1",

@@ -68,17 +68,6 @@ export default function FeaturedServicesSection({
   const chunkSize = getChunkSize();
   const slides = chunkArray(services, chunkSize);
 
-  // Auto-play functionality
-  useEffect(() => {
-    if (!isAutoPlaying || slides.length <= 1) return;
-
-    const interval = setInterval(() => {
-      paginate(1);
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [isAutoPlaying, currentIndex, slides.length]);
-
   // Navigation handlers
   const paginate = useCallback(
     (newDirection: number) => {
@@ -89,6 +78,18 @@ export default function FeaturedServicesSection({
     },
     [slides.length]
   );
+
+  // Auto-play functionality
+  useEffect(() => {
+    if (!isAutoPlaying || slides.length <= 1) return;
+
+    const interval = setInterval(() => {
+      paginate(1);
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [isAutoPlaying, currentIndex, slides.length, paginate]);
+
 
   // Swipe handlers for touch devices
   const swipeHandlers = useSwipeable({

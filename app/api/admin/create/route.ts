@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
-import { DEFAULT_MANAGER_PERMISSIONS } from "@/types/auth";
+import { DEFAULT_MANAGER_PERMISSIONS, UserRole } from "@/types/auth";
+import { requireAdminOrSuperAdmin, authErrorResponse, AuthError, isSuperAdminEmail } from "@/lib/server/auth";
 
 export async function POST(req: NextRequest) {
   try {
+    // 1. Authorize caller: Super Admin or Admin required
+    const caller = await requireAdminOrSuperAdmin(req);
+
     const body = await req.json();
     const { email, password, displayName, phoneNumber, businessName, customTitle, role, permissions } = body;
 
@@ -15,7 +19,26 @@ export async function POST(req: NextRequest) {
     }
 
     const cleanEmail = email.trim().toLowerCase();
-    const assignedRole = role === "manager" ? "manager" : "admin";
+
+    // Prevent anyone from creating a super_admin or creating an account with the primary super admin email
+    if (role === "super_admin" || isSuperAdminEmail(cleanEmail)) {
+      throw new AuthError("Forbidden: Super Admin accounts cannot be created via API", 403);
+    }
+
+    // 2. Enforce Role Hierarchy:
+    // - Admin may ONLY create Managers
+    // - Super Admin may create Admins or Managers
+    let assignedRole: UserRole;
+    if (caller.isSuperAdmin) {
+      assignedRole = role === "manager" ? "manager" : "admin";
+    } else {
+      // Caller is Admin: must only create manager
+      if (role && role !== "manager") {
+        throw new AuthError("Forbidden: Administrators are only permitted to create Manager accounts", 403);
+      }
+      assignedRole = "manager";
+    }
+
     const userPassword = password || (assignedRole === "manager" ? "OsvidManager2026!" : "OsvidAdmin2026!");
     const userName = displayName.trim();
     const title = customTitle || businessName || (assignedRole === "manager" ? "Operations Manager" : "Tenant Store Account");
@@ -31,7 +54,7 @@ export async function POST(req: NextRequest) {
 
     let uid = `user_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
-    // 1. Create or update user in Firebase Auth
+    // 3. Create or update user in Firebase Auth
     try {
       const userRecord = await adminAuth.createUser({
         email: cleanEmail,
@@ -52,7 +75,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Set custom claims in Firebase Auth
+    // 4. Set custom claims in Firebase Auth
     try {
       await adminAuth.setCustomUserClaims(uid, {
         role: assignedRole,
@@ -64,7 +87,7 @@ export async function POST(req: NextRequest) {
       console.warn("Could not set custom claims:", claimErr.message);
     }
 
-    // 3. Save profile in Firestore users collection
+    // 5. Save profile in Firestore users collection
     const profileData = {
       uid,
       email: cleanEmail,
@@ -74,6 +97,7 @@ export async function POST(req: NextRequest) {
       role: assignedRole,
       permissions: assignedPermissions,
       isActive: true,
+      createdBy: caller.uid,
       createdAt: new Date().toISOString(),
       lastLoginAt: new Date().toISOString(),
     };
@@ -91,10 +115,8 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: any) {
     console.error("API create user error:", err);
-    return NextResponse.json(
-      { error: err.message || "Failed to create account" },
-      { status: 500 }
-    );
+    return authErrorResponse(err);
   }
 }
+
 

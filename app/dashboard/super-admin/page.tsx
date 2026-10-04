@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { auth } from "@/lib/firebase/client";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import {
   getExecutiveGovernanceStats,
@@ -207,9 +208,17 @@ export default function SuperAdminDashboard() {
     }
     try {
       setSavingAction(true);
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) {
+        throw new Error("Authentication required to create administrator");
+      }
+
       const res = await fetch("/api/admin/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           email: newAdminEmail.trim().toLowerCase(),
           displayName: newAdminName.trim(),
@@ -264,9 +273,17 @@ export default function SuperAdminDashboard() {
 
     try {
       setSavingAction(true);
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) {
+        throw new Error("Authentication required to update administrator");
+      }
+
       const res = await fetch("/api/admin/update", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           uid: selectedAdmin.uid,
           email: editAdminEmail.trim().toLowerCase(),
@@ -295,18 +312,32 @@ export default function SuperAdminDashboard() {
   const handleToggleAdminStatus = async (adm: UserProfile) => {
     try {
       const newStatus = !adm.isActive;
-      await fetch("/api/admin/toggle-status", {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) {
+        throw new Error("Authentication required to alter admin status");
+      }
+
+      const res = await fetch("/api/admin/toggle-status", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ uid: adm.uid, isActive: newStatus }),
       });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to change admin status");
+      }
+
       await toggleUserStatus(adm.uid, newStatus);
       toast.success(`Tenant Admin status changed to ${newStatus ? "Active" : "Disabled"}`);
       setAdmins((prev) =>
         prev.map((a) => (a.uid === adm.uid ? { ...a, isActive: newStatus } : a))
       );
     } catch (e: any) {
-      toast.error("Failed to change admin status");
+      toast.error(e.message || "Failed to change admin status");
     }
   };
 
@@ -315,11 +346,25 @@ export default function SuperAdminDashboard() {
       return;
     }
     try {
-      await fetch("/api/admin/delete", {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) {
+        throw new Error("Authentication required to delete admin");
+      }
+
+      const res = await fetch("/api/admin/delete", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ uid: adm.uid }),
       });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to delete admin");
+      }
+
       toast.success(`Admin "${adm.displayName}" deleted successfully`);
       setAdmins((prev) => prev.filter((a) => a.uid !== adm.uid));
     } catch (e: any) {

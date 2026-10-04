@@ -1,0 +1,60 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == 'abolarinwaemmanuelfree@gmail.com' ||
+        request.auth.token.role == 'super_admin'
+      );
+    }
+
+    function isStaff() {
+      return isSuperAdmin() || (
+        isAuthenticated() && (
+          request.auth.token.role == 'admin' ||
+          request.auth.token.role == 'manager'
+        )
+      );
+    }
+
+    // Public storefront images (product catalog, site assets, blog media)
+    match /products/{allPaths=**} {
+      allow read: if true;
+      allow write: if isStaff() && request.resource.size < 10 * 1024 * 1024;
+    }
+
+    match /categories/{allPaths=**} {
+      allow read: if true;
+      allow write: if isStaff() && request.resource.size < 5 * 1024 * 1024;
+    }
+
+    match /site/{allPaths=**} {
+      allow read: if true;
+      allow write: if isStaff() && request.resource.size < 10 * 1024 * 1024;
+    }
+
+    match /blog/{allPaths=**} {
+      allow read: if true;
+      allow write: if isStaff() && request.resource.size < 10 * 1024 * 1024;
+    }
+
+    // User profile avatars
+    match /users/{userId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin())
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Default deny for all other storage paths
+    match /{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isStaff();
+    }
+  }
+}

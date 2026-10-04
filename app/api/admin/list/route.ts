@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { UserProfile } from "@/types/auth";
-
-const SUPER_ADMIN_EMAIL = "abolarinwaemmanuelfree@gmail.com";
+import { requireAdminOrSuperAdmin, authErrorResponse, PRIMARY_SUPER_ADMIN_EMAIL } from "@/lib/server/auth";
 
 export async function GET(req: NextRequest) {
   try {
+    const caller = await requireAdminOrSuperAdmin(req);
     const adminMap = new Map<string, UserProfile>();
+
 
     // 1. Fetch from Firestore `users` collection (if available)
     try {
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
         if (
           data &&
           data.email &&
-          data.email.trim().toLowerCase() !== SUPER_ADMIN_EMAIL.toLowerCase() &&
+          data.email.trim().toLowerCase() !== PRIMARY_SUPER_ADMIN_EMAIL.toLowerCase() &&
           data.role !== "super_admin"
         ) {
           adminMap.set(data.email.toLowerCase(), {
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
       for (const u of authUsers.users) {
         if (
           u.email &&
-          u.email.toLowerCase() !== SUPER_ADMIN_EMAIL.toLowerCase()
+          u.email.toLowerCase() !== PRIMARY_SUPER_ADMIN_EMAIL.toLowerCase()
         ) {
           const emailKey = u.email.toLowerCase();
           const existing = adminMap.get(emailKey);
@@ -87,10 +88,8 @@ export async function GET(req: NextRequest) {
     });
   } catch (err: any) {
     console.error("API get admin list error:", err);
-    return NextResponse.json(
-      { error: err.message || "Failed to fetch administrator directory" },
-      { status: 500 }
-    );
+    return authErrorResponse(err);
   }
 }
+
 

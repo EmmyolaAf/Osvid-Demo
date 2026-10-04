@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState, useMemo } from "react";
+import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from "react";
 import {
   User,
   signOut,
@@ -128,16 +128,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const refreshProfile = async () => {
+  const refreshProfile = useCallback(async () => {
     if (!user) return;
     const profile = await fetchUserProfile(user.uid);
     if (profile) setUserProfile(profile);
-  };
+  }, [user]);
 
   /**
    * Strict async login handler awaiting Firebase Auth & Firestore verification
    */
-  const login = async (email: string, pass: string): Promise<UserProfile> => {
+  const login = useCallback(async (email: string, pass: string): Promise<UserProfile> => {
     const authResult = await authenticateAndVerifyUser(email, pass);
 
     if (!authResult.success || !authResult.data) {
@@ -152,18 +152,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
 
     return profile;
-  };
+  }, []);
 
-  const loginWithGoogle = async () => {
+  const loginWithGoogle = useCallback(async () => {
     const cred = await signInWithPopup(auth, googleProvider);
     const profile = await fetchUserProfile(cred.user.uid);
     if (profile && !profile.isActive) {
       await signOut(auth);
       throw new Error("Your account has been deactivated. Please contact an administrator.");
     }
-  };
+  }, []);
 
-  const register = async (email: string, pass: string, name: string, phone?: string) => {
+  const register = useCallback(async (email: string, pass: string, name: string, phone?: string) => {
     const cred = await createUserWithEmailAndPassword(auth, email.trim(), pass);
     await updateProfile(cred.user, { displayName: name });
 
@@ -185,9 +185,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     await setDoc(doc(db, "users", cred.user.uid), newProfile, { merge: true });
     setUserProfile(newProfile);
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await signOut(auth);
     } catch (e) {
@@ -195,20 +195,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     setUser(null);
     setUserProfile(null);
-  };
+  }, []);
 
-  const resetPassword = async (email: string) => {
+
+  const resetPassword = useCallback(async (email: string) => {
     await sendPasswordResetEmail(auth, email.trim());
-  };
+  }, []);
 
-  const createManager = async (data: ManagerCreateInput) => {
+  const createManager = useCallback(async (data: ManagerCreateInput) => {
     if (!userProfile || (userProfile.role !== "admin" && userProfile.role !== "super_admin")) {
       throw new Error("Unauthorized: Only Admins can create Managers");
     }
 
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) {
+      throw new Error("Unauthorized: No active authentication session found");
+    }
+
     const res = await fetch("/api/admin/create", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
       body: JSON.stringify({
         email: data.email.trim().toLowerCase(),
         password: data.password || "OsvidManager2026!",
@@ -227,34 +236,70 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }),
     });
 
-    const result = await res.json();
+    const result = await res.json().catch(() => ({}));
     if (!res.ok || !result.success) {
       throw new Error(result.error || "Failed to create manager account");
     }
 
     return result.user;
-  };
+  }, [userProfile]);
 
-  const updateUserRole = async (uid: string, newRole: UserRole) => {
+  const updateUserRole = useCallback(async (uid: string, newRole: UserRole) => {
     if (!userProfile || (userProfile.role !== "super_admin" && userProfile.role !== "admin")) {
       throw new Error("Unauthorized: Insufficient permissions to change roles");
     }
     await updateRoleInDb(uid, newRole);
-  };
+  }, [userProfile]);
 
-  const toggleUserStatus = async (uid: string, isActive: boolean) => {
+  const toggleUserStatus = useCallback(async (uid: string, isActive: boolean) => {
     if (!userProfile || (userProfile.role !== "super_admin" && userProfile.role !== "admin")) {
       throw new Error("Unauthorized: Insufficient permissions");
     }
-    await toggleStatusInDb(uid, isActive);
-  };
 
-  const deleteUser = async (uid: string) => {
+    const token = await auth.currentUser?.getIdToken();
+    if (token) {
+      const res = await fetch("/api/admin/toggle-status", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ uid, isActive }),
+      });
+
+      if (!res.ok) {
+        const result = await res.json().catch(() => ({}));
+        throw new Error(result.error || "Failed to update user status");
+      }
+    } else {
+      await toggleStatusInDb(uid, isActive);
+    }
+  }, [userProfile]);
+
+  const deleteUser = useCallback(async (uid: string) => {
     if (!userProfile || (userProfile.role !== "super_admin" && userProfile.role !== "admin")) {
       throw new Error("Unauthorized: Insufficient permissions");
     }
-    await deleteUserRecord(uid);
-  };
+
+    const token = await auth.currentUser?.getIdToken();
+    if (token) {
+      const res = await fetch("/api/admin/delete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ uid }),
+      });
+
+      if (!res.ok) {
+        const result = await res.json().catch(() => ({}));
+        throw new Error(result.error || "Failed to delete user account");
+      }
+    } else {
+      await deleteUserRecord(uid);
+    }
+  }, [userProfile]);
 
   const role: UserRole = userProfile?.role || "user";
   const isSuperAdmin = Boolean(
@@ -287,7 +332,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       deleteUser,
       refreshProfile,
     }),
-    [user, userProfile, role, loading, isSuperAdmin, isAdmin, isManager, isStaff, isCustomer]
+    [
+      user,
+      userProfile,
+      role,
+      loading,
+      isSuperAdmin,
+      isAdmin,
+      isManager,
+      isStaff,
+      isCustomer,
+      login,
+      loginWithGoogle,
+      register,
+      logout,
+      resetPassword,
+      createManager,
+      updateUserRole,
+      toggleUserStatus,
+      deleteUser,
+      refreshProfile,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
