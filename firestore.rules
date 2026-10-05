@@ -74,12 +74,18 @@ service cloud.firestore {
     }
 
     // Evaluates whether the tenant application is active or suspended using the minimal runtime document.
-    // Checks that the document EXISTS (fail-closed if missing), manual killswitch flag, and hardSuspendAt threshold.
+    // Enforces full structural schema validity (fail-closed if missing, malformed, or suspended).
     function isSubscriptionOperational() {
       let subDoc = /databases/$(database)/documents/runtime_settings/subscription;
       return exists(subDoc) &&
-        get(subDoc).data.isSuspended != true &&
-        (!('hardSuspendAt' in get(subDoc).data) || get(subDoc).data.hardSuspendAt == null || request.time < get(subDoc).data.hardSuspendAt);
+        ('clientId' in get(subDoc).data) &&
+        get(subDoc).data.clientId == "osvid" &&
+        ('isSuspended' in get(subDoc).data) &&
+        get(subDoc).data.isSuspended is bool &&
+        get(subDoc).data.isSuspended == false &&
+        ('hardSuspendAt' in get(subDoc).data) &&
+        get(subDoc).data.hardSuspendAt is timestamp &&
+        request.time < get(subDoc).data.hardSuspendAt;
     }
 
     // ===============================================================
@@ -202,18 +208,15 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Provider subscription documents are strictly private to Super Admin
-    match /system_settings/subscription {
-      allow read, write: if isSuperAdmin();
-    }
-
-    match /system_settings/main_business {
-      allow read, write: if isSuperAdmin();
-    }
-
+    // Provider system settings: strictly private to Super Admin.
+    // Ordinary Admins and Managers MUST NOT be able to read subscription or main_business
+    // through any overlapping wildcard rule.
     match /system_settings/{settingId} {
-      // General non-subscription configuration (if any)
-      allow read: if isStaff() || isSuperAdmin();
+      allow read: if isSuperAdmin() || (
+        isStaff() &&
+        settingId != "subscription" &&
+        settingId != "main_business"
+      );
       allow write: if isSuperAdmin();
     }
 

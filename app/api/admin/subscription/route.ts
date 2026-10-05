@@ -196,6 +196,16 @@ export async function POST(req: NextRequest) {
 
     switch (action) {
       case "initialize": {
+        if (lookup.kind === "FOUND") {
+          return NextResponse.json(
+            {
+              error:
+                "Subscription is already configured. Use 'update-terms' to modify terms or 'bootstrap-runtime' to sync runtime state.",
+            },
+            { status: 409 }
+          );
+        }
+
         const {
           hostingExpiryDate,
           renewalAmountNgn,
@@ -220,6 +230,12 @@ export async function POST(req: NextRequest) {
           );
         }
 
+        if (renewalAmountNgn === undefined || renewalAmountNgn === null) {
+          return NextResponse.json(
+            { error: "renewalAmountNgn is required for initialization." },
+            { status: 400 }
+          );
+        }
         const validRenewal = Number(renewalAmountNgn);
         if (isNaN(validRenewal) || !Number.isFinite(validRenewal) || validRenewal < 0) {
           return NextResponse.json(
@@ -245,15 +261,50 @@ export async function POST(req: NextRequest) {
           );
         }
 
-        const name =
-          (businessName && typeof businessName === "string" && businessName.trim()) ||
-          OSVID_CLIENT_CONFIG.clientName;
+        let validatedBusinessName: string | undefined = undefined;
+        if (businessName !== undefined && businessName !== null) {
+          if (typeof businessName !== "string" || businessName.trim().length === 0 || businessName.length > 150) {
+            return NextResponse.json(
+              { error: "businessName must be a non-empty string of up to 150 characters." },
+              { status: 400 }
+            );
+          }
+          validatedBusinessName = businessName.trim();
+        }
+
+        let validatedAdminEmail: string | undefined = undefined;
+        if (adminEmail !== undefined && adminEmail !== null && adminEmail !== "") {
+          if (
+            typeof adminEmail !== "string" ||
+            adminEmail.length > 254 ||
+            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail.trim())
+          ) {
+            return NextResponse.json(
+              { error: "adminEmail must be a valid email format of up to 254 characters." },
+              { status: 400 }
+            );
+          }
+          validatedAdminEmail = adminEmail.trim().toLowerCase();
+        }
+
+        let validatedWarningNotice: string | undefined = undefined;
+        if (warningNotice !== undefined && warningNotice !== null) {
+          if (typeof warningNotice !== "string" || warningNotice.length > 500) {
+            return NextResponse.json(
+              { error: "warningNotice exceeds maximum allowed length of 500 characters." },
+              { status: 400 }
+            );
+          }
+          validatedWarningNotice = warningNotice.trim();
+        }
+
+        const name = validatedBusinessName || OSVID_CLIENT_CONFIG.clientName;
         const lifecycle = computeLifecycle(parsedExpiry.toISOString(), validGrace, false, false);
 
         updatedSub = {
           clientId: OSVID_CLIENT_CONFIG.clientId,
           businessName: name,
-          adminEmail: adminEmail || undefined,
+          ...(validatedAdminEmail ? { adminEmail: validatedAdminEmail } : {}),
           hostingPlan: plan,
           status: lifecycle.status,
           isSuspended: lifecycle.isSuspended,
@@ -262,9 +313,9 @@ export async function POST(req: NextRequest) {
           renewalAmountNgn: validRenewal,
           showWarning: false,
           warningNotice:
-            warningNotice ||
+            validatedWarningNotice ||
             "Hosting renewal due soon. Please settle your account to prevent service interruption.",
-          createdAt: currentSub?.createdAt || now,
+          createdAt: now,
           updatedAt: now,
           updatedBy: caller.email,
         };

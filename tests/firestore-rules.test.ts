@@ -80,15 +80,19 @@ test("firestore.rules denies direct client order creation entirely (server Admin
   assert.match(blockSnippet, /hasManagerPermission\('canManageOrders'\)/);
 });
 
-test("firestore.rules restricts system_settings read to staff and write strictly to Super Admin", () => {
+test("firestore.rules restricts system_settings read to Super Admin and staff excluding subscription docs", () => {
   const content = fs.readFileSync(rulesPath, "utf8");
 
   const systemBlock = content.slice(content.indexOf("match /system_settings/{settingId}"));
   const nextMatch = systemBlock.indexOf("match /site_content");
   const blockSnippet = systemBlock.slice(0, nextMatch);
 
-  // Not exposed to unauthenticated public visitors
-  assert.match(blockSnippet, /allow read:\s*if isStaff\(\) \|\| isSuperAdmin\(\);/);
+  // Wildcard staff read explicitly excludes 'subscription' and 'main_business'
+  assert.match(blockSnippet, /isSuperAdmin\(\)\s*\|\|\s*\(/);
+  assert.match(blockSnippet, /isStaff\(\)/);
+  assert.match(blockSnippet, /settingId\s*!=\s*['"]subscription['"]/);
+  assert.match(blockSnippet, /settingId\s*!=\s*['"]main_business['"]/);
+  assert.doesNotMatch(blockSnippet, /allow read:\s*if isStaff\(\)\s*\|\|\s*isSuperAdmin\(\);/);
   assert.match(blockSnippet, /allow write:\s*if isSuperAdmin\(\);/);
 });
 

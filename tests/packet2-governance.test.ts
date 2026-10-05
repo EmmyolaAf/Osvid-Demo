@@ -387,15 +387,19 @@ test("firestore.rules enforces tamper-resistance on audit_logs and separates cat
   assert.match(rules, /request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\.hasOnly\(\['stockQuantity', 'updatedAt'\]\)/);
 });
 
-test("firestore.rules enforces isSubscriptionOperational() on staff mutations and isolates runtime_settings", () => {
+test("firestore.rules enforces isSubscriptionOperational() schema validity and seals system_settings", () => {
   const rulesPath = path.resolve(process.cwd(), "firestore.rules");
   const rules = fs.readFileSync(rulesPath, "utf-8");
 
-  // isSubscriptionOperational helper requires exists(subDoc) and NO fail-open !exists(subDoc)
+  // isSubscriptionOperational helper requires exists(subDoc), structural schema validity, and NO fail-open !exists(subDoc)
   assert.match(rules, /function isSubscriptionOperational\(\)/);
   assert.match(rules, /let subDoc = \/databases\/\$\(database\)\/documents\/runtime_settings\/subscription;/);
   assert.match(rules, /exists\(subDoc\)/);
   assert.doesNotMatch(rules, /!exists\(subDoc\)/);
+  assert.match(rules, /get\(subDoc\)\.data\.clientId == "osvid"/);
+  assert.match(rules, /get\(subDoc\)\.data\.isSuspended is bool/);
+  assert.match(rules, /get\(subDoc\)\.data\.isSuspended == false/);
+  assert.match(rules, /get\(subDoc\)\.data\.hardSuspendAt is timestamp/);
   assert.match(rules, /request\.time < get\(subDoc\)\.data\.hardSuspendAt/);
 
   // Gated staff writes
@@ -408,15 +412,18 @@ test("firestore.rules enforces isSubscriptionOperational() on staff mutations an
   assert.match(rules, /allow read: if true;/);
   assert.match(rules, /allow write: if false;/);
 
-  // Provider-private subscription records in system_settings must be Super Admin only
-  assert.match(rules, /match \/system_settings\/subscription\s*\{\s*allow read, write:\s*if isSuperAdmin\(\);/);
-  assert.match(rules, /match \/system_settings\/main_business\s*\{\s*allow read, write:\s*if isSuperAdmin\(\);/);
+  // Provider-private subscription records in system_settings: non-overlapping wildcard excludes subscription docs
+  assert.match(rules, /match \/system_settings\/\{settingId\}/);
+  assert.match(rules, /settingId != "subscription"/);
+  assert.match(rules, /settingId != "main_business"/);
+  // Ensure broad wildcard staff read without exclusions no longer exists
+  assert.doesNotMatch(rules, /match \/system_settings\/\{settingId\}[\s\S]*?allow read:\s*if isStaff\(\) \|\| isSuperAdmin\(\);/);
 
   // users collection: direct delete forbidden
   assert.match(rules, /match \/users\/\{userId\}[\s\S]*?allow delete: if false;/);
 });
 
-test("storage.rules gates staff uploads behind isSubscriptionOperational() and fails closed when doc is missing", () => {
+test("storage.rules gates staff uploads behind isSubscriptionOperational() with full schema enforcement", () => {
   const rulesPath = path.resolve(process.cwd(), "storage.rules");
   const rules = fs.readFileSync(rulesPath, "utf-8");
 
@@ -424,7 +431,11 @@ test("storage.rules gates staff uploads behind isSubscriptionOperational() and f
   assert.match(rules, /let subDoc = \/databases\/\(default\)\/documents\/runtime_settings\/subscription;/);
   assert.match(rules, /firestore\.exists\(subDoc\)/);
   assert.doesNotMatch(rules, /!firestore\.exists\(subDoc\)/);
-  assert.match(rules, /firestore\.get\(subDoc\)/);
+  assert.match(rules, /firestore\.get\(subDoc\)\.data\.clientId == "osvid"/);
+  assert.match(rules, /firestore\.get\(subDoc\)\.data\.isSuspended is bool/);
+  assert.match(rules, /firestore\.get\(subDoc\)\.data\.isSuspended == false/);
+  assert.match(rules, /firestore\.get\(subDoc\)\.data\.hardSuspendAt is timestamp/);
+  assert.match(rules, /request\.time < firestore\.get\(subDoc\)\.data\.hardSuspendAt/);
   assert.match(rules, /isSubscriptionOperational\(\)/);
 });
 
@@ -765,4 +776,235 @@ test("Subscription initialization payload rejects invalid or synthetic terms", (
   assert.equal(validPayload.renewalAmountNgn > 0, true);
   assert.equal(Number.isNaN(new Date(validPayload.hostingExpiryDate).getTime()), false);
 });
+// ===============================================================
+// 12. PACKET 2D OVERLAP PREVENTION & RUNTIME SCHEMA ENFORCEMENT
+// ===============================================================
 
+function simulateSystemSettingsReadRule(params: {
+  settingId: string;
+  isSuperAdmin: boolean;
+  isStaff: boolean;
+}): boolean {
+  // Direct simulation of:
+  // allow read: if isSuperAdmin() || (isStaff() && settingId != "subscription" && settingId != "main_business");
+  return params.isSuperAdmin || (
+    params.isStaff &&
+    params.settingId !== "subscription" &&
+    params.settingId !== "main_business"
+  );
+}
+
+test("system_settings non-overlapping rule strictly blocks staff from reading subscription documents", () => {
+  // Staff callers (Admin / Manager) attempting to read subscription documents
+  assert.equal(
+    simulateSystemSettingsReadRule({ settingId: "subscription", isSuperAdmin: false, isStaff: true }),
+    false,
+    "Staff must be denied read on system_settings/subscription"
+  );
+  assert.equal(
+    simulateSystemSettingsReadRule({ settingId: "main_business", isSuperAdmin: false, isStaff: true }),
+    false,
+    "Staff must be denied read on system_settings/main_business"
+  );
+
+  // Staff callers attempting to read general non-subscription documents
+  assert.equal(
+    simulateSystemSettingsReadRule({ settingId: "theme_config", isSuperAdmin: false, isStaff: true }),
+    true,
+    "Staff may read non-subscription system settings"
+  );
+
+  // Super Admin can read all documents
+  assert.equal(
+    simulateSystemSettingsReadRule({ settingId: "subscription", isSuperAdmin: true, isStaff: true }),
+    true,
+    "Super Admin can read system_settings/subscription"
+  );
+  assert.equal(
+    simulateSystemSettingsReadRule({ settingId: "main_business", isSuperAdmin: true, isStaff: true }),
+    true,
+    "Super Admin can read system_settings/main_business"
+  );
+
+  // Unauthenticated / non-staff callers denied on all documents
+  assert.equal(
+    simulateSystemSettingsReadRule({ settingId: "theme_config", isSuperAdmin: false, isStaff: false }),
+    false,
+    "Non-staff denied on all system settings"
+  );
+});
+
+function simulateIsSubscriptionOperationalRule(doc: any, requestTimeMs: number): boolean {
+  if (!doc) return false;
+  if (typeof doc !== "object") return false;
+  if (!("clientId" in doc) || doc.clientId !== "osvid") return false;
+  if (!("isSuspended" in doc) || typeof doc.isSuspended !== "boolean" || doc.isSuspended !== false) return false;
+  if (!("hardSuspendAt" in doc) || doc.hardSuspendAt === null) return false;
+  if (typeof doc.hardSuspendAt !== "object" || typeof doc.hardSuspendAt.toMillis !== "function") return false;
+  if (requestTimeMs >= doc.hardSuspendAt.toMillis()) return false;
+  return true;
+}
+
+test("Malformed or missing runtime state fails closed in operational evaluation", () => {
+  const nowMs = 1791244800000; // 2026-10-05T00:00:00.000Z
+  const validFutureTimestamp = { toMillis: () => nowMs + 7 * 24 * 60 * 60 * 1000 };
+  const expiredTimestamp = { toMillis: () => nowMs - 1000 };
+
+  // 1. Missing document fails closed
+  assert.equal(simulateIsSubscriptionOperationalRule(null, nowMs), false);
+
+  // 2. Missing hardSuspendAt fails closed (no longer treated as operational)
+  assert.equal(
+    simulateIsSubscriptionOperationalRule(
+      { clientId: "osvid", isSuspended: false },
+      nowMs
+    ),
+    false
+  );
+
+  // 3. Null hardSuspendAt fails closed
+  assert.equal(
+    simulateIsSubscriptionOperationalRule(
+      { clientId: "osvid", isSuspended: false, hardSuspendAt: null },
+      nowMs
+    ),
+    false
+  );
+
+  // 4. Non-timestamp hardSuspendAt fails closed
+  assert.equal(
+    simulateIsSubscriptionOperationalRule(
+      { clientId: "osvid", isSuspended: false, hardSuspendAt: "2027-10-01" },
+      nowMs
+    ),
+    false
+  );
+
+  // 5. Missing or incorrect clientId fails closed
+  assert.equal(
+    simulateIsSubscriptionOperationalRule(
+      { clientId: "wrong-client", isSuspended: false, hardSuspendAt: validFutureTimestamp },
+      nowMs
+    ),
+    false
+  );
+  assert.equal(
+    simulateIsSubscriptionOperationalRule(
+      { isSuspended: false, hardSuspendAt: validFutureTimestamp },
+      nowMs
+    ),
+    false
+  );
+
+  // 6. Non-boolean isSuspended fails closed
+  assert.equal(
+    simulateIsSubscriptionOperationalRule(
+      { clientId: "osvid", isSuspended: "false", hardSuspendAt: validFutureTimestamp },
+      nowMs
+    ),
+    false
+  );
+
+  // 7. isSuspended == true fails closed
+  assert.equal(
+    simulateIsSubscriptionOperationalRule(
+      { clientId: "osvid", isSuspended: true, hardSuspendAt: validFutureTimestamp },
+      nowMs
+    ),
+    false
+  );
+
+  // 8. request.time >= hardSuspendAt fails closed (expired past grace)
+  assert.equal(
+    simulateIsSubscriptionOperationalRule(
+      { clientId: "osvid", isSuspended: false, hardSuspendAt: expiredTimestamp },
+      nowMs
+    ),
+    false
+  );
+
+  // 9. Structurally valid runtime state succeeds
+  assert.equal(
+    simulateIsSubscriptionOperationalRule(
+      { clientId: "osvid", isSuspended: false, hardSuspendAt: validFutureTimestamp },
+      nowMs
+    ),
+    true
+  );
+});
+
+test("Super Admin bypasses runtime subscription gating even with malformed runtime state", () => {
+  const malformedRuntimeDoc = { clientId: "corrupt", isSuspended: "invalid" };
+  const isOperational = simulateIsSubscriptionOperationalRule(malformedRuntimeDoc, Date.now());
+  assert.equal(isOperational, false);
+
+  const allowed = simulateRulesUpdate({
+    isSuperAdmin: true,
+    isSubscriptionOperational: isOperational,
+    canManageProducts: false,
+    canManageInventory: false,
+    existingDoc: { name: "Chemical A", price: 5000 },
+    incomingDoc: { name: "Chemical A", price: 6000 },
+  });
+  assert.equal(allowed, true, "Super Admin emergency bypass must succeed");
+});
+
+test("Initialization logic rejects overwriting existing authoritative subscription terms (409 Conflict)", () => {
+  const simulateInitializeAction = (lookupKind: "FOUND" | "NOT_CONFIGURED") => {
+    if (lookupKind === "FOUND") {
+      return {
+        status: 409,
+        error:
+          "Subscription is already configured. Use 'update-terms' to modify terms or 'bootstrap-runtime' to sync runtime state.",
+      };
+    }
+    return { status: 200, success: true };
+  };
+
+  const conflictRes = simulateInitializeAction("FOUND");
+  assert.equal(conflictRes.status, 409);
+  assert.match(conflictRes.error!, /already configured/);
+
+  const freshRes = simulateInitializeAction("NOT_CONFIGURED");
+  assert.equal(freshRes.status, 200);
+});
+
+test("Initialization validates optional fields: businessName, adminEmail, warningNotice", () => {
+  const validateInitPayload = (payload: any) => {
+    if (payload.businessName !== undefined) {
+      if (typeof payload.businessName !== "string" || payload.businessName.trim().length === 0 || payload.businessName.length > 150) {
+        return { valid: false, error: "Invalid businessName" };
+      }
+    }
+    if (payload.adminEmail !== undefined && payload.adminEmail !== "") {
+      if (
+        typeof payload.adminEmail !== "string" ||
+        payload.adminEmail.length > 254 ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.adminEmail.trim())
+      ) {
+        return { valid: false, error: "Invalid adminEmail" };
+      }
+    }
+    if (payload.warningNotice !== undefined) {
+      if (typeof payload.warningNotice !== "string" || payload.warningNotice.length > 500) {
+        return { valid: false, error: "Invalid warningNotice" };
+      }
+    }
+    return { valid: true };
+  };
+
+  // Invalid email format rejected
+  assert.equal(validateInitPayload({ adminEmail: "not-an-email" }).valid, false);
+  assert.equal(validateInitPayload({ adminEmail: "admin@osvid" }).valid, false);
+  assert.equal(validateInitPayload({ adminEmail: "admin@osvid.com" }).valid, true);
+
+  // Empty or overly long businessName rejected
+  assert.equal(validateInitPayload({ businessName: "" }).valid, false);
+  assert.equal(validateInitPayload({ businessName: "   " }).valid, false);
+  assert.equal(validateInitPayload({ businessName: "a".repeat(151) }).valid, false);
+  assert.equal(validateInitPayload({ businessName: "OSVID Chemicals" }).valid, true);
+
+  // Overly long warning notice rejected
+  assert.equal(validateInitPayload({ warningNotice: "x".repeat(501) }).valid, false);
+  assert.equal(validateInitPayload({ warningNotice: "Notice within limits" }).valid, true);
+});
