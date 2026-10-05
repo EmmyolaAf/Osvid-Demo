@@ -67,10 +67,9 @@ service firebase.storage {
 
     function isSubscriptionOperational() {
       let subDoc = /databases/(default)/documents/runtime_settings/subscription;
-      return !firestore.exists(subDoc) || (
+      return firestore.exists(subDoc) &&
         firestore.get(subDoc).data.isSuspended != true &&
-        (!('hardSuspendAt' in firestore.get(subDoc).data) || firestore.get(subDoc).data.hardSuspendAt == null || request.time < firestore.get(subDoc).data.hardSuspendAt)
-      );
+        (!('hardSuspendAt' in firestore.get(subDoc).data) || firestore.get(subDoc).data.hardSuspendAt == null || request.time < firestore.get(subDoc).data.hardSuspendAt);
     }
 
     function isImageFile() {

@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Audit log event
-    await logAuditEvent({
+    const auditRes = await logAuditEvent({
       actor: {
         uid: caller.uid,
         email: caller.email,
@@ -109,8 +109,16 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    if (!auditRes.success) {
+      console.error("AUDIT WARNING: Staff account deleted but audit log failed:", auditRes.error);
+    }
+
     return NextResponse.json({
       success: true,
+      auditRecorded: Boolean(auditRes.success),
+      ...(!auditRes.success
+        ? { auditWarning: "Staff account deleted successfully, but audit log entry failed to record." }
+        : {}),
       message: "Staff account deleted successfully",
     });
   } catch (err: any) {

@@ -158,7 +158,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 7. Audit log event
-    await logAuditEvent({
+    const auditRes = await logAuditEvent({
       actor: {
         uid: caller.uid,
         email: caller.email,
@@ -175,8 +175,16 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    if (!auditRes.success) {
+      console.error("AUDIT WARNING: Staff account created but audit log failed:", auditRes.error);
+    }
+
     return NextResponse.json({
       success: true,
+      auditRecorded: Boolean(auditRes.success),
+      ...(!auditRes.success
+        ? { auditWarning: "Staff account created successfully, but audit log entry failed to record." }
+        : {}),
       message: `${
         assignedRole === "manager" ? "Manager" : "Administrator"
       } "${userName}" created successfully!`,

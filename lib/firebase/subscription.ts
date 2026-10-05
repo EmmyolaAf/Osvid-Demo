@@ -332,3 +332,94 @@ export async function toggleAppSuspension(
     };
   }
 }
+
+/**
+ * Bootstrap and synchronize the safe client runtime subscription document from
+ * existing authoritative database records (Super Admin only).
+ */
+export async function bootstrapRuntimeSubscription(): Promise<SubscriptionResult<any>> {
+  try {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) {
+      return {
+        success: false,
+        error: "Authentication required to bootstrap runtime subscription.",
+      };
+    }
+
+    const res = await fetch("/api/admin/subscription", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ action: "bootstrap-runtime" }),
+    });
+
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || "Failed to bootstrap runtime subscription document.",
+      };
+    }
+
+    return { success: true, data: result.runtime };
+  } catch (error: any) {
+    console.error("bootstrapRuntimeSubscription error:", error);
+    return {
+      success: false,
+      error: error?.message || "Failed to bootstrap runtime subscription.",
+    };
+  }
+}
+
+/**
+ * Initialize authoritative subscription terms from scratch (Super Admin only).
+ */
+export async function initializeSubscription(
+  terms: {
+    hostingExpiryDate: string;
+    renewalAmountNgn: number;
+    gracePeriodDays?: number;
+    hostingPlan?: string;
+    businessName?: string;
+    adminEmail?: string;
+    warningNotice?: string;
+  }
+): Promise<SubscriptionResult<any>> {
+  try {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) {
+      return {
+        success: false,
+        error: "Authentication required to initialize subscription.",
+      };
+    }
+
+    const res = await fetch("/api/admin/subscription", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ action: "initialize", payload: terms }),
+    });
+
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || "Failed to initialize subscription.",
+      };
+    }
+
+    return { success: true, data: result.subscription };
+  } catch (error: any) {
+    console.error("initializeSubscription error:", error);
+    return {
+      success: false,
+      error: error?.message || "Failed to initialize subscription.",
+    };
+  }
+}

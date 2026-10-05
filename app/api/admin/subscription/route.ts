@@ -16,27 +16,17 @@ const LEGACY_SUBSCRIPTION_DOC = "main_business";
 const COLLECTION_NAME = "system_settings";
 const RUNTIME_COLLECTION_NAME = "runtime_settings";
 
-export const DEFAULT_SERVER_SUBSCRIPTION: ClientSubscription = {
-  clientId: OSVID_CLIENT_CONFIG.clientId,
-  businessName: OSVID_CLIENT_CONFIG.clientName,
-  adminEmail: undefined,
-  hostingPlan: "enterprise",
-  status: "active",
-  isSuspended: false,
-  suspendedReason: "Hosting subscription payment past due.",
-  hostingExpiryDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365).toISOString(),
-  gracePeriodDays: 7,
-  renewalAmountNgn: 250000,
-  showWarning: false,
-  warningNotice: "Hosting renewal due soon. Please settle your account to prevent service interruption.",
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-};
+export type SubscriptionLookupResult =
+  | { kind: "FOUND"; subscription: ClientSubscription; source: "primary" | "legacy" }
+  | { kind: "NOT_CONFIGURED" }
+  | { kind: "READ_FAILURE"; error: string };
 
 /**
  * Reads existing authoritative subscription state from Firestore.
+ * Strictly distinguishes FOUND, NOT_CONFIGURED, and READ_FAILURE.
+ * Does NOT synthesize a 1-year active subscription on missing docs or read failure.
  */
-async function getExistingSubscription(): Promise<ClientSubscription> {
+export async function fetchAuthoritativeSubscription(): Promise<SubscriptionLookupResult> {
   try {
     const primarySnap = await adminDb
       .collection(COLLECTION_NAME)
@@ -44,10 +34,16 @@ async function getExistingSubscription(): Promise<ClientSubscription> {
       .get();
 
     if (primarySnap.exists) {
+      const data = primarySnap.data() || {};
       return {
-        ...DEFAULT_SERVER_SUBSCRIPTION,
-        ...(primarySnap.data() as ClientSubscription),
-        id: primarySnap.id,
+        kind: "FOUND",
+        subscription: {
+          clientId: OSVID_CLIENT_CONFIG.clientId,
+          businessName: OSVID_CLIENT_CONFIG.clientName,
+          ...data,
+          id: primarySnap.id,
+        } as ClientSubscription,
+        source: "primary",
       };
     }
 
@@ -57,17 +53,25 @@ async function getExistingSubscription(): Promise<ClientSubscription> {
       .get();
 
     if (legacySnap.exists) {
+      const data = legacySnap.data() || {};
       return {
-        ...DEFAULT_SERVER_SUBSCRIPTION,
-        ...(legacySnap.data() as ClientSubscription),
-        id: legacySnap.id,
+        kind: "FOUND",
+        subscription: {
+          clientId: OSVID_CLIENT_CONFIG.clientId,
+          businessName: OSVID_CLIENT_CONFIG.clientName,
+          ...data,
+          id: legacySnap.id,
+        } as ClientSubscription,
+        source: "legacy",
       };
     }
-  } catch (err) {
-    console.warn("Could not read subscription from Firestore, using default fallback:", err);
-  }
 
-  return { ...DEFAULT_SERVER_SUBSCRIPTION };
+    return { kind: "NOT_CONFIGURED" };
+  } catch (err: any) {
+    const errorMsg = err?.message || String(err);
+    console.error("Firestore authoritative subscription read failure:", errorMsg);
+    return { kind: "READ_FAILURE", error: errorMsg };
+  }
 }
 
 /**
@@ -116,12 +120,35 @@ function computeLifecycle(
 
 /**
  * GET: Retrieves full subscription parameters (Super Admin only).
+ * Returns explicit status for configured, unconfigured, or read failures.
  */
 export async function GET(req: NextRequest) {
   try {
     await requireSuperAdmin(req);
-    const sub = await getExistingSubscription();
-    return NextResponse.json({ success: true, subscription: sub });
+    const lookup = await fetchAuthoritativeSubscription();
+
+    if (lookup.kind === "READ_FAILURE") {
+      return NextResponse.json(
+        { success: false, error: `Failed to read authoritative subscription: ${lookup.error}` },
+        { status: 500 }
+      );
+    }
+
+    if (lookup.kind === "NOT_CONFIGURED") {
+      return NextResponse.json({
+        success: true,
+        configured: false,
+        subscription: null,
+        message: "No authoritative subscription configured yet.",
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      configured: true,
+      subscription: lookup.subscription,
+      source: lookup.source,
+    });
   } catch (err) {
     return authErrorResponse(err);
   }
@@ -141,7 +168,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required action parameter" }, { status: 400 });
     }
 
-    const currentSub = await getExistingSubscription();
+    const lookup = await fetchAuthoritativeSubscription();
+
+    if (lookup.kind === "READ_FAILURE") {
+      return NextResponse.json(
+        { error: `Cannot mutate subscription: Database read failed (${lookup.error}). Aborting to protect existing configuration.` },
+        { status: 503 }
+      );
+    }
+
+    // When subscription is not configured, ONLY explicit "initialize" action is permitted
+    if (lookup.kind === "NOT_CONFIGURED" && action !== "initialize") {
+      return NextResponse.json(
+        { error: "Subscription is not configured. Please use the 'initialize' action with concrete terms to establish subscription state." },
+        { status: 400 }
+      );
+    }
+
+    const currentSub: ClientSubscription | null = lookup.kind === "FOUND" ? lookup.subscription : null;
+    const activeSub = currentSub as ClientSubscription;
     const now = new Date().toISOString();
 
     let updatedSub: ClientSubscription;
@@ -150,6 +195,115 @@ export async function POST(req: NextRequest) {
     const auditMeta: Record<string, any> = {};
 
     switch (action) {
+      case "initialize": {
+        const {
+          hostingExpiryDate,
+          renewalAmountNgn,
+          gracePeriodDays,
+          hostingPlan,
+          businessName,
+          adminEmail,
+          warningNotice,
+        } = payload || {};
+
+        if (!hostingExpiryDate) {
+          return NextResponse.json(
+            { error: "hostingExpiryDate is required for initialization." },
+            { status: 400 }
+          );
+        }
+        const parsedExpiry = new Date(hostingExpiryDate);
+        if (isNaN(parsedExpiry.getTime())) {
+          return NextResponse.json(
+            { error: "Invalid hostingExpiryDate format. Expected valid ISO date." },
+            { status: 400 }
+          );
+        }
+
+        const validRenewal = Number(renewalAmountNgn);
+        if (isNaN(validRenewal) || !Number.isFinite(validRenewal) || validRenewal < 0) {
+          return NextResponse.json(
+            { error: "renewalAmountNgn must be a valid non-negative number." },
+            { status: 400 }
+          );
+        }
+
+        const validGrace = gracePeriodDays !== undefined ? Number(gracePeriodDays) : 7;
+        if (!Number.isInteger(validGrace) || validGrace < 0 || validGrace > 90) {
+          return NextResponse.json(
+            { error: "gracePeriodDays must be an integer between 0 and 90." },
+            { status: 400 }
+          );
+        }
+
+        const plan: HostingPlan = hostingPlan || "enterprise";
+        const allowedPlans: HostingPlan[] = ["standard", "professional", "enterprise"];
+        if (!allowedPlans.includes(plan)) {
+          return NextResponse.json(
+            { error: `hostingPlan must be one of [${allowedPlans.join(", ")}]` },
+            { status: 400 }
+          );
+        }
+
+        const name =
+          (businessName && typeof businessName === "string" && businessName.trim()) ||
+          OSVID_CLIENT_CONFIG.clientName;
+        const lifecycle = computeLifecycle(parsedExpiry.toISOString(), validGrace, false, false);
+
+        updatedSub = {
+          clientId: OSVID_CLIENT_CONFIG.clientId,
+          businessName: name,
+          adminEmail: adminEmail || undefined,
+          hostingPlan: plan,
+          status: lifecycle.status,
+          isSuspended: lifecycle.isSuspended,
+          hostingExpiryDate: parsedExpiry.toISOString(),
+          gracePeriodDays: validGrace,
+          renewalAmountNgn: validRenewal,
+          showWarning: false,
+          warningNotice:
+            warningNotice ||
+            "Hosting renewal due soon. Please settle your account to prevent service interruption.",
+          createdAt: currentSub?.createdAt || now,
+          updatedAt: now,
+          updatedBy: caller.email,
+        };
+
+        auditAction = "subscription.initialize";
+        auditSummary = `Initialized authoritative subscription (Expiry: ${updatedSub.hostingExpiryDate}, Plan: ${updatedSub.hostingPlan}, Fee: ₦${updatedSub.renewalAmountNgn.toLocaleString()})`;
+        auditMeta.initializedTerms = {
+          hostingExpiryDate: updatedSub.hostingExpiryDate,
+          hostingPlan: updatedSub.hostingPlan,
+          renewalAmountNgn: updatedSub.renewalAmountNgn,
+          gracePeriodDays: updatedSub.gracePeriodDays,
+        };
+        break;
+      }
+
+      case "initialize-runtime":
+      case "bootstrap-runtime":
+      case "sync-runtime": {
+        const lifecycle = computeLifecycle(
+          activeSub.hostingExpiryDate,
+          activeSub.gracePeriodDays,
+          activeSub.isSuspended,
+          activeSub.showWarning
+        );
+
+        updatedSub = {
+          ...activeSub,
+          status: lifecycle.status,
+          isSuspended: lifecycle.isSuspended,
+          updatedAt: now,
+          updatedBy: caller.email,
+        };
+
+        auditAction = "subscription.bootstrap_runtime";
+        auditSummary = `Synchronized safe client runtime subscription document (Status: ${lifecycle.status}, Expiry: ${updatedSub.hostingExpiryDate})`;
+        auditMeta.runtimeSynchronized = true;
+        break;
+      }
+
       case "update-terms": {
         const {
           hostingExpiryDate,
@@ -211,12 +365,12 @@ export async function POST(req: NextRequest) {
 
         const newExpiryStr = hostingExpiryDate
           ? new Date(hostingExpiryDate).toISOString()
-          : currentSub.hostingExpiryDate;
-        const newGrace = gracePeriodDays !== undefined ? Number(gracePeriodDays) : currentSub.gracePeriodDays;
-        const lifecycle = computeLifecycle(newExpiryStr, newGrace, currentSub.isSuspended, currentSub.showWarning);
+          : activeSub.hostingExpiryDate;
+        const newGrace = gracePeriodDays !== undefined ? Number(gracePeriodDays) : activeSub.gracePeriodDays;
+        const lifecycle = computeLifecycle(newExpiryStr, newGrace, activeSub.isSuspended, activeSub.showWarning);
 
         updatedSub = {
-          ...currentSub,
+          ...activeSub,
           hostingExpiryDate: newExpiryStr,
           ...(renewalAmountNgn !== undefined ? { renewalAmountNgn: Number(renewalAmountNgn) } : {}),
           gracePeriodDays: newGrace,
@@ -231,9 +385,9 @@ export async function POST(req: NextRequest) {
         auditAction = "subscription.update_terms";
         auditSummary = `Updated subscription license terms (Expiry: ${updatedSub.hostingExpiryDate}, Fee: ₦${updatedSub.renewalAmountNgn.toLocaleString()}, Grace: ${updatedSub.gracePeriodDays}d)`;
         auditMeta.before = {
-          hostingExpiryDate: currentSub.hostingExpiryDate,
-          renewalAmountNgn: currentSub.renewalAmountNgn,
-          gracePeriodDays: currentSub.gracePeriodDays,
+          hostingExpiryDate: activeSub.hostingExpiryDate,
+          renewalAmountNgn: activeSub.renewalAmountNgn,
+          gracePeriodDays: activeSub.gracePeriodDays,
         };
         auditMeta.after = {
           hostingExpiryDate: updatedSub.hostingExpiryDate,
@@ -255,14 +409,14 @@ export async function POST(req: NextRequest) {
 
         const nextShowWarning = Boolean(showWarning);
         const lifecycle = computeLifecycle(
-          currentSub.hostingExpiryDate,
-          currentSub.gracePeriodDays,
-          currentSub.isSuspended,
+          activeSub.hostingExpiryDate,
+          activeSub.gracePeriodDays,
+          activeSub.isSuspended,
           nextShowWarning
         );
 
         updatedSub = {
-          ...currentSub,
+          ...activeSub,
           showWarning: nextShowWarning,
           ...(warningNotice !== undefined ? { warningNotice: String(warningNotice).trim() } : {}),
           status: lifecycle.status,
@@ -287,7 +441,7 @@ export async function POST(req: NextRequest) {
             : "Annual hosting and licensing subscription is past due.";
 
         updatedSub = {
-          ...currentSub,
+          ...activeSub,
           isSuspended: true,
           status: "suspended",
           suspendedReason: suspendReason,
@@ -303,7 +457,7 @@ export async function POST(req: NextRequest) {
 
       case "reactivate": {
         const { hostingExpiryDate } = payload || {};
-        let targetExpiryStr = currentSub.hostingExpiryDate;
+        let targetExpiryStr = activeSub.hostingExpiryDate;
 
         if (hostingExpiryDate) {
           const parsed = new Date(hostingExpiryDate);
@@ -316,9 +470,9 @@ export async function POST(req: NextRequest) {
         // Validate that subscription is not past grace period without a renewed date
         const lifecycle = computeLifecycle(
           targetExpiryStr,
-          currentSub.gracePeriodDays,
+          activeSub.gracePeriodDays,
           false, // request un-suspension
-          currentSub.showWarning
+          activeSub.showWarning
         );
 
         if (lifecycle.status === "suspended") {
@@ -332,7 +486,7 @@ export async function POST(req: NextRequest) {
         }
 
         updatedSub = {
-          ...currentSub,
+          ...activeSub,
           hostingExpiryDate: targetExpiryStr,
           isSuspended: false,
           status: lifecycle.status,

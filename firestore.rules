@@ -74,13 +74,12 @@ service cloud.firestore {
     }
 
     // Evaluates whether the tenant application is active or suspended using the minimal runtime document.
-    // Checks both the manual killswitch flag and the server-calculated hardSuspendAt timestamp threshold.
+    // Checks that the document EXISTS (fail-closed if missing), manual killswitch flag, and hardSuspendAt threshold.
     function isSubscriptionOperational() {
       let subDoc = /databases/$(database)/documents/runtime_settings/subscription;
-      return !exists(subDoc) || (
+      return exists(subDoc) &&
         get(subDoc).data.isSuspended != true &&
-        (!('hardSuspendAt' in get(subDoc).data) || get(subDoc).data.hardSuspendAt == null || request.time < get(subDoc).data.hardSuspendAt)
-      );
+        (!('hardSuspendAt' in get(subDoc).data) || get(subDoc).data.hardSuspendAt == null || request.time < get(subDoc).data.hardSuspendAt);
     }
 
     // ===============================================================
@@ -203,10 +202,18 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Provider subscription documents are strictly private to Super Admin
+    match /system_settings/subscription {
+      allow read, write: if isSuperAdmin();
+    }
+
+    match /system_settings/main_business {
+      allow read, write: if isSuperAdmin();
+    }
+
     match /system_settings/{settingId} {
-      // Accessible to live staff / super admin to evaluate legacy lease parameters
+      // General non-subscription configuration (if any)
       allow read: if isStaff() || isSuperAdmin();
-      // STRICT PROTECTION: Direct client writes are forbidden; writes occur via Super Admin API
       allow write: if isSuperAdmin();
     }
 

@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Audit log event
-    await logAuditEvent({
+    const auditRes = await logAuditEvent({
       actor: {
         uid: caller.uid,
         email: caller.email,
@@ -116,7 +116,18 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    return NextResponse.json({ success: true, isActive: Boolean(isActive) });
+    if (!auditRes.success) {
+      console.error("AUDIT WARNING: Staff account status toggled but audit log failed:", auditRes.error);
+    }
+
+    return NextResponse.json({
+      success: true,
+      isActive: Boolean(isActive),
+      auditRecorded: Boolean(auditRes.success),
+      ...(!auditRes.success
+        ? { auditWarning: "Staff status toggled successfully, but audit log entry failed to record." }
+        : {}),
+    });
   } catch (err: any) {
     return authErrorResponse(err);
   }

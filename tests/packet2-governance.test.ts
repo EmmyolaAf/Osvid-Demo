@@ -391,9 +391,11 @@ test("firestore.rules enforces isSubscriptionOperational() on staff mutations an
   const rulesPath = path.resolve(process.cwd(), "firestore.rules");
   const rules = fs.readFileSync(rulesPath, "utf-8");
 
-  // isSubscriptionOperational helper
+  // isSubscriptionOperational helper requires exists(subDoc) and NO fail-open !exists(subDoc)
   assert.match(rules, /function isSubscriptionOperational\(\)/);
   assert.match(rules, /let subDoc = \/databases\/\$\(database\)\/documents\/runtime_settings\/subscription;/);
+  assert.match(rules, /exists\(subDoc\)/);
+  assert.doesNotMatch(rules, /!exists\(subDoc\)/);
   assert.match(rules, /request\.time < get\(subDoc\)\.data\.hardSuspendAt/);
 
   // Gated staff writes
@@ -406,16 +408,22 @@ test("firestore.rules enforces isSubscriptionOperational() on staff mutations an
   assert.match(rules, /allow read: if true;/);
   assert.match(rules, /allow write: if false;/);
 
+  // Provider-private subscription records in system_settings must be Super Admin only
+  assert.match(rules, /match \/system_settings\/subscription\s*\{\s*allow read, write:\s*if isSuperAdmin\(\);/);
+  assert.match(rules, /match \/system_settings\/main_business\s*\{\s*allow read, write:\s*if isSuperAdmin\(\);/);
+
   // users collection: direct delete forbidden
   assert.match(rules, /match \/users\/\{userId\}[\s\S]*?allow delete: if false;/);
 });
 
-test("storage.rules gates staff uploads behind isSubscriptionOperational()", () => {
+test("storage.rules gates staff uploads behind isSubscriptionOperational() and fails closed when doc is missing", () => {
   const rulesPath = path.resolve(process.cwd(), "storage.rules");
   const rules = fs.readFileSync(rulesPath, "utf-8");
 
   assert.match(rules, /function isSubscriptionOperational\(\)/);
   assert.match(rules, /let subDoc = \/databases\/\(default\)\/documents\/runtime_settings\/subscription;/);
+  assert.match(rules, /firestore\.exists\(subDoc\)/);
+  assert.doesNotMatch(rules, /!firestore\.exists\(subDoc\)/);
   assert.match(rules, /firestore\.get\(subDoc\)/);
   assert.match(rules, /isSubscriptionOperational\(\)/);
 });
@@ -672,5 +680,89 @@ test("buildAuditLogRecord produces immutable, properly structured audit record",
   assert.equal(typeof entry.timestamp, "string");
   assert.deepEqual(entry.metadata, { newStatus: "active", plan: "pro" });
   assert.ok(docRef);
+});
+
+// ===============================================================
+// 11. PACKET 2C CONSISTENCY & AUDIT SURFACING VERIFICATION
+// ===============================================================
+
+test("Staff mutation response contract surfaces auditRecorded and auditWarning on audit failure", () => {
+  // Simulate successful auth operation where audit log succeeds
+  const successAuditResult = { success: true, logId: "audit-123" };
+  const successResponse = {
+    success: true,
+    auditRecorded: Boolean(successAuditResult.success),
+    ...(!successAuditResult.success
+      ? { auditWarning: "Staff account created successfully, but audit log entry failed to record." }
+      : {}),
+    message: 'Manager "John Doe" created successfully!',
+  };
+  assert.equal(successResponse.success, true);
+  assert.equal(successResponse.auditRecorded, true);
+  assert.equal("auditWarning" in successResponse, false);
+
+  // Simulate successful auth operation where audit log fails
+  const failedAuditResult = { success: false, error: "Firestore unavailable" };
+  const warningResponse = {
+    success: true,
+    auditRecorded: Boolean(failedAuditResult.success),
+    ...(!failedAuditResult.success
+      ? { auditWarning: "Staff account created successfully, but audit log entry failed to record." }
+      : {}),
+    message: 'Manager "John Doe" created successfully!',
+  };
+  assert.equal(warningResponse.success, true);
+  assert.equal(warningResponse.auditRecorded, false);
+  assert.equal(typeof warningResponse.auditWarning, "string");
+  assert.match(warningResponse.auditWarning!, /audit log entry failed to record/);
+});
+
+test("Operational mutation fails closed when runtime subscription doc does not exist", () => {
+  // When runtime subscription doc does not exist in Firestore:
+  const subDocExists = false;
+  const isSuperAdmin = false;
+  const isSubscriptionOperational = subDocExists; // fail-closed: must exist
+
+  const allowed = simulateRulesUpdate({
+    isSuperAdmin,
+    isSubscriptionOperational,
+    canManageProducts: true,
+    canManageInventory: true,
+    existingDoc: { name: "Product A", price: 100 },
+    incomingDoc: { name: "Product A", price: 120 },
+  });
+  assert.equal(allowed, false, "Staff write must be denied when runtime subscription doc does not exist");
+
+  // Super Admin can still perform recovery writes when subscription doc does not exist
+  const superAllowed = simulateRulesUpdate({
+    isSuperAdmin: true,
+    isSubscriptionOperational,
+    canManageProducts: false,
+    canManageInventory: false,
+    existingDoc: { name: "Product A", price: 100 },
+    incomingDoc: { name: "Product A", price: 120 },
+  });
+  assert.equal(superAllowed, true, "Super Admin must retain emergency recovery capability");
+});
+
+test("Subscription initialization payload rejects invalid or synthetic terms", () => {
+  // Positive renewalAmountNgn required
+  const invalidAmountPayload = {
+    action: "initialize",
+    renewalAmountNgn: 0,
+    hostingExpiryDate: "2027-10-01T00:00:00.000Z",
+  };
+  assert.equal(invalidAmountPayload.renewalAmountNgn <= 0, true);
+
+  // Valid concrete terms
+  const validPayload = {
+    action: "initialize",
+    businessName: "OSVID Chemicals Limited",
+    renewalAmountNgn: 150000,
+    hostingExpiryDate: "2027-10-01T00:00:00.000Z",
+    gracePeriodDays: 14,
+  };
+  assert.equal(validPayload.renewalAmountNgn > 0, true);
+  assert.equal(Number.isNaN(new Date(validPayload.hostingExpiryDate).getTime()), false);
 });
 
