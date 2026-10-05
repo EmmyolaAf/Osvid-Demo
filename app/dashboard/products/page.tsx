@@ -11,7 +11,7 @@ import {
   saveCategoryToDb,
   deleteCategoryFromDb,
 } from "@/lib/firebase/firestore";
-import { Product, ProductCategory } from "@/types/auth";
+import { Product, ProductCategory, normalizeManagerPermissions } from "@/types/auth";
 import {
   Package,
   Plus,
@@ -30,6 +30,7 @@ import {
   Layers,
   ArrowUpDown,
   Filter,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,7 +46,10 @@ import { toast } from "sonner";
 import Image from "next/image";
 
 export default function ProductsManagementPage() {
-  const { isAdmin, isManager } = useAuth();
+  const { isAdmin, isSuperAdmin, userProfile } = useAuth();
+  const perms = userProfile?.permissions ? normalizeManagerPermissions(userProfile.permissions) : undefined;
+  const canManageProducts = isSuperAdmin || isAdmin || Boolean(perms?.canManageProducts);
+  const canManageInventory = isSuperAdmin || isAdmin || Boolean(perms?.canManageInventory);
 
   // Data State
   const [products, setProducts] = useState<Product[]>([]);
@@ -385,34 +389,38 @@ export default function ProductsManagementPage() {
             >
               Products ({products.length})
             </button>
-            <button
-              onClick={() => setActiveTab("categories")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                activeTab === "categories"
-                  ? "bg-white text-slate-900 shadow-sm"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Categories ({categories.length})
-            </button>
+            {canManageProducts && (
+              <button
+                onClick={() => setActiveTab("categories")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  activeTab === "categories"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Categories ({categories.length})
+              </button>
+            )}
           </div>
 
-          {activeTab === "products" ? (
-            <Button
-              onClick={openAddProductModal}
-              className="bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl shadow-md shadow-orange-600/20 flex items-center gap-2 h-10 px-4 text-xs"
-            >
-              <Plus size={16} />
-              <span>Add Product</span>
-            </Button>
-          ) : (
-            <Button
-              onClick={openAddCategoryModal}
-              className="bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl shadow-md shadow-orange-600/20 flex items-center gap-2 h-10 px-4 text-xs"
-            >
-              <Plus size={16} />
-              <span>New Category</span>
-            </Button>
+          {canManageProducts && (
+            activeTab === "products" ? (
+              <Button
+                onClick={openAddProductModal}
+                className="bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl shadow-md shadow-orange-600/20 flex items-center gap-2 h-10 px-4 text-xs"
+              >
+                <Plus size={16} />
+                <span>Add Product</span>
+              </Button>
+            ) : (
+              <Button
+                onClick={openAddCategoryModal}
+                className="bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl shadow-md shadow-orange-600/20 flex items-center gap-2 h-10 px-4 text-xs"
+              >
+                <Plus size={16} />
+                <span>New Category</span>
+              </Button>
+            )
           )}
         </div>
       </div>
@@ -607,16 +615,26 @@ export default function ProductsManagementPage() {
                           <td className="py-3.5 px-5">
                             <div className="flex items-center gap-1">
                               <button
-                                onClick={() => handleQuickStockChange(p.id, p.stockQuantity, -10)}
-                                className="w-6 h-6 rounded-lg border border-slate-200 hover:bg-slate-100 text-[11px] font-bold text-slate-600 flex items-center justify-center"
-                                title="Decrease by 10"
+                                onClick={() => canManageInventory && handleQuickStockChange(p.id, p.stockQuantity, -10)}
+                                disabled={!canManageInventory}
+                                className={`w-6 h-6 rounded-lg border border-slate-200 text-[11px] font-bold flex items-center justify-center transition-colors ${
+                                  canManageInventory
+                                    ? "hover:bg-slate-100 text-slate-600"
+                                    : "opacity-40 cursor-not-allowed text-slate-400"
+                                }`}
+                                title={canManageInventory ? "Decrease by 10" : "Requires Inventory Management permission"}
                               >
                                 -10
                               </button>
                               <button
-                                onClick={() => handleQuickStockChange(p.id, p.stockQuantity, -1)}
-                                className="w-6 h-6 rounded-lg border border-slate-200 hover:bg-slate-100 text-[11px] font-bold text-slate-600 flex items-center justify-center"
-                                title="Decrease by 1"
+                                onClick={() => canManageInventory && handleQuickStockChange(p.id, p.stockQuantity, -1)}
+                                disabled={!canManageInventory}
+                                className={`w-6 h-6 rounded-lg border border-slate-200 text-[11px] font-bold flex items-center justify-center transition-colors ${
+                                  canManageInventory
+                                    ? "hover:bg-slate-100 text-slate-600"
+                                    : "opacity-40 cursor-not-allowed text-slate-400"
+                                }`}
+                                title={canManageInventory ? "Decrease by 1" : "Requires Inventory Management permission"}
                               >
                                 -1
                               </button>
@@ -624,16 +642,26 @@ export default function ProductsManagementPage() {
                                 {p.stockQuantity}
                               </span>
                               <button
-                                onClick={() => handleQuickStockChange(p.id, p.stockQuantity, 1)}
-                                className="w-6 h-6 rounded-lg border border-slate-200 hover:bg-slate-100 text-[11px] font-bold text-slate-600 flex items-center justify-center"
-                                title="Increase by 1"
+                                onClick={() => canManageInventory && handleQuickStockChange(p.id, p.stockQuantity, 1)}
+                                disabled={!canManageInventory}
+                                className={`w-6 h-6 rounded-lg border border-slate-200 text-[11px] font-bold flex items-center justify-center transition-colors ${
+                                  canManageInventory
+                                    ? "hover:bg-slate-100 text-slate-600"
+                                    : "opacity-40 cursor-not-allowed text-slate-400"
+                                }`}
+                                title={canManageInventory ? "Increase by 1" : "Requires Inventory Management permission"}
                               >
                                 +1
                               </button>
                               <button
-                                onClick={() => handleQuickStockChange(p.id, p.stockQuantity, 10)}
-                                className="w-6 h-6 rounded-lg border border-orange-200 bg-orange-50 hover:bg-orange-100 text-[11px] font-bold text-orange-600 flex items-center justify-center"
-                                title="Add 10"
+                                onClick={() => canManageInventory && handleQuickStockChange(p.id, p.stockQuantity, 10)}
+                                disabled={!canManageInventory}
+                                className={`w-6 h-6 rounded-lg border text-[11px] font-bold flex items-center justify-center transition-colors ${
+                                  canManageInventory
+                                    ? "border-orange-200 bg-orange-50 hover:bg-orange-100 text-orange-600"
+                                    : "border-slate-200 opacity-40 cursor-not-allowed text-slate-400"
+                                }`}
+                                title={canManageInventory ? "Add 10" : "Requires Inventory Management permission"}
                               >
                                 +10
                               </button>
@@ -641,26 +669,32 @@ export default function ProductsManagementPage() {
                           </td>
 
                           <td className="py-3.5 px-5 text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => openEditProductModal(p)}
-                                className="text-xs h-8 w-8 p-0 text-slate-600 hover:text-slate-900 rounded-lg"
-                                title="Edit Product"
-                              >
-                                <Edit size={14} />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDeleteProduct(p.id, p.name)}
-                                className="text-xs h-8 w-8 p-0 text-red-600 hover:bg-red-50 rounded-lg"
-                                title="Delete Product"
-                              >
-                                <Trash2 size={14} />
-                              </Button>
-                            </div>
+                            {canManageProducts ? (
+                              <div className="flex items-center justify-end gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => openEditProductModal(p)}
+                                  className="text-xs h-8 w-8 p-0 text-slate-600 hover:text-slate-900 rounded-lg"
+                                  title="Edit Product"
+                                >
+                                  <Edit size={14} />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleDeleteProduct(p.id, p.name)}
+                                  className="text-xs h-8 w-8 p-0 text-red-600 hover:bg-red-50 rounded-lg"
+                                  title="Delete Product"
+                                >
+                                  <Trash2 size={14} />
+                                </Button>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 font-medium italic">
+                                Stock Only
+                              </span>
+                            )}
                           </td>
                         </tr>
                       );

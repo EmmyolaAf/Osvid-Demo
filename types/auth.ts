@@ -2,6 +2,7 @@ export type UserRole = "super_admin" | "admin" | "manager" | "user";
 
 export interface ManagerPermissions {
   canManageProducts: boolean;
+  canManageInventory: boolean;
   canManageOrders: boolean;
   canViewFinancials: boolean;
   canManageWebsite: boolean;
@@ -10,7 +11,8 @@ export interface ManagerPermissions {
 }
 
 export const DEFAULT_MANAGER_PERMISSIONS: ManagerPermissions = {
-  canManageProducts: true,
+  canManageProducts: false,
+  canManageInventory: true,
   canManageOrders: true,
   canViewFinancials: false,
   canManageWebsite: false,
@@ -18,8 +20,52 @@ export const DEFAULT_MANAGER_PERMISSIONS: ManagerPermissions = {
   canManageDiscounts: false,
 };
 
+/**
+ * Normalizes manager permissions with backward compatibility for documents created before canManageInventory was separated.
+ * If canManageInventory is undefined:
+ * If the legacy document explicitly granted canManageProducts: true, we assume they had inventory authority too (fallback to true).
+ * If neither is defined, fallback to DEFAULT_MANAGER_PERMISSIONS.
+ */
+export function normalizeManagerPermissions(
+  perms?: Partial<ManagerPermissions> | null
+): ManagerPermissions {
+  if (!perms) {
+    return { ...DEFAULT_MANAGER_PERMISSIONS };
+  }
+
+  const inventoryDefault =
+    perms.canManageInventory !== undefined
+      ? Boolean(perms.canManageInventory)
+      : perms.canManageProducts !== undefined
+      ? Boolean(perms.canManageProducts)
+      : DEFAULT_MANAGER_PERMISSIONS.canManageInventory;
+
+  return {
+    canManageProducts: Boolean(
+      perms.canManageProducts ?? DEFAULT_MANAGER_PERMISSIONS.canManageProducts
+    ),
+    canManageInventory: inventoryDefault,
+    canManageOrders: Boolean(
+      perms.canManageOrders ?? DEFAULT_MANAGER_PERMISSIONS.canManageOrders
+    ),
+    canViewFinancials: Boolean(
+      perms.canViewFinancials ?? DEFAULT_MANAGER_PERMISSIONS.canViewFinancials
+    ),
+    canManageWebsite: Boolean(
+      perms.canManageWebsite ?? DEFAULT_MANAGER_PERMISSIONS.canManageWebsite
+    ),
+    canManageCustomers: Boolean(
+      perms.canManageCustomers ?? DEFAULT_MANAGER_PERMISSIONS.canManageCustomers
+    ),
+    canManageDiscounts: Boolean(
+      perms.canManageDiscounts ?? DEFAULT_MANAGER_PERMISSIONS.canManageDiscounts
+    ),
+  };
+}
+
 export interface BusinessSubscription {
   id?: string;
+  clientId?: string;
   businessName: string;
   adminEmail: string;
   adminUid?: string;
@@ -34,7 +80,15 @@ export interface BusinessSubscription {
   warningNotice?: string;
   createdAt: string;
   updatedAt: string;
+  updatedBy?: string;
 }
+
+export type {
+  ClientSubscription,
+  RuntimeSubscriptionState,
+  SubscriptionStatus,
+} from "./subscription";
+export type { AuditLogEntry, AuditLogCreateInput } from "./audit";
 
 export interface UserProfile {
   uid: string;

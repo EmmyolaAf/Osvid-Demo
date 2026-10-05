@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import SuspensionBarrier from "@/components/auth/SuspensionBarrier";
 import { getSubscriptionStatus } from "@/lib/firebase/subscription";
-import { BusinessSubscription } from "@/types/auth";
+import { BusinessSubscription, normalizeManagerPermissions } from "@/types/auth";
 import {
   LayoutDashboard,
   Users,
@@ -84,7 +84,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     router.push("/login");
   };
 
-  const perms = userProfile?.permissions;
+  const rawPerms = userProfile?.permissions;
+  const perms = rawPerms ? normalizeManagerPermissions(rawPerms) : undefined;
 
   interface NavItem {
     title: string;
@@ -125,7 +126,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           title: "Products & Stock",
           href: "/dashboard/products",
           icon: Package,
-          allowed: isAdmin || Boolean(perms?.canManageProducts),
+          allowed: isAdmin || Boolean(perms?.canManageProducts) || Boolean(perms?.canManageInventory),
         },
         {
           title: "Orders & Fulfillment",

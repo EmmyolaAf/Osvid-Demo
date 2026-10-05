@@ -50,7 +50,7 @@ export default function FinancialsAnalyticsPage() {
   const averageOrderValue = paidOrders.length > 0 ? totalRevenue / paidOrders.length : 0;
 
   return (
-    <ProtectedRoute allowedRoles={["super_admin", "admin"]}>
+    <ProtectedRoute allowedRoles={["super_admin", "admin", "manager"]} requiredPermission="canViewFinancials">
       <div className="space-y-6">
         <div>
           <div className="flex items-center gap-2">

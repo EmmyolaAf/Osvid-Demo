@@ -80,6 +80,7 @@ test("hasPermission correctly evaluates manager vs admin privileges", () => {
     isActive: true,
     permissions: {
       canManageProducts: true,
+      canManageInventory: false,
       canManageOrders: false,
       canViewFinancials: false,
       canManageWebsite: false,
@@ -104,16 +105,19 @@ test("hasPermission correctly evaluates manager vs admin privileges", () => {
 
   // Super Admin has all permissions
   assert.equal(hasPermission(superAdmin, "canManageProducts"), true);
+  assert.equal(hasPermission(superAdmin, "canManageInventory"), true);
   assert.equal(hasPermission(superAdmin, "canViewFinancials"), true);
   assert.equal(hasPermission(superAdmin, "canManageWebsite"), true);
 
   // Admin has all business operations permissions
   assert.equal(hasPermission(admin, "canManageProducts"), true);
+  assert.equal(hasPermission(admin, "canManageInventory"), true);
   assert.equal(hasPermission(admin, "canViewFinancials"), true);
   assert.equal(hasPermission(admin, "canManageDiscounts"), true);
 
   // Manager with granular permissions
   assert.equal(hasPermission(managerWithProductsOnly, "canManageProducts"), true);
+  assert.equal(hasPermission(managerWithProductsOnly, "canManageInventory"), false);
   assert.equal(hasPermission(managerWithProductsOnly, "canManageOrders"), false);
   assert.equal(hasPermission(managerWithProductsOnly, "canViewFinancials"), false);
 
@@ -188,10 +192,22 @@ test("resolveServerUser: non-primary super_admin claim does NOT grant Super Admi
 });
 
 test("resolveServerUser: primary provider account receives Super Admin authority", async () => {
+  // Unverified provider email is NOT granted Super Admin authority
+  const unverifiedToken: any = {
+    uid: "unverified-super-uid",
+    email: PRIMARY_SUPER_ADMIN_EMAIL,
+    role: "super_admin",
+    email_verified: false,
+  };
+  const unverifiedUser = await resolveServerUser(unverifiedToken);
+  assert.equal(unverifiedUser.isSuperAdmin, false);
+
+  // Verified provider email is granted Super Admin authority
   const token: any = {
     uid: "primary-super-uid",
     email: PRIMARY_SUPER_ADMIN_EMAIL,
     role: "super_admin",
+    email_verified: true,
   };
   const user = await resolveServerUser(token);
   assert.equal(user.isSuperAdmin, true);
@@ -290,11 +306,12 @@ test("resolveServerUser: fails closed with 503 when live staff profile cannot be
       (err: any) => err instanceof AuthError && err.status === 503
     );
 
-    // Primary Super Admin emergency bootstrap bypass remains functional
+    // Primary Super Admin emergency bootstrap bypass remains functional with verified provider identity
     const superToken: any = {
       uid: "super-bootstrap-uid",
       email: PRIMARY_SUPER_ADMIN_EMAIL,
       role: "super_admin",
+      email_verified: true,
     };
     const superUser = await resolveServerUser(superToken);
     assert.equal(superUser.isSuperAdmin, true);

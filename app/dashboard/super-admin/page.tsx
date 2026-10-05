@@ -48,6 +48,7 @@ import {
   Loader2,
   Server,
   ArrowRight,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,9 +60,11 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { OSVID_CLIENT_CONFIG } from "@/config/client";
+import { AuditLogEntry } from "@/types/audit";
 import { toast } from "sonner";
 
-type SuperAdminTab = "overview" | "tenant-admins" | "notifications" | "lease-control";
+type SuperAdminTab = "overview" | "tenant-admins" | "audit-log" | "notifications" | "lease-control";
 
 export default function SuperAdminDashboard() {
   const { userProfile, logout } = useAuth();
@@ -80,10 +83,12 @@ export default function SuperAdminDashboard() {
     activeAdmins: 0,
     activeManagers: 0,
     totalCustomers: 0,
-    systemHealth: "Optimal 99.98%",
-    serverUptime: "Active",
+    systemStatus: "Operational",
+    databaseStatus: "Connected (Firestore Cloud)",
   });
   const [admins, setAdmins] = useState<UserProfile[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
+  const [auditSearchQuery, setAuditSearchQuery] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [subscription, setSubscription] = useState<SubscriptionStatusInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -145,13 +150,26 @@ export default function SuperAdminDashboard() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [kpis, adminList, subRes] = await Promise.all([
+      const token = await auth.currentUser?.getIdToken();
+      const auditPromise = token
+        ? fetch("/api/admin/audit-logs?limit=100", {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+            .then((r) => (r.ok ? r.json() : { success: false, data: [] }))
+            .catch(() => ({ success: false, data: [] }))
+        : Promise.resolve({ success: false, data: [] });
+
+      const [kpis, adminList, subRes, auditRes] = await Promise.all([
         getExecutiveGovernanceStats(),
         getTenantAdministrators(),
         getSubscriptionStatus(),
+        auditPromise,
       ]);
       setStats(kpis);
       setAdmins(adminList);
+      if (auditRes?.success && Array.isArray(auditRes.data)) {
+        setAuditLogs(auditRes.data);
+      }
 
       if (subRes.success && subRes.data) {
         setSubscription(subRes.data);
@@ -536,6 +554,12 @@ export default function SuperAdminDashboard() {
       badge: `${admins.length}`,
     },
     {
+      id: "audit-log" as SuperAdminTab,
+      label: "Provider Audit Log",
+      icon: FileText,
+      badge: `${auditLogs.length}`,
+    },
+    {
       id: "notifications" as SuperAdminTab,
       label: "Warning Broadcast Center",
       icon: BellRing,
@@ -723,6 +747,7 @@ export default function SuperAdminDashboard() {
               <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight mt-0.5">
                 {activeTab === "overview" && "Business Telemetry & Performance"}
                 {activeTab === "tenant-admins" && "Tenant Administrator Directory"}
+                {activeTab === "audit-log" && "Provider Governance Audit Log"}
                 {activeTab === "notifications" && "Tenant Warning & Notice Broadcast"}
                 {activeTab === "lease-control" && "Annual Lease Terms & Kill-Switch"}
               </h2>
@@ -942,6 +967,73 @@ export default function SuperAdminDashboard() {
                     </div>
                   </div>
                 </div>
+
+                {/* Governed Client Installation (Multi-Client Ready Metadata) */}
+                <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 mb-4 border-b border-slate-100 gap-2">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-orange-50 border border-orange-200 flex items-center justify-center text-orange-600 font-black">
+                        <Server size={20} />
+                      </div>
+                      <div>
+                        <h4 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                          Governed Client Installation
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 uppercase font-semibold">
+                            Tenant Scope
+                          </span>
+                        </h4>
+                        <p className="text-xs text-slate-500">
+                          Isolated client application instance governed by platform landlord authority.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      Client Plane: {OSVID_CLIENT_CONFIG.clientId}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
+                      <span className="text-slate-400 block text-[11px] font-semibold uppercase">Business Name</span>
+                      <span className="font-bold text-slate-900 text-sm mt-0.5 block">{OSVID_CLIENT_CONFIG.clientName}</span>
+                      <span className="text-[11px] text-slate-500 block mt-0.5">ID: <code className="font-mono text-orange-600 font-semibold">{OSVID_CLIENT_CONFIG.clientId}</code></span>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
+                      <span className="text-slate-400 block text-[11px] font-semibold uppercase">Hosting & Project</span>
+                      <span className="font-bold text-slate-900 text-sm mt-0.5 block font-mono">{OSVID_CLIENT_CONFIG.primaryDomain}</span>
+                      <span className="text-[11px] text-slate-500 block mt-0.5">Firebase: <code className="font-mono text-slate-700">{OSVID_CLIENT_CONFIG.firebaseProjectId}</code></span>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
+                      <span className="text-slate-400 block text-[11px] font-semibold uppercase">Primary Administrator</span>
+                      <span className="font-bold text-slate-900 text-sm mt-0.5 block truncate">
+                        {admins.find((a) => a.role === "admin")?.displayName || admins[0]?.displayName || "Tenant Admin"}
+                      </span>
+                      <span className="text-[11px] text-slate-500 block mt-0.5 truncate font-mono">
+                        {admins.find((a) => a.role === "admin")?.email || admins[0]?.email || "admin@osvidcompany.com"}
+                      </span>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
+                      <span className="text-slate-400 block text-[11px] font-semibold uppercase">Plan & Status</span>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="font-bold text-slate-900 text-sm">{OSVID_CLIENT_CONFIG.plan}</span>
+                        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                          subscription?.isSuspended
+                            ? "bg-red-100 text-red-800"
+                            : "bg-emerald-100 text-emerald-800"
+                        }`}>
+                          {subscription?.isSuspended ? "Suspended" : (subscription?.status || "Active")}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-500 block mt-0.5">
+                        DB: {stats.databaseStatus}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -1126,6 +1218,164 @@ export default function SuperAdminDashboard() {
                               </td>
                             </tr>
                           ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ============================================================ */}
+            {/* TAB: PROVIDER GOVERNANCE AUDIT LOG */}
+            {/* ============================================================ */}
+            {activeTab === "audit-log" && (
+              <div className="space-y-6">
+                <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm">
+                  {/* Header & Search */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                          <FileText className="text-orange-600 w-5 h-5" />
+                          Platform Governance Audit Trail
+                        </h3>
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-orange-100 text-orange-800 border border-orange-200">
+                          {auditLogs.length} Recorded Events
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Append-only, tamper-resistant record of administrative actions, credential updates, and lease governance changes.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <Input
+                          placeholder="Search action, actor, target..."
+                          value={auditSearchQuery}
+                          onChange={(e) => setAuditSearchQuery(e.target.value)}
+                          className="pl-9 h-10 bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 rounded-xl text-xs w-64"
+                        />
+                      </div>
+
+                      <Button
+                        variant="outline"
+                        onClick={loadData}
+                        disabled={loading}
+                        className="text-xs font-semibold rounded-xl h-10 gap-1.5 bg-white hover:bg-slate-50 border-slate-200"
+                      >
+                        <RefreshCw size={14} className={loading ? "animate-spin text-orange-600" : "text-slate-500"} />
+                        <span>Refresh Trail</span>
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Audit Logs Table */}
+                  <div className="overflow-x-auto mt-3">
+                    <table className="w-full text-left text-xs text-slate-600">
+                      <thead className="bg-slate-50 text-[11px] font-bold uppercase text-slate-500 border-b border-slate-200">
+                        <tr>
+                          <th className="px-4 py-3.5">Timestamp</th>
+                          <th className="px-4 py-3.5">Action</th>
+                          <th className="px-4 py-3.5">Actor</th>
+                          <th className="px-4 py-3.5">Target</th>
+                          <th className="px-4 py-3.5">Summary / Changes</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {auditLogs
+                          .filter((log) => {
+                            if (!auditSearchQuery.trim()) return true;
+                            const q = auditSearchQuery.trim().toLowerCase();
+                            return (
+                              (log.action || "").toLowerCase().includes(q) ||
+                              (log.actorEmail || "").toLowerCase().includes(q) ||
+                              (log.targetType || "").toLowerCase().includes(q) ||
+                              (log.targetId || "").toLowerCase().includes(q) ||
+                              (log.summary || "").toLowerCase().includes(q)
+                            );
+                          })
+                          .map((log) => {
+                            const isDanger =
+                              log.action.includes("delete") || log.action.includes("suspend");
+                            const isWarning =
+                              log.action.includes("update") || log.action.includes("warning");
+                            const isSuccess =
+                              log.action.includes("create") || log.action.includes("reactivate");
+
+                            return (
+                              <tr key={log.id} className="hover:bg-slate-50/80 transition-colors">
+                                <td className="px-4 py-3 font-mono text-[11px] text-slate-500 whitespace-nowrap">
+                                  {log.timestamp
+                                    ? new Date(log.timestamp).toLocaleString("en-US", {
+                                        month: "short",
+                                        day: "numeric",
+                                        year: "numeric",
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                        second: "2-digit",
+                                      })
+                                    : "—"}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span
+                                    className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase font-mono tracking-wider ${
+                                      isDanger
+                                        ? "bg-red-100 text-red-800"
+                                        : isWarning
+                                        ? "bg-amber-100 text-amber-800"
+                                        : isSuccess
+                                        ? "bg-emerald-100 text-emerald-800"
+                                        : "bg-blue-100 text-blue-800"
+                                    }`}
+                                  >
+                                    {log.action}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="font-semibold text-slate-900 truncate max-w-[200px]">
+                                    {log.actorEmail}
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 uppercase font-bold">
+                                    {log.actorRole}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="font-semibold text-slate-800 uppercase text-[10px]">
+                                    {log.targetType}
+                                  </div>
+                                  <div className="font-mono text-[11px] text-slate-500 truncate max-w-[150px]">
+                                    {log.targetId || "—"}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <p className="text-slate-800 font-medium">{log.summary}</p>
+                                  {log.metadata && Object.keys(log.metadata).length > 0 && (
+                                    <details className="mt-1 text-[11px] text-slate-500 cursor-pointer">
+                                      <summary className="text-orange-600 hover:text-orange-700 font-semibold select-none">
+                                        View Details
+                                      </summary>
+                                      <pre className="mt-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-mono text-slate-700 whitespace-pre-wrap overflow-x-auto max-w-md">
+                                        {JSON.stringify(log.metadata, null, 2)}
+                                      </pre>
+                                    </details>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        {auditLogs.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="px-4 py-12 text-center text-slate-400">
+                              <FileText className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                              <p className="font-semibold text-slate-600">No audit events recorded</p>
+                              <p className="text-xs text-slate-400 mt-0.5">
+                                Administrative actions and subscription updates will appear here automatically.
+                              </p>
+                            </td>
+                          </tr>
                         )}
                       </tbody>
                     </table>

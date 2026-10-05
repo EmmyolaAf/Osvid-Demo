@@ -10,11 +10,17 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Authoritative Super Admin: strictly the designated primary provider account
+    // Authoritative Super Admin: strictly the designated primary provider account with verified identity
     function isSuperAdmin() {
       return isAuthenticated() &&
         request.auth.token.email != null &&
-        request.auth.token.email.lower() == 'abolarinwaemmanuelfree@gmail.com';
+        request.auth.token.email.lower() == 'abolarinwaemmanuelfree@gmail.com' &&
+        (
+          request.auth.token.email_verified == true ||
+          request.auth.token.firebase.sign_in_provider == 'google.com' ||
+          (request.auth.token.keys().hasAny(['isProviderOwner', 'provider_owner']) &&
+           (request.auth.token.isProviderOwner == true || request.auth.token.provider_owner == true))
+        );
     }
 
     function userDocExists() {
@@ -53,11 +59,17 @@ service cloud.firestore {
     }
 
     // Privileged operational permission: must be actively granted in the live profile
+    // Includes non-destructive fallback for existing legacy manager profiles lacking canManageInventory
     function hasManagerPermission(perm) {
       return isAdmin() || (
         isManager() &&
         ('permissions' in getUserData()) &&
-        getUserData().permissions[perm] == true
+        (
+          getUserData().permissions[perm] == true ||
+          (perm == 'canManageInventory' &&
+           !('canManageInventory' in getUserData().permissions) &&
+           getUserData().permissions.canManageProducts == true)
+        )
       );
     }
 
@@ -115,7 +127,14 @@ service cloud.firestore {
     // ===============================================================
     match /products/{productId} {
       allow read: if true; // Public catalog
-      allow write: if hasManagerPermission('canManageProducts');
+      // Catalogue creation and deletion strictly requires canManageProducts
+      allow create, delete: if hasManagerPermission('canManageProducts');
+      // Full catalogue edits require canManageProducts.
+      // Stock adjustments require canManageInventory.
+      allow update: if hasManagerPermission('canManageProducts') || (
+        hasManagerPermission('canManageInventory') &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stockQuantity', 'updatedAt'])
+      );
     }
 
     match /categories/{categoryId} {
@@ -208,8 +227,18 @@ service cloud.firestore {
 
     match /back_in_stock_requests/{requestId} {
       allow create: if true;
-      allow read, delete: if hasManagerPermission('canManageProducts');
-      allow update: if hasManagerPermission('canManageProducts');
+      allow read, delete: if hasManagerPermission('canManageProducts') || hasManagerPermission('canManageInventory');
+      allow update: if hasManagerPermission('canManageProducts') || hasManagerPermission('canManageInventory');
+    }
+
+    // ===============================================================
+    // 8. AUDIT LOGS (TAMPER-RESISTANT APPEND-ONLY)
+    // ===============================================================
+    match /audit_logs/{logId} {
+      // Readable exclusively by verified Super Admin
+      allow read: if isSuperAdmin();
+      // Tamper-resistant: direct client writes are forbidden; writes occur via Firebase Admin SDK
+      allow write: if false;
     }
   }
 }

@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { getUsersByRole, updateManagerProfile } from "@/lib/firebase/firestore";
-import { UserProfile, ManagerPermissions, DEFAULT_MANAGER_PERMISSIONS } from "@/types/auth";
+import { UserProfile, ManagerPermissions, DEFAULT_MANAGER_PERMISSIONS, normalizeManagerPermissions } from "@/types/auth";
 import {
   Users,
   UserPlus,
@@ -126,13 +126,15 @@ export default function ManagersManagementPage() {
   const handleOpenEdit = (mgr: UserProfile) => {
     setSelectedManager(mgr);
     setEditTitle(mgr.customTitle || "Operations Manager");
+    const perms = normalizeManagerPermissions(mgr.permissions);
     setEditPermissions({
-      canManageProducts: mgr.permissions?.canManageProducts ?? true,
-      canManageOrders: mgr.permissions?.canManageOrders ?? true,
-      canViewFinancials: mgr.permissions?.canViewFinancials ?? false,
-      canManageWebsite: mgr.permissions?.canManageWebsite ?? false,
-      canManageCustomers: mgr.permissions?.canManageCustomers ?? true,
-      canManageDiscounts: mgr.permissions?.canManageDiscounts ?? false,
+      canManageProducts: perms.canManageProducts,
+      canManageInventory: perms.canManageInventory,
+      canManageOrders: perms.canManageOrders,
+      canViewFinancials: perms.canViewFinancials,
+      canManageWebsite: perms.canManageWebsite,
+      canManageCustomers: perms.canManageCustomers,
+      canManageDiscounts: perms.canManageDiscounts,
     });
     setIsEditOpen(true);
   };
@@ -268,7 +270,7 @@ export default function ManagersManagementPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium">
                   {filteredManagers.map((mgr) => {
-                    const perms = mgr.permissions || DEFAULT_MANAGER_PERMISSIONS;
+                    const perms = normalizeManagerPermissions(mgr.permissions);
                     return (
                       <tr key={mgr.uid} className="hover:bg-slate-50/80 transition-colors">
                         <td className="py-4 px-6">
@@ -289,7 +291,12 @@ export default function ManagersManagementPage() {
                           <div className="flex flex-wrap gap-1.5 max-w-xs">
                             {perms.canManageProducts && (
                               <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">
-                                Products
+                                Catalogue CRUD
+                              </span>
+                            )}
+                            {perms.canManageInventory && (
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-cyan-50 text-cyan-700 border border-cyan-100">
+                                Inventory Stock
                               </span>
                             )}
                             {perms.canManageOrders && (
@@ -467,7 +474,22 @@ export default function ManagersManagementPage() {
                       }
                       className="w-4 h-4 accent-orange-600 rounded"
                     />
-                    <span>Products &amp; Inventory</span>
+                    <span>Product Catalogue CRUD</span>
+                  </label>
+
+                  <label className="flex items-center gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={createPermissions.canManageInventory}
+                      onChange={(e) =>
+                        setCreatePermissions({
+                          ...createPermissions,
+                          canManageInventory: e.target.checked,
+                        })
+                      }
+                      className="w-4 h-4 accent-orange-600 rounded"
+                    />
+                    <span>Inventory &amp; Stock Levels</span>
                   </label>
 
                   <label className="flex items-center gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer">
@@ -611,7 +633,22 @@ export default function ManagersManagementPage() {
                       }
                       className="w-4 h-4 accent-orange-600 rounded"
                     />
-                    <span>Manage Products &amp; Stock</span>
+                    <span>Manage Product Catalogue CRUD</span>
+                  </label>
+
+                  <label className="flex items-center gap-2.5 text-xs text-slate-800 font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editPermissions.canManageInventory}
+                      onChange={(e) =>
+                        setEditPermissions({
+                          ...editPermissions,
+                          canManageInventory: e.target.checked,
+                        })
+                      }
+                      className="w-4 h-4 accent-orange-600 rounded"
+                    />
+                    <span>Manage Inventory &amp; Stock Levels</span>
                   </label>
 
                   <label className="flex items-center gap-2.5 text-xs text-slate-800 font-semibold cursor-pointer">

@@ -8,6 +8,7 @@ import {
   assertCanManageTargetStaff,
   assertCanUpdateStaffFields,
 } from "@/lib/server/auth";
+import { logAuditEvent } from "@/lib/server/audit";
 
 export async function POST(req: NextRequest) {
   try {
@@ -87,6 +88,33 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
+
+    // 3. Audit log event
+    await logAuditEvent({
+      actor: {
+        uid: caller.uid,
+        email: caller.email,
+        role: caller.role,
+      },
+      action:
+        targetRole === "admin"
+          ? isActive
+            ? "admin.activate"
+            : "admin.deactivate"
+          : isActive
+          ? "manager.activate"
+          : "manager.deactivate",
+      targetType: targetRole,
+      targetId: uid,
+      summary: `${isActive ? "Activated" : "Deactivated"} ${
+        targetRole === "admin" ? "Administrator" : "Manager"
+      } account (${targetUser.email})`,
+      metadata: {
+        targetUid: uid,
+        targetEmail: targetUser.email,
+        isActive: Boolean(isActive),
+      },
+    });
 
     return NextResponse.json({ success: true, isActive: Boolean(isActive) });
   } catch (err: any) {

@@ -1,14 +1,16 @@
-import { doc, getDoc, setDoc } from "firebase/firestore";
-import { db } from "./client";
+import { doc, getDoc } from "firebase/firestore";
+import { db, auth } from "./client";
 import { BusinessSubscription } from "@/types/auth";
+import { OSVID_CLIENT_CONFIG } from "@/config/client";
+import { SubscriptionStatus } from "@/types/subscription";
 
-const SUBSCRIPTION_DOC_ID = "main_business";
+const PRIMARY_SUBSCRIPTION_DOC_ID = "subscription";
+const LEGACY_SUBSCRIPTION_DOC_ID = "main_business";
 const COLLECTION_NAME = "system_settings";
-const WRITE_TIMEOUT_MS = 12000;
 const READ_TIMEOUT_MS = 6000;
 
 export interface SubscriptionStatusInfo {
-  status: "active" | "warning" | "suspended";
+  status: SubscriptionStatus;
   isSuspended: boolean;
   suspendedReason?: string;
   daysRemaining: number;
@@ -21,6 +23,7 @@ export interface SubscriptionStatusInfo {
   renewalAmountNgn: number;
   hostingPlan: "standard" | "professional" | "enterprise";
   businessName: string;
+  clientId?: string;
 }
 
 export type SubscriptionResult<T> =
@@ -28,9 +31,10 @@ export type SubscriptionResult<T> =
   | { success: false; error: string; data?: never };
 
 export const DEFAULT_BUSINESS_SUBSCRIPTION: BusinessSubscription = {
-  id: SUBSCRIPTION_DOC_ID,
-  businessName: "OSVID Chemicals Limited",
-  adminEmail: "admin@osvidchemicals.com",
+  id: PRIMARY_SUBSCRIPTION_DOC_ID,
+  clientId: OSVID_CLIENT_CONFIG.clientId,
+  businessName: OSVID_CLIENT_CONFIG.clientName,
+  adminEmail: OSVID_CLIENT_CONFIG.defaultAdminEmail,
   isSuspended: false,
   suspendedReason: "Hosting subscription payment past due.",
   hostingPlan: "enterprise",
@@ -67,6 +71,11 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMsg: string
 
 /**
  * Calculate subscription status, days remaining, and grace period logic
+ * Deterministic states:
+ * - suspended: manually suspended OR hard expired beyond grace period
+ * - grace: past expiry but within grace period
+ * - warning: within 14 days of expiry OR showWarning enabled
+ * - active: normal operation
  */
 export function calculateSubscriptionStatus(sub: BusinessSubscription): SubscriptionStatusInfo {
   const now = new Date();
@@ -79,24 +88,28 @@ export function calculateSubscriptionStatus(sub: BusinessSubscription): Subscrip
   const isGracePeriod = isPastDue && Math.abs(daysRemaining) <= gracePeriodDays;
   const isHardExpired = isPastDue && Math.abs(daysRemaining) > gracePeriodDays;
 
-  let computedStatus: "active" | "warning" | "suspended" = "active";
+  let computedStatus: SubscriptionStatus = "active";
 
   if (sub.isSuspended || isHardExpired) {
     computedStatus = "suspended";
-  } else if (sub.showWarning || daysRemaining <= 14 || isGracePeriod) {
+  } else if (isGracePeriod) {
+    computedStatus = "grace";
+  } else if (sub.showWarning || daysRemaining <= 14) {
     computedStatus = "warning";
   } else {
     computedStatus = "active";
   }
 
+  const effectiveSuspended = sub.isSuspended || isHardExpired;
+
   return {
     status: computedStatus,
-    isSuspended: sub.isSuspended || isHardExpired,
+    isSuspended: effectiveSuspended,
     suspendedReason:
       sub.suspendedReason ||
       (isHardExpired
         ? `Annual license expired on ${expiry.toLocaleDateString()}. Grace period of ${gracePeriodDays} days has elapsed.`
-        : "Application access suspended by administrator."),
+        : "Application access suspended by platform provider."),
     daysRemaining,
     hostingExpiryDate: sub.hostingExpiryDate,
     gracePeriodDays,
@@ -112,33 +125,50 @@ export function calculateSubscriptionStatus(sub: BusinessSubscription): Subscrip
         : ""),
     renewalAmountNgn: sub.renewalAmountNgn || 250000,
     hostingPlan: sub.hostingPlan || "enterprise",
-    businessName: sub.businessName || "OSVID Chemicals Limited",
+    businessName: sub.businessName || OSVID_CLIENT_CONFIG.clientName,
+    clientId: sub.clientId || OSVID_CLIENT_CONFIG.clientId,
   };
 }
 
 /**
- * Get direct database subscription object with safe fallback
+ * Get direct database subscription object with safe dual-read fallback
  */
 export async function getBusinessSubscription(): Promise<BusinessSubscription> {
   try {
-    const docRef = doc(db, COLLECTION_NAME, SUBSCRIPTION_DOC_ID);
-    const snap = await withTimeout(
-      getDoc(docRef),
+    // 1. Try primary authoritative document
+    const primaryRef = doc(db, COLLECTION_NAME, PRIMARY_SUBSCRIPTION_DOC_ID);
+    const primarySnap = await withTimeout(
+      getDoc(primaryRef),
       READ_TIMEOUT_MS,
       "Subscription query read timed out"
     );
 
-    if (snap.exists()) {
-      const data = snap.data() as BusinessSubscription;
+    if (primarySnap.exists()) {
+      const data = primarySnap.data() as BusinessSubscription;
       return {
         ...DEFAULT_BUSINESS_SUBSCRIPTION,
         ...data,
-        id: snap.id,
+        id: primarySnap.id,
       };
     }
 
-    // Auto-seed in background if missing
-    setDoc(docRef, DEFAULT_BUSINESS_SUBSCRIPTION, { merge: true }).catch(() => {});
+    // 2. Try legacy fallback document
+    const legacyRef = doc(db, COLLECTION_NAME, LEGACY_SUBSCRIPTION_DOC_ID);
+    const legacySnap = await withTimeout(
+      getDoc(legacyRef),
+      READ_TIMEOUT_MS,
+      "Legacy subscription query read timed out"
+    );
+
+    if (legacySnap.exists()) {
+      const data = legacySnap.data() as BusinessSubscription;
+      return {
+        ...DEFAULT_BUSINESS_SUBSCRIPTION,
+        ...data,
+        id: legacySnap.id,
+      };
+    }
+
     return DEFAULT_BUSINESS_SUBSCRIPTION;
   } catch (err) {
     console.warn("getBusinessSubscription returned fallback due to:", err);
@@ -151,78 +181,78 @@ export async function getBusinessSubscription(): Promise<BusinessSubscription> {
  */
 export async function getSubscriptionStatus(): Promise<SubscriptionResult<SubscriptionStatusInfo>> {
   try {
-    const docRef = doc(db, COLLECTION_NAME, SUBSCRIPTION_DOC_ID);
-    const snap = await withTimeout(
-      getDoc(docRef),
-      READ_TIMEOUT_MS,
-      "Firestore subscription read timed out"
-    );
-
-    let subData: BusinessSubscription;
-
-    if (snap.exists()) {
-      subData = {
-        ...DEFAULT_BUSINESS_SUBSCRIPTION,
-        ...(snap.data() as BusinessSubscription),
-        id: snap.id,
-      };
-    } else {
-      subData = DEFAULT_BUSINESS_SUBSCRIPTION;
-      setDoc(docRef, DEFAULT_BUSINESS_SUBSCRIPTION, { merge: true }).catch(() => {});
-    }
-
+    const subData = await getBusinessSubscription();
     const statusInfo = calculateSubscriptionStatus(subData);
     return { success: true, data: statusInfo };
   } catch (error: any) {
     console.warn("getSubscriptionStatus using active fallback cache:", error?.message || error);
-    // Graceful active state fallback prevents UI crashes during connection handshakes
     const fallbackStatus = calculateSubscriptionStatus(DEFAULT_BUSINESS_SUBSCRIPTION);
     return { success: true, data: fallbackStatus };
   }
 }
 
 /**
- * Update subscription parameters (Super Admin only) with confirmation
+ * Update subscription parameters via secure server API route (Super Admin only).
+ * Replaces direct browser Firestore writes with authenticated server endpoint.
  */
 export async function updateSubscriptionSettings(
   data: Partial<BusinessSubscription>
 ): Promise<SubscriptionResult<BusinessSubscription>> {
   try {
-    const docRef = doc(db, COLLECTION_NAME, SUBSCRIPTION_DOC_ID);
-
-    let currentData: BusinessSubscription = DEFAULT_BUSINESS_SUBSCRIPTION;
-    try {
-      const currentSnap = await withTimeout(
-        getDoc(docRef),
-        READ_TIMEOUT_MS,
-        "Read before update timed out"
-      );
-      if (currentSnap.exists()) {
-        currentData = currentSnap.data() as BusinessSubscription;
-      }
-    } catch (readErr) {
-      // ignore, proceed with update
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) {
+      return {
+        success: false,
+        error: "Authentication required to update subscription settings.",
+      };
     }
 
-    const payload: BusinessSubscription = {
-      ...currentData,
-      ...data,
-      updatedAt: new Date().toISOString(),
-    };
+    let action = "update-terms";
+    let payload: any = {};
 
-    // Strict write to Firestore
-    await withTimeout(
-      setDoc(docRef, payload, { merge: true }),
-      WRITE_TIMEOUT_MS,
-      "Database write timed out after 12s."
-    );
+    if (data.isSuspended !== undefined) {
+      action = data.isSuspended ? "suspend" : "reactivate";
+      payload = { reason: data.suspendedReason };
+    } else if (data.showWarning !== undefined || data.warningNotice !== undefined) {
+      action = "set-warning";
+      payload = {
+        showWarning: data.showWarning,
+        warningNotice: data.warningNotice,
+      };
+    } else {
+      action = "update-terms";
+      payload = {
+        hostingExpiryDate: data.hostingExpiryDate,
+        renewalAmountNgn: data.renewalAmountNgn,
+        gracePeriodDays: data.gracePeriodDays,
+        hostingPlan: data.hostingPlan,
+        businessName: data.businessName,
+      };
+    }
 
-    return { success: true, data: payload };
+    const res = await fetch("/api/admin/subscription", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ action, payload }),
+    });
+
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || "Failed to persist subscription settings via server.",
+      };
+    }
+
+    return { success: true, data: result.subscription };
   } catch (error: any) {
     console.error("updateSubscriptionSettings failure:", error);
     return {
       success: false,
-      error: error?.message || "Failed to persist subscription settings to Firestore.",
+      error: error?.message || "Failed to update subscription settings.",
     };
   }
 }
@@ -241,20 +271,42 @@ export async function updateBusinessSubscription(
 }
 
 /**
- * Toggle the global app suspension kill-switch with immediate confirmation
+ * Toggle the global app suspension kill-switch with immediate confirmation via server API
  */
 export async function toggleAppSuspension(
   isSuspended: boolean,
   reason?: string
 ): Promise<SubscriptionResult<BusinessSubscription>> {
   try {
-    const updatePayload: Partial<BusinessSubscription> = {
-      isSuspended,
-      ...(isSuspended && reason ? { suspendedReason: reason.trim() } : {}),
-      updatedAt: new Date().toISOString(),
-    };
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) {
+      return {
+        success: false,
+        error: "Authentication required to toggle application suspension.",
+      };
+    }
 
-    return await updateSubscriptionSettings(updatePayload);
+    const res = await fetch("/api/admin/subscription", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        action: isSuspended ? "suspend" : "reactivate",
+        payload: { reason: reason?.trim() },
+      }),
+    });
+
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok || !result.success) {
+      return {
+        success: false,
+        error: result.error || "Failed to update global app suspension state.",
+      };
+    }
+
+    return { success: true, data: result.subscription };
   } catch (error: any) {
     console.error("toggleAppSuspension error:", error);
     return {

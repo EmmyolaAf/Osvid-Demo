@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { normalizeManagerPermissions } from "@/types/auth";
 import {
   requireAdminOrSuperAdmin,
   authErrorResponse,
@@ -9,6 +10,7 @@ import {
   assertCanManageTargetStaff,
   assertCanUpdateStaffFields,
 } from "@/lib/server/auth";
+import { logAuditEvent } from "@/lib/server/audit";
 
 export async function POST(req: NextRequest) {
   try {
@@ -134,25 +136,17 @@ export async function POST(req: NextRequest) {
           ? phoneNumber.trim()
           : existingClaims.phoneNumber || "",
       permissions:
-        permissions ||
-        existingClaims.permissions ||
-        (finalRole === "manager"
-          ? {
-              canManageProducts: true,
-              canManageOrders: true,
-              canViewFinancials: false,
-              canManageWebsite: false,
-              canManageCustomers: true,
-              canManageDiscounts: false,
-            }
+        finalRole === "manager"
+          ? normalizeManagerPermissions(permissions || existingClaims.permissions)
           : {
               canManageProducts: true,
+              canManageInventory: true,
               canManageOrders: true,
               canViewFinancials: true,
               canManageWebsite: true,
               canManageCustomers: true,
               canManageDiscounts: true,
-            }),
+            },
     };
 
     try {
@@ -260,6 +254,26 @@ export async function POST(req: NextRequest) {
       isActive: !finalAuthUser.disabled,
       updatedAt: new Date().toISOString(),
     };
+
+    // 9. Audit log event
+    await logAuditEvent({
+      actor: {
+        uid: caller.uid,
+        email: caller.email,
+        role: caller.role,
+      },
+      action: finalRole === "admin" ? "admin.update" : "manager.update",
+      targetType: finalRole,
+      targetId: uid,
+      summary: `Updated ${finalRole === "admin" ? "Administrator" : "Manager"} account "${confirmedProfile.displayName || confirmedProfile.email}"`,
+      metadata: {
+        role: finalRole,
+        changedFields: Object.keys(profileUpdates),
+        permissions: updatedClaims.permissions,
+        customTitle: updatedClaims.customTitle,
+        isActive: confirmedProfile.isActive,
+      },
+    });
 
     return NextResponse.json({
       success: true,

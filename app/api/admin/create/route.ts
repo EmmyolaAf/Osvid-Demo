@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
-import { DEFAULT_MANAGER_PERMISSIONS, UserRole } from "@/types/auth";
+import { DEFAULT_MANAGER_PERMISSIONS, UserRole, normalizeManagerPermissions } from "@/types/auth";
 import {
   requireAdminOrSuperAdmin,
   authErrorResponse,
@@ -8,6 +8,7 @@ import {
   assertCanCreateStaffRole,
   generateSecureTemporaryPassword,
 } from "@/lib/server/auth";
+import { logAuditEvent } from "@/lib/server/audit";
 
 export async function POST(req: NextRequest) {
   try {
@@ -69,17 +70,17 @@ export async function POST(req: NextRequest) {
         : "Tenant Store Account");
 
     const assignedPermissions =
-      permissions ||
-      (assignedRole === "manager"
-        ? DEFAULT_MANAGER_PERMISSIONS
+      assignedRole === "manager"
+        ? normalizeManagerPermissions(permissions)
         : {
             canManageProducts: true,
+            canManageInventory: true,
             canManageOrders: true,
             canViewFinancials: true,
             canManageWebsite: true,
             canManageCustomers: true,
             canManageDiscounts: true,
-          });
+          };
 
     // 4. Create user in Firebase Auth (fail-closed, no fabricated UID)
     let uid: string;
@@ -155,6 +156,24 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
+
+    // 7. Audit log event
+    await logAuditEvent({
+      actor: {
+        uid: caller.uid,
+        email: caller.email,
+        role: caller.role,
+      },
+      action: assignedRole === "admin" ? "admin.create" : "manager.create",
+      targetType: assignedRole === "admin" ? "admin" : "manager",
+      targetId: uid,
+      summary: `Created ${assignedRole === "admin" ? "Administrator" : "Manager"} account "${userName}" (${cleanEmail})`,
+      metadata: {
+        role: assignedRole,
+        customTitle: title,
+        permissions: assignedPermissions,
+      },
+    });
 
     return NextResponse.json({
       success: true,

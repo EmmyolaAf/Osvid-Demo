@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
-import { UserRole, ManagerPermissions, UserProfile } from "@/types/auth";
+import { UserRole, ManagerPermissions, UserProfile, normalizeManagerPermissions } from "@/types/auth";
 import type { DecodedIdToken } from "firebase-admin/auth";
 
 /**
@@ -13,6 +13,27 @@ export const PRIMARY_SUPER_ADMIN_EMAIL = "abolarinwaemmanuelfree@gmail.com";
 export function isSuperAdminEmail(email?: string | null): boolean {
   if (!email) return false;
   return email.trim().toLowerCase() === PRIMARY_SUPER_ADMIN_EMAIL.toLowerCase();
+}
+
+/**
+ * Validates that caller identity matches the primary provider identity AND
+ * is verified (email verified, Google OAuth provider, or trusted provider claim),
+ * ensuring an unverified email/password signup cannot claim Super Admin privileges.
+ */
+export function isVerifiedProviderIdentity(decodedToken: DecodedIdToken): boolean {
+  const tokenEmail = (decodedToken.email || "").trim().toLowerCase();
+  if (!isSuperAdminEmail(tokenEmail)) {
+    return false;
+  }
+
+  const isEmailVerified = decodedToken.email_verified === true;
+  const isGoogleProvider =
+    (decodedToken.firebase as any)?.sign_in_provider === "google.com";
+  const hasProviderClaim =
+    (decodedToken as any).isProviderOwner === true ||
+    (decodedToken as any).provider_owner === true;
+
+  return isEmailVerified || isGoogleProvider || hasProviderClaim;
 }
 
 export class AuthError extends Error {
@@ -69,16 +90,16 @@ export async function resolveServerUser(
   const tokenEmail = (decodedToken.email || "").trim().toLowerCase();
 
   // 1. Determine baseline role:
-  // Sole authorized Super Admin is PRIMARY_SUPER_ADMIN_EMAIL.
-  // Any token attempting to claim 'super_admin' with a different email is demoted to 'user'.
-  const isSuper = isSuperAdminEmail(tokenEmail);
+  // Sole authorized Super Admin is PRIMARY_SUPER_ADMIN_EMAIL with verified identity.
+  // Any token attempting to claim 'super_admin' without verified identity is demoted to 'user'.
+  const isSuper = isVerifiedProviderIdentity(decodedToken);
 
   let effectiveRole: UserRole = isSuper
     ? "super_admin"
     : (decodedToken.role as UserRole) || "user";
 
   if (!isSuper && effectiveRole === "super_admin") {
-    // Non-primary tokens claiming super_admin receive zero elevated authority by default
+    // Non-verified or non-primary tokens claiming super_admin receive zero elevated authority
     effectiveRole = "user";
   }
 
@@ -263,7 +284,8 @@ export function hasPermission(
 ): boolean {
   if (user.isSuperAdmin || user.isAdmin) return true;
   if (user.isManager && user.permissions) {
-    return Boolean(user.permissions[permission]);
+    const normalized = normalizeManagerPermissions(user.permissions);
+    return Boolean(normalized[permission]);
   }
   return false;
 }

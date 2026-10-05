@@ -1105,8 +1105,9 @@ export async function getExecutiveGovernanceStats() {
       activeAdmins: adminsCount,
       activeManagers: managersCount,
       totalCustomers,
-      systemHealth: "Optimal 99.98%",
-      serverUptime: "36 days 14 hrs",
+      systemStatus: "Operational",
+      databaseStatus: "Connected (Firestore Cloud)",
+      clientId: "osvid",
     };
   } catch (error) {
     console.error("Error calculating executive stats:", error);
@@ -1118,8 +1119,9 @@ export async function getExecutiveGovernanceStats() {
       activeAdmins: 1,
       activeManagers: 0,
       totalCustomers: 0,
-      systemHealth: "Optimal",
-      serverUptime: "Active",
+      systemStatus: "Degraded",
+      databaseStatus: "Error connecting to Firestore",
+      clientId: "osvid",
     };
   }
 }

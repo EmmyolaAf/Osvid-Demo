@@ -6,6 +6,7 @@ import {
   AuthError,
   assertCanDeleteStaff,
 } from "@/lib/server/auth";
+import { logAuditEvent } from "@/lib/server/audit";
 
 export async function POST(req: NextRequest) {
   try {
@@ -87,6 +88,26 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
+
+    // Audit log event
+    await logAuditEvent({
+      actor: {
+        uid: caller.uid,
+        email: caller.email,
+        role: caller.role,
+      },
+      action: targetRole === "admin" ? "admin.delete" : "manager.delete",
+      targetType: targetRole,
+      targetId: uid,
+      summary: `Deleted ${
+        targetRole === "admin" ? "Administrator" : "Manager"
+      } account (${targetUser.email || uid})`,
+      metadata: {
+        targetUid: uid,
+        targetEmail: targetUser.email,
+        targetRole,
+      },
+    });
 
     return NextResponse.json({
       success: true,
