@@ -9,11 +9,13 @@ import {
   generateSecureTemporaryPassword,
 } from "@/lib/server/auth";
 import { logAuditEvent } from "@/lib/server/audit";
+import { assertOperationalSubscription } from "@/lib/server/subscription-guard";
 
 export async function POST(req: NextRequest) {
   try {
     // 1. Authorize caller: Super Admin or Admin required
     const caller = await requireAdminOrSuperAdmin(req);
+    await assertOperationalSubscription(caller);
 
     const body = await req.json();
     const {

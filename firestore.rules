@@ -133,29 +133,26 @@ service cloud.firestore {
     match /products/{productId} {
       allow read: if true; // Public catalog
 
-      // Product creation requires catalogue permission and operational subscription.
-      // Product Manager without Inventory permission CANNOT create initial positive stock.
-      allow create: if (isSuperAdmin() || isSubscriptionOperational()) &&
+      // Product creation: requires catalogue permission and operational subscription.
+      // Direct browser writes must persist stockQuantity == 0 (or omit it); positive stock enters via ledger API.
+      allow create: if isSuperAdmin() || (
+        isSubscriptionOperational() &&
         hasManagerPermission('canManageProducts') &&
-        (hasManagerPermission('canManageInventory') || !('stockQuantity' in request.resource.data) || request.resource.data.stockQuantity == 0);
+        (!('stockQuantity' in request.resource.data) || request.resource.data.stockQuantity == 0)
+      );
 
-      // Product updates: strictly isolate catalogue authority from inventory stock adjustments.
-      allow update: if (isSuperAdmin() || isSubscriptionOperational()) && (
-        // Case 1: Caller holds both Catalogue and Inventory permissions (or Admin / Super Admin)
-        (hasManagerPermission('canManageProducts') && hasManagerPermission('canManageInventory'))
-        ||
-        // Case 2: Catalogue-only Manager cannot modify stockQuantity
-        (hasManagerPermission('canManageProducts') &&
-         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['stockQuantity']))
-        ||
-        // Case 3: Inventory-only Manager can ONLY modify stockQuantity and updatedAt
-        (hasManagerPermission('canManageInventory') &&
-         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stockQuantity', 'updatedAt']))
+      // Product updates: catalogue management allowed, but stockQuantity is strictly forbidden from client updates!
+      allow update: if isSuperAdmin() || (
+        isSubscriptionOperational() &&
+        hasManagerPermission('canManageProducts') &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['stockQuantity'])
       );
 
       // Catalogue deletion strictly requires catalogue authority and operational subscription
-      allow delete: if (isSuperAdmin() || isSubscriptionOperational()) &&
-        hasManagerPermission('canManageProducts');
+      allow delete: if isSuperAdmin() || (
+        isSubscriptionOperational() &&
+        hasManagerPermission('canManageProducts')
+      );
     }
 
     match /categories/{categoryId} {
@@ -180,14 +177,10 @@ service cloud.firestore {
         )
       );
 
-      // Deny direct client order creation entirely.
-      // All orders are securely verified and written server-side by the Firebase Admin SDK.
+      // All order creations, fulfillment updates, and deletions must go through server APIs
       allow create: if false;
-
-      // Updates: only staff with live order management permission and operational subscription
-      allow update: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageOrders'));
-
-      allow delete: if isSuperAdmin() || (isSubscriptionOperational() && isAdmin());
+      allow update: if false;
+      allow delete: if false;
     }
 
     // ===============================================================
@@ -271,6 +264,23 @@ service cloud.firestore {
       allow read: if isSuperAdmin();
       // Tamper-resistant: direct client writes are forbidden; writes occur via Firebase Admin SDK
       allow write: if false;
+    }
+
+    // ===============================================================
+    // 9. INVENTORY MOVEMENTS LEDGER (IMMUTABLE APPEND-ONLY)
+    // ===============================================================
+    match /inventory_movements/{movementId} {
+      // Read access: authorized staff holding inventory authority or Super Admin
+      allow read: if isSuperAdmin() || (
+        isSubscriptionOperational() &&
+        isStaff() &&
+        (isAdmin() || hasManagerPermission('canManageInventory'))
+      );
+
+      // Immutable append-only ledger: browser client writes strictly denied
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
     }
   }
 }

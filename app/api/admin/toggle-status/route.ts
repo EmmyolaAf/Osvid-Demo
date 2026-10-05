@@ -9,10 +9,12 @@ import {
   assertCanUpdateStaffFields,
 } from "@/lib/server/auth";
 import { logAuditEvent } from "@/lib/server/audit";
+import { assertOperationalSubscription } from "@/lib/server/subscription-guard";
 
 export async function POST(req: NextRequest) {
   try {
     const caller = await requireAdminOrSuperAdmin(req);
+    await assertOperationalSubscription(caller);
     const { uid, isActive } = await req.json();
 
     if (!uid) {

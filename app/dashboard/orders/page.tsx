@@ -32,6 +32,28 @@ import {
 import { toast } from "sonner";
 import formatCurrency from "@/helpers/formatCurrency";
 
+function getAllowedTransitions(
+  currentStatus: OrderStatus,
+  deliveryMethod?: "pickup" | "delivery"
+): OrderStatus[] {
+  if (currentStatus === "delivered" || currentStatus === "cancelled") {
+    return [currentStatus];
+  }
+
+  const method = deliveryMethod === "pickup" ? "pickup" : "delivery";
+
+  if (method === "pickup") {
+    if (currentStatus === "pending") return ["pending", "processing", "cancelled"];
+    if (currentStatus === "processing") return ["processing", "delivered", "cancelled"];
+  } else {
+    if (currentStatus === "pending") return ["pending", "processing", "cancelled"];
+    if (currentStatus === "processing") return ["processing", "shipped", "cancelled"];
+    if (currentStatus === "shipped") return ["shipped", "delivered"];
+  }
+
+  return [currentStatus];
+}
+
 export default function OrdersManagementPage() {
   const { userProfile } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -42,7 +64,8 @@ export default function OrdersManagementPage() {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-  // Tracking and Note Edit State in Modal
+  // Tracking, Note, and Stage Edit State in Modal
+  const [modalStatus, setModalStatus] = useState<OrderStatus>("pending");
   const [modalTrackingNumber, setModalTrackingNumber] = useState("");
   const [modalNote, setModalNote] = useState("");
   const [isSavingModal, setIsSavingModal] = useState(false);
@@ -72,11 +95,10 @@ export default function OrdersManagementPage() {
   ) => {
     try {
       setUpdatingId(orderId);
-      const updaterName = userProfile?.displayName || "Operations Manager";
       await updateOrderStatusInDb(
         orderId,
         newStatus,
-        updaterName,
+        undefined,
         note || `Fulfillment stage updated to ${newStatus}`,
         trackingNumber
       );
@@ -105,9 +127,7 @@ export default function OrdersManagementPage() {
         );
       }
 
-      toast.success(`Order status updated to "${newStatus.toUpperCase()}"`, {
-        description: `Updated by ${updaterName}`,
-      });
+      toast.success(`Order status updated to "${newStatus.toUpperCase()}"`);
     } catch (err: any) {
       console.error("Error updating order:", err);
       toast.error(err.message || "Failed to update order status.");
@@ -120,11 +140,25 @@ export default function OrdersManagementPage() {
     if (!selectedOrder) return;
     setIsSavingModal(true);
     try {
+      const trackingTrimmed = modalTrackingNumber.trim() || undefined;
+      const noteTrimmed = modalNote.trim() || undefined;
+
+      if (
+        modalStatus === "shipped" &&
+        !trackingTrimmed &&
+        !selectedOrder.trackingNumber &&
+        selectedOrder.deliveryMethod !== "pickup"
+      ) {
+        toast.error("Courier tracking reference is required to transition delivery order to Shipped.");
+        setIsSavingModal(false);
+        return;
+      }
+
       await handleStatusChange(
         selectedOrder.id,
-        selectedOrder.orderStatus,
-        modalTrackingNumber.trim() || undefined,
-        modalNote.trim() || undefined
+        modalStatus,
+        trackingTrimmed,
+        noteTrimmed
       );
       toast.success("Shipment details and notes saved successfully!");
     } catch (err: any) {
@@ -136,6 +170,7 @@ export default function OrdersManagementPage() {
 
   const openDetailModal = (o: Order) => {
     setSelectedOrder(o);
+    setModalStatus(o.orderStatus);
     setModalTrackingNumber(o.trackingNumber || "");
     setModalNote("");
     setIsDetailOpen(true);
@@ -316,19 +351,36 @@ export default function OrdersManagementPage() {
                       <div className="flex items-center gap-1.5">
                         {updatingId === o.id ? (
                           <Loader2 className="w-4 h-4 animate-spin text-orange-600" />
+                        ) : o.orderStatus === "delivered" || o.orderStatus === "cancelled" ? (
+                          <span className="text-xs font-semibold text-slate-400 italic">
+                            Completed
+                          </span>
                         ) : (
                           <select
                             value={o.orderStatus}
-                            onChange={(e) =>
-                              handleStatusChange(o.id, e.target.value as OrderStatus)
-                            }
+                            onChange={(e) => {
+                              const targetStatus = e.target.value as OrderStatus;
+                              if (targetStatus === o.orderStatus) return;
+                              if (
+                                targetStatus === "shipped" &&
+                                !o.trackingNumber &&
+                                o.deliveryMethod !== "pickup"
+                              ) {
+                                toast.error(
+                                  "Tracking reference required before setting status to Shipped. Please enter details."
+                                );
+                                openDetailModal(o);
+                                return;
+                              }
+                              handleStatusChange(o.id, targetStatus);
+                            }}
                             className="text-xs font-semibold bg-slate-100 border border-slate-300 rounded-xl px-2.5 py-1.5 text-slate-700 focus:outline-none focus:ring-2 focus:ring-orange-500"
                           >
-                            <option value="pending">Pending</option>
-                            <option value="processing">Processing</option>
-                            <option value="shipped">Shipped</option>
-                            <option value="delivered">Delivered</option>
-                            <option value="cancelled">Cancelled</option>
+                            {getAllowedTransitions(o.orderStatus, o.deliveryMethod).map((st) => (
+                              <option key={st} value={st}>
+                                {st.charAt(0).toUpperCase() + st.slice(1)}
+                              </option>
+                            ))}
                           </select>
                         )}
                       </div>
@@ -404,28 +456,53 @@ export default function OrdersManagementPage() {
                     <Truck size={14} className="text-orange-600" />
                     Dispatch & Tracking Management
                   </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-3">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Courier Tracking Number
+                        Fulfillment Stage
                       </label>
-                      <Input
-                        placeholder="e.g. GIG-998242-NG"
-                        value={modalTrackingNumber}
-                        onChange={(e) => setModalTrackingNumber(e.target.value)}
-                        className="rounded-xl border-slate-300 text-xs bg-white"
-                      />
+                      {selectedOrder.orderStatus === "delivered" || selectedOrder.orderStatus === "cancelled" ? (
+                        <div className="h-9 px-3 flex items-center bg-slate-100 rounded-xl text-xs font-bold text-slate-500 capitalize">
+                          {selectedOrder.orderStatus} (Completed)
+                        </div>
+                      ) : (
+                        <select
+                          value={modalStatus}
+                          onChange={(e) => setModalStatus(e.target.value as OrderStatus)}
+                          className="w-full h-9 rounded-xl border border-slate-300 text-xs bg-white px-2.5 font-medium text-slate-800 outline-none focus:border-orange-500"
+                        >
+                          {getAllowedTransitions(selectedOrder.orderStatus, selectedOrder.deliveryMethod).map((st) => (
+                            <option key={st} value={st}>
+                              {st.charAt(0).toUpperCase() + st.slice(1)}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Internal Status Note
-                      </label>
-                      <Input
-                        placeholder="e.g. Dispatched via Lagos hub"
-                        value={modalNote}
-                        onChange={(e) => setModalNote(e.target.value)}
-                        className="rounded-xl border-slate-300 text-xs bg-white"
-                      />
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Courier Tracking Number
+                        </label>
+                        <Input
+                          placeholder="e.g. GIG-998242-NG"
+                          value={modalTrackingNumber}
+                          onChange={(e) => setModalTrackingNumber(e.target.value)}
+                          className="rounded-xl border-slate-300 text-xs bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Internal Status Note
+                        </label>
+                        <Input
+                          placeholder="e.g. Dispatched via Lagos hub"
+                          value={modalNote}
+                          onChange={(e) => setModalNote(e.target.value)}
+                          className="rounded-xl border-slate-300 text-xs bg-white"
+                        />
+                      </div>
                     </div>
                   </div>
                   <Button

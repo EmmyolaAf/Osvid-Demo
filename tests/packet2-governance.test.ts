@@ -379,12 +379,15 @@ test("firestore.rules enforces tamper-resistance on audit_logs and separates cat
   assert.match(rules, /allow write: if false;/);
   assert.match(rules, /allow read: if isSuperAdmin\(\);/);
 
-  // Products collection separates catalogue CRUD from stock adjustment
+  // Products collection enforces catalogue permission and strictly forbids direct client stockQuantity updates (Packet 3)
   assert.match(rules, /match \/products\/\{productId\}/);
   assert.match(rules, /hasManagerPermission\('canManageProducts'\)/);
-  assert.match(rules, /hasManagerPermission\('canManageInventory'\)/);
   assert.match(rules, /!request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\.hasAny\(\['stockQuantity'\]\)/);
-  assert.match(rules, /request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\.hasOnly\(\['stockQuantity', 'updatedAt'\]\)/);
+
+  // Inventory movements ledger: staff read with canManageInventory, client writes denied
+  assert.match(rules, /match \/inventory_movements\/\{movementId\}/);
+  assert.match(rules, /hasManagerPermission\('canManageInventory'\)/);
+  assert.match(rules, /allow write: if false;/);
 });
 
 test("firestore.rules enforces isSubscriptionOperational() schema validity and seals system_settings", () => {
@@ -404,7 +407,7 @@ test("firestore.rules enforces isSubscriptionOperational() schema validity and s
 
   // Gated staff writes
   assert.match(rules, /match \/categories\/\{categoryId\}[\s\S]*?isSubscriptionOperational\(\)/);
-  assert.match(rules, /match \/orders\/\{orderId\}[\s\S]*?isSubscriptionOperational\(\)/);
+  assert.match(rules, /match \/inventory_movements\/\{movementId\}[\s\S]*?isSubscriptionOperational\(\)/);
   assert.match(rules, /match \/discounts\/\{discountId\}[\s\S]*?isSubscriptionOperational\(\)/);
 
   // runtime_settings collection: public read, write denied

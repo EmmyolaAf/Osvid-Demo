@@ -3,7 +3,7 @@
  * Recorded in the append-only `audit_logs` collection.
  */
 
-export type AuditTargetType = "admin" | "manager" | "subscription" | "system";
+export type AuditTargetType = "admin" | "manager" | "subscription" | "system" | "product" | "order" | "inventory";
 
 export interface AuditLogEntry {
   id: string;

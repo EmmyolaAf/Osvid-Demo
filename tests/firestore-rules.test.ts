@@ -73,11 +73,10 @@ test("firestore.rules denies direct client order creation entirely (server Admin
   const nextMatch = orderBlock.indexOf("match /discounts");
   const blockSnippet = orderBlock.slice(0, nextMatch);
 
-  // Client-side order creation is completely denied
+  // Client-side order creation, updates, and deletes are completely denied (Packet 3)
   assert.match(blockSnippet, /allow create:\s*if false;/);
-
-  // Order updates require canManageOrders permission
-  assert.match(blockSnippet, /hasManagerPermission\('canManageOrders'\)/);
+  assert.match(blockSnippet, /allow update:\s*if false;/);
+  assert.match(blockSnippet, /allow delete:\s*if false;/);
 });
 
 test("firestore.rules restricts system_settings read to Super Admin and staff excluding subscription docs", () => {

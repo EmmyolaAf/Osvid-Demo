@@ -2,16 +2,19 @@
 
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import { auth } from "@/lib/firebase/client";
 import {
   getProductsFromDb,
   saveProductToDb,
   updateProductStockInDb,
+  adjustProductStockViaApi,
   deleteProductFromDb,
   getCategoriesFromDb,
   saveCategoryToDb,
   deleteCategoryFromDb,
 } from "@/lib/firebase/firestore";
 import { Product, ProductCategory, normalizeManagerPermissions } from "@/types/auth";
+import { InventoryMovement, InventoryMovementType } from "@/types/inventory";
 import {
   Package,
   Plus,
@@ -31,6 +34,10 @@ import {
   ArrowUpDown,
   Filter,
   Lock,
+  History,
+  SlidersHorizontal,
+  RefreshCw,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -80,6 +87,20 @@ export default function ProductsManagementPage() {
     featuresText: "",
     suggestedProductIds: [] as string[],
   });
+
+  // Dedicated Adjust Stock Modal State
+  const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
+  const [adjustProduct, setAdjustProduct] = useState<Product | null>(null);
+  const [adjustType, setAdjustType] = useState<InventoryMovementType>("restock");
+  const [adjustUnits, setAdjustUnits] = useState("10");
+  const [adjustReason, setAdjustReason] = useState("");
+  const [submittingAdjust, setSubmittingAdjust] = useState(false);
+
+  // Inventory Ledger / Movement History Modal State
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [historyProductId, setHistoryProductId] = useState<string | null>(null);
+  const [historyMovements, setHistoryMovements] = useState<InventoryMovement[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   // Category Modal State
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
@@ -184,8 +205,7 @@ export default function ProductsManagementPage() {
         .filter(Boolean);
 
       const isEditing = Boolean(editingProduct?.id);
-      const shouldOmitStock = !canManageInventory && isEditing;
-      const initialStock = canManageInventory ? (parseInt(productForm.stockQuantity) || 0) : 0;
+      const initialStock = canManageInventory ? (parseInt(productForm.stockQuantity, 10) || 0) : 0;
 
       const result = await saveProductToDb(
         {
@@ -194,9 +214,7 @@ export default function ProductsManagementPage() {
           category: productForm.category.trim(),
           price: numPrice,
           discountPrice: productForm.discountPrice ? parseFloat(productForm.discountPrice) : undefined,
-          stockQuantity: isEditing
-            ? (canManageInventory ? parseInt(productForm.stockQuantity) || 0 : (editingProduct?.stockQuantity ?? 0))
-            : initialStock,
+          stockQuantity: 0,
           unit: productForm.unit.trim() || "kg",
           sku: productForm.sku.trim(),
           imageUrl: productForm.imageUrl.trim() || "/images/placeholder.webp",
@@ -205,12 +223,27 @@ export default function ProductsManagementPage() {
           suggestedProductIds: productForm.suggestedProductIds,
           isActive: true,
         },
-        { omitStock: shouldOmitStock }
+        { omitStock: isEditing }
       );
 
       if (!result.success) {
         toast.error(result.error || "Failed to save product document in Firestore.");
         return;
+      }
+
+      if (!isEditing && initialStock > 0 && canManageInventory && result.data?.id) {
+        const prodId = result.data.id;
+        const adjResult = await adjustProductStockViaApi(
+          prodId,
+          initialStock,
+          "initial_stock",
+          "Initial product stock recorded upon creation"
+        );
+        if (!adjResult.success) {
+          toast.warning(
+            `Product created with stock 0, but initial stock ledger entry failed: ${adjResult.error}. Please adjust stock using the inventory controls.`
+          );
+        }
       }
 
       toast.success(
@@ -228,19 +261,114 @@ export default function ProductsManagementPage() {
   };
 
   const handleQuickStockChange = async (productId: string, currentStock: number, delta: number) => {
-    const newStock = Math.max(0, currentStock + delta);
+    if (currentStock + delta < 0) {
+      toast.error(`Cannot reduce stock below 0. Current stock is ${currentStock}.`);
+      return;
+    }
     try {
-      const result = await updateProductStockInDb(productId, newStock);
+      const result = await adjustProductStockViaApi(
+        productId,
+        delta,
+        "manual_adjustment",
+        "Quick adjustment from Products & Stock dashboard"
+      );
       if (!result.success) {
-        toast.error(result.error || "Failed to update stock in database.");
+        toast.error(result.error || "Failed to update stock via inventory ledger.");
         return;
       }
+      const newStock = result.data?.newStock ?? (currentStock + delta);
       setProducts((prev) =>
         prev.map((p) => (p.id === productId ? { ...p, stockQuantity: newStock } : p))
       );
       toast.success(`Stock level adjusted to ${newStock}.`);
     } catch (err: any) {
       toast.error(err?.message || "Failed to update stock quantity.");
+    }
+  };
+
+  const openAdjustStockModal = (product: Product) => {
+    setAdjustProduct(product);
+    setAdjustType("restock");
+    setAdjustUnits("10");
+    setAdjustReason("");
+    setIsAdjustModalOpen(true);
+  };
+
+  const handleSaveAdjustStock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adjustProduct) return;
+    const units = parseInt(adjustUnits, 10);
+    if (isNaN(units) || units <= 0) {
+      toast.error("Please enter a valid positive quantity.");
+      return;
+    }
+    if (!adjustReason.trim()) {
+      toast.error("Please provide a note or reason for this stock adjustment.");
+      return;
+    }
+
+    let delta = units;
+    if (adjustType === "damaged") {
+      delta = -units;
+    }
+
+    if (adjustProduct.stockQuantity + delta < 0) {
+      toast.error(`Adjustment would result in negative stock. Current stock is ${adjustProduct.stockQuantity}.`);
+      return;
+    }
+
+    try {
+      setSubmittingAdjust(true);
+      const result = await adjustProductStockViaApi(
+        adjustProduct.id,
+        delta,
+        adjustType,
+        adjustReason.trim()
+      );
+      if (!result.success) {
+        toast.error(result.error || "Failed to adjust stock.");
+        return;
+      }
+
+      const updatedStock = result.data?.newStock ?? (adjustProduct.stockQuantity + delta);
+      setProducts((prev) =>
+        prev.map((p) => (p.id === adjustProduct.id ? { ...p, stockQuantity: updatedStock } : p))
+      );
+      toast.success(`Inventory adjusted to ${updatedStock} (${adjustType}).`);
+      setIsAdjustModalOpen(false);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to adjust stock.");
+    } finally {
+      setSubmittingAdjust(false);
+    }
+  };
+
+  const openHistoryModal = async (productId?: string) => {
+    setHistoryProductId(productId || null);
+    setIsHistoryModalOpen(true);
+    setLoadingHistory(true);
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) {
+        toast.error("Authentication required to view inventory history.");
+        return;
+      }
+      const url = `/api/admin/inventory/history?limit=50${productId ? `&productId=${productId}` : ""}`;
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        toast.error(data.error || "Failed to load inventory history.");
+        return;
+      }
+      setHistoryMovements(data.movements || []);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to fetch inventory ledger records.");
+    } finally {
+      setLoadingHistory(false);
     }
   };
 
@@ -411,6 +539,17 @@ export default function ProductsManagementPage() {
               </button>
             )}
           </div>
+
+          {canManageInventory && activeTab === "products" && (
+            <Button
+              variant="outline"
+              onClick={() => openHistoryModal()}
+              className="border-slate-300 hover:bg-slate-100 text-slate-700 font-bold rounded-xl flex items-center gap-1.5 h-10 px-3.5 text-xs shadow-sm"
+            >
+              <History size={15} className="text-orange-600" />
+              <span>Stock Ledger</span>
+            </Button>
+          )}
 
           {canManageProducts && (
             activeTab === "products" ? (
@@ -674,36 +813,59 @@ export default function ProductsManagementPage() {
                               >
                                 +10
                               </button>
+                              {canManageInventory && (
+                                <button
+                                  onClick={() => openAdjustStockModal(p)}
+                                  className="ml-1.5 px-2 h-6 rounded-lg border border-slate-300 hover:border-orange-300 hover:bg-orange-50 text-[11px] font-semibold text-slate-700 hover:text-orange-700 flex items-center gap-1 transition-colors"
+                                  title="Deliberate stock adjustment (Restock, Correction, Damaged)"
+                                >
+                                  <SlidersHorizontal size={11} />
+                                  <span>Adjust</span>
+                                </button>
+                              )}
                             </div>
                           </td>
 
                           <td className="py-3.5 px-5 text-right">
-                            {canManageProducts ? (
-                              <div className="flex items-center justify-end gap-1">
+                            <div className="flex items-center justify-end gap-1">
+                              {canManageInventory && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => openEditProductModal(p)}
-                                  className="text-xs h-8 w-8 p-0 text-slate-600 hover:text-slate-900 rounded-lg"
-                                  title="Edit Product"
+                                  onClick={() => openHistoryModal(p.id)}
+                                  className="text-xs h-8 w-8 p-0 text-slate-500 hover:text-orange-600 rounded-lg"
+                                  title={`View Stock History for ${p.name}`}
                                 >
-                                  <Edit size={14} />
+                                  <History size={14} />
                                 </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleDeleteProduct(p.id, p.name)}
-                                  className="text-xs h-8 w-8 p-0 text-red-600 hover:bg-red-50 rounded-lg"
-                                  title="Delete Product"
-                                >
-                                  <Trash2 size={14} />
-                                </Button>
-                              </div>
-                            ) : (
-                              <span className="text-[10px] text-slate-400 font-medium italic">
-                                Stock Only
-                              </span>
-                            )}
+                              )}
+                              {canManageProducts ? (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => openEditProductModal(p)}
+                                    className="text-xs h-8 w-8 p-0 text-slate-600 hover:text-slate-900 rounded-lg"
+                                    title="Edit Product"
+                                  >
+                                    <Edit size={14} />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleDeleteProduct(p.id, p.name)}
+                                    className="text-xs h-8 w-8 p-0 text-red-600 hover:bg-red-50 rounded-lg"
+                                    title="Delete Product"
+                                  >
+                                    <Trash2 size={14} />
+                                  </Button>
+                                </>
+                              ) : (
+                                <span className="text-[10px] text-slate-400 font-medium italic">
+                                  Stock Only
+                                </span>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -888,20 +1050,38 @@ export default function ProductsManagementPage() {
               </div>
 
               <div>
-                <Label className="text-xs font-bold text-slate-700">Initial Stock Units *</Label>
+                <Label className="text-xs font-bold text-slate-700">
+                  {editingProduct ? "Current Stock Units (Read-only)" : "Initial Stock Units *"}
+                </Label>
                 <Input
                   type="number"
                   required
                   min={0}
                   placeholder={canManageInventory ? "50" : "0"}
-                  value={canManageInventory ? productForm.stockQuantity : (editingProduct ? (editingProduct.stockQuantity ?? 0).toString() : "0")}
-                  disabled={!canManageInventory}
+                  value={
+                    editingProduct
+                      ? (editingProduct.stockQuantity ?? 0).toString()
+                      : (canManageInventory ? productForm.stockQuantity : "0")
+                  }
+                  disabled={Boolean(editingProduct) || !canManageInventory}
                   onChange={(e) => setProductForm({ ...productForm, stockQuantity: e.target.value })}
-                  className={`mt-1 h-10 rounded-xl text-sm ${!canManageInventory ? "bg-slate-100 text-slate-500 cursor-not-allowed" : ""}`}
+                  className={`mt-1 h-10 rounded-xl text-sm ${
+                    editingProduct || !canManageInventory
+                      ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                      : ""
+                  }`}
                 />
-                {!canManageInventory && (
+                {editingProduct ? (
+                  <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1 font-medium">
+                    <Lock size={12} /> Stock is read-only in product editing. Use Adjust Stock / quick controls to record ledger movements.
+                  </p>
+                ) : !canManageInventory ? (
                   <p className="text-[11px] text-amber-600 mt-1 flex items-center gap-1 font-medium">
-                    <Lock size={12} /> Stock levels require Inventory Management authority.
+                    <Lock size={12} /> Stock initialization requires Inventory authority. Product will be created with stock 0.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-emerald-600 mt-1 flex items-center gap-1 font-medium">
+                    Initial stock will be recorded in the immutable inventory ledger upon creation.
                   </p>
                 )}
               </div>
@@ -1095,6 +1275,258 @@ export default function ProductsManagementPage() {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ======================================================== */}
+      {/* MODAL 3: DELIBERATE ADJUST STOCK MODAL */}
+      {/* ======================================================== */}
+      <Dialog open={isAdjustModalOpen} onOpenChange={setIsAdjustModalOpen}>
+        <DialogContent className="sm:max-w-lg bg-white rounded-3xl p-6 sm:p-8">
+          <DialogHeader className="text-left space-y-1">
+            <DialogTitle className="text-xl font-black text-slate-900 flex items-center gap-2">
+              <SlidersHorizontal size={20} className="text-orange-600" />
+              Adjust Inventory Stock
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
+              Submit a recorded stock adjustment to the append-only inventory ledger.
+            </DialogDescription>
+          </DialogHeader>
+
+          {adjustProduct && (
+            <form onSubmit={handleSaveAdjustStock} className="space-y-4 pt-2">
+              {/* Product Overview Card */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-slate-900 text-sm">{adjustProduct.name}</p>
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    {adjustProduct.sku || "No SKU"} • {adjustProduct.category}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span className="text-[11px] text-slate-500 block">Current Stock</span>
+                  <span className="text-base font-extrabold text-slate-900">
+                    {adjustProduct.stockQuantity} {adjustProduct.unit || "units"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Adjustment Type */}
+              <div>
+                <Label className="text-xs font-bold text-slate-700">Movement Type *</Label>
+                <select
+                  value={adjustType}
+                  onChange={(e) => setAdjustType(e.target.value as InventoryMovementType)}
+                  className="mt-1 w-full h-10 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl text-slate-800 outline-none focus:border-orange-500 font-medium"
+                >
+                  <option value="restock">Restock (Adding units to warehouse)</option>
+                  <option value="correction">Inventory Correction (Count reconciliation)</option>
+                  <option value="damaged">Damaged Stock (Removing damaged units)</option>
+                  <option value="manual_adjustment">Manual Adjustment</option>
+                  <option value="other">Other Reason</option>
+                </select>
+              </div>
+
+              {/* Quantity */}
+              <div>
+                <Label className="text-xs font-bold text-slate-700">
+                  {adjustType === "damaged" ? "Units Damaged (will be deducted) *" : "Units Count *"}
+                </Label>
+                <Input
+                  type="number"
+                  min={1}
+                  required
+                  placeholder="10"
+                  value={adjustUnits}
+                  onChange={(e) => setAdjustUnits(e.target.value)}
+                  className="mt-1 h-10 rounded-xl text-sm font-bold"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Resulting stock level:{" "}
+                  <span className="font-bold text-slate-900">
+                    {Math.max(
+                      0,
+                      adjustProduct.stockQuantity +
+                        (adjustType === "damaged"
+                          ? -(parseInt(adjustUnits, 10) || 0)
+                          : parseInt(adjustUnits, 10) || 0)
+                    )}{" "}
+                    {adjustProduct.unit || "units"}
+                  </span>
+                </p>
+              </div>
+
+              {/* Reason / Note */}
+              <div>
+                <Label className="text-xs font-bold text-slate-700">Ledger Reason / Note *</Label>
+                <textarea
+                  rows={2}
+                  required
+                  placeholder={
+                    adjustType === "restock"
+                      ? "e.g. Received new shipment from supplier batch #829"
+                      : adjustType === "damaged"
+                      ? "e.g. Damaged during warehouse transport / broken seals"
+                      : "e.g. Physical stock count reconciliation"
+                  }
+                  value={adjustReason}
+                  onChange={(e) => setAdjustReason(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-slate-200 p-2.5 text-xs text-slate-800 outline-none focus:border-orange-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsAdjustModalOpen(false)}
+                  disabled={submittingAdjust}
+                  className="rounded-xl text-xs"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={submittingAdjust}
+                  className="bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs rounded-xl shadow-md shadow-orange-600/20"
+                >
+                  {submittingAdjust ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    "Commit Stock Adjustment"
+                  )}
+                </Button>
+              </div>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ======================================================== */}
+      {/* MODAL 4: INVENTORY HISTORY LEDGER MODAL */}
+      {/* ======================================================== */}
+      <Dialog open={isHistoryModalOpen} onOpenChange={setIsHistoryModalOpen}>
+        <DialogContent className="sm:max-w-3xl bg-white rounded-3xl p-6 sm:p-8 max-h-[85vh] overflow-y-auto">
+          <DialogHeader className="text-left space-y-1">
+            <div className="flex items-center justify-between">
+              <DialogTitle className="text-xl font-black text-slate-900 flex items-center gap-2">
+                <History size={20} className="text-orange-600" />
+                Inventory Movement Ledger
+              </DialogTitle>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => openHistoryModal(historyProductId || undefined)}
+                disabled={loadingHistory}
+                className="text-xs h-8 text-slate-500 hover:text-slate-900 rounded-lg"
+              >
+                <RefreshCw size={13} className={`mr-1 ${loadingHistory ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
+            </div>
+            <DialogDescription className="text-xs text-slate-500">
+              {historyProductId
+                ? `Immutable movement ledger for: ${products.find((p) => p.id === historyProductId)?.name || historyProductId}`
+                : "Append-only movement ledger across all products (newest first)."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-2">
+            {loadingHistory ? (
+              <div className="py-16 flex flex-col items-center justify-center gap-3">
+                <Loader2 className="w-7 h-7 text-orange-600 animate-spin" />
+                <p className="text-xs text-slate-500 font-medium">Loading ledger movements...</p>
+              </div>
+            ) : historyMovements.length === 0 ? (
+              <div className="py-12 text-center">
+                <FileText className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-xs text-slate-500 font-medium">No inventory movements recorded yet.</p>
+              </div>
+            ) : (
+              <div className="border border-slate-200 rounded-2xl overflow-hidden">
+                <div className="overflow-x-auto max-h-[55vh]">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase font-bold text-slate-500 sticky top-0">
+                      <tr>
+                        <th className="py-2.5 px-3">Date / Time</th>
+                        <th className="py-2.5 px-3">Product</th>
+                        <th className="py-2.5 px-3">Type</th>
+                        <th className="py-2.5 px-3 text-right">Delta</th>
+                        <th className="py-2.5 px-3 text-right">Stock</th>
+                        <th className="py-2.5 px-3">Staff Actor</th>
+                        <th className="py-2.5 px-3">Note / Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {historyMovements.map((m) => {
+                        const isPositive = m.delta > 0;
+                        const isNegative = m.delta < 0;
+                        return (
+                          <tr key={m.id} className="hover:bg-slate-50/70 transition-colors">
+                            <td className="py-2.5 px-3 text-slate-500 whitespace-nowrap text-[11px]">
+                              {new Date(m.createdAtIso).toLocaleString(undefined, {
+                                month: "short",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <p className="font-bold text-slate-900">{m.productName}</p>
+                              {m.sku && <p className="text-[10px] font-mono text-slate-400">{m.sku}</p>}
+                            </td>
+                            <td className="py-2.5 px-3 whitespace-nowrap">
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                  m.type === "initial_stock" || m.type === "restock"
+                                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                    : m.type === "damaged"
+                                    ? "bg-red-50 text-red-700 border border-red-200"
+                                    : m.type === "sale"
+                                    ? "bg-blue-50 text-blue-700 border border-blue-200"
+                                    : "bg-slate-100 text-slate-700 border border-slate-200"
+                                }`}
+                              >
+                                {m.type.replace(/_/g, " ")}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono font-bold">
+                              <span
+                                className={
+                                  isPositive
+                                    ? "text-emerald-600"
+                                    : isNegative
+                                    ? "text-red-600"
+                                    : "text-slate-600"
+                                }
+                              >
+                                {isPositive ? `+${m.delta}` : m.delta}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-right whitespace-nowrap text-slate-600 text-[11px] font-mono">
+                              {m.previousStock} &rarr; <span className="font-bold text-slate-900">{m.newStock}</span>
+                            </td>
+                            <td className="py-2.5 px-3 whitespace-nowrap">
+                              <p className="text-slate-800 font-medium text-[11px]">{m.actorEmail}</p>
+                              <p className="text-[10px] text-slate-400 capitalize">{m.actorRole}</p>
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-600 max-w-[200px] truncate" title={m.reason}>
+                              {m.reason || "—"}
+                              {m.orderId && (
+                                <span className="block text-[10px] font-mono text-slate-400">
+                                  Order #{m.orderId.slice(0, 8)}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

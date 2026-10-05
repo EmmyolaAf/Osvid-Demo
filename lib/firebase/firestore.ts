@@ -305,39 +305,32 @@ export async function getUserOrdersFromDb(userId: string, email?: string): Promi
 
 export async function updateOrderStatusInDb(
   orderId: string,
-  newStatus: OrderStatus,
-  updatedBy: string,
+  newStatus?: OrderStatus,
+  updatedBy?: string,
   note?: string,
   trackingNumber?: string
 ): Promise<void> {
-  try {
-    const docRef = doc(db, "orders", orderId);
-    const snap = await getDoc(docRef);
-    if (!snap.exists()) throw new Error("Order not found");
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) {
+    throw new Error("Authentication required to update order fulfillment status.");
+  }
 
-    const currentOrder = snap.data() as Order;
-    const history = currentOrder.statusHistory || [];
-    history.push({
+  const res = await fetch(`/api/admin/orders/${orderId}/fulfillment`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
       status: newStatus,
-      updatedAt: new Date().toISOString(),
-      updatedBy,
-      note: note || `Status changed to ${newStatus}`,
-    });
+      trackingNumber,
+      note,
+    }),
+  });
 
-    const updatePayload: Partial<Order> = {
-      orderStatus: newStatus,
-      updatedAt: new Date().toISOString(),
-      statusHistory: history,
-    };
-
-    if (trackingNumber) {
-      updatePayload.trackingNumber = trackingNumber;
-    }
-
-    await updateDoc(docRef, updatePayload);
-  } catch (error) {
-    console.error("Error updating order status:", error);
-    throw error;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || "Failed to update order fulfillment status.");
   }
 }
 
@@ -577,9 +570,8 @@ export async function saveProductToDb(
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/(^-|-$)/g, "");
 
-    if (isUpdate && options?.omitStock) {
-      // Field-level catalogue update strictly omitting stockQuantity so catalogue-only managers
-      // satisfy !request.resource.data.diff(resource.data).affectedKeys().hasAny(['stockQuantity'])
+    if (isUpdate) {
+      // In accordance with Packet 3 rules, client updates strictly omit stockQuantity
       const updatePayload: Record<string, any> = {
         name: productData.name.trim(),
         slug,
@@ -626,8 +618,7 @@ export async function saveProductToDb(
       };
     }
 
-    const initialStock = options?.omitStock ? 0 : (Number(productData.stockQuantity) || 0);
-
+    // New products are always created with stockQuantity 0; initial positive stock is applied via inventory API
     const newProduct: Product = {
       id: productId,
       name: productData.name.trim(),
@@ -635,7 +626,7 @@ export async function saveProductToDb(
       description: productData.description?.trim() || "",
       price: Number(productData.price),
       discountPrice: productData.discountPrice ? Number(productData.discountPrice) : undefined,
-      stockQuantity: initialStock,
+      stockQuantity: 0,
       category: productData.category?.trim() || "Industrial Chemicals",
       categorySlug:
         productData.categorySlug ||
@@ -675,26 +666,87 @@ export async function saveProductToDb(
   }
 }
 
+export async function adjustProductStockViaApi(
+  productId: string,
+  delta: number,
+  type: string = "manual_adjustment",
+  reason?: string,
+  requestId?: string
+): Promise<MutationResult<{ previousStock: number; newStock: number; movementId: string; replayed?: boolean }>> {
+  try {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) {
+      return { success: false, error: "Authentication required to adjust inventory." };
+    }
+
+    const opId =
+      requestId ||
+      (typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `adj-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
+
+    const res = await fetch("/api/admin/inventory/adjust", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        productId,
+        delta,
+        type,
+        reason,
+        requestId: opId,
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) {
+      return { success: false, error: data.error || "Failed to adjust product inventory." };
+    }
+
+    return {
+      success: true,
+      data: {
+        previousStock: data.previousStock,
+        newStock: data.newStock,
+        movementId: data.movementId,
+        replayed: Boolean(data.replayed),
+      },
+    };
+  } catch (error: any) {
+    console.error("Error adjusting product stock via API:", error);
+    return {
+      success: false,
+      error: error?.message || "Failed to adjust product inventory.",
+    };
+  }
+}
+
 export async function updateProductStockInDb(
   productId: string,
   newStock: number
-): Promise<MutationResult> {
+): Promise<MutationResult<{ previousStock: number; newStock: number; movementId: string }>> {
   try {
     if (!productId) return { success: false, error: "Product ID is required." };
     const docRef = doc(db, "products", productId);
-
-    await withDbTimeout(
-      updateDoc(docRef, {
-        stockQuantity: Math.max(0, newStock),
-        updatedAt: new Date().toISOString(),
-      }),
-      10000,
-      "Failed to update stock: Firestore operation timed out."
+    const snap = await getDoc(docRef);
+    const currentStock = snap.exists() ? (Number(snap.data()?.stockQuantity) || 0) : 0;
+    const delta = newStock - currentStock;
+    if (delta === 0) {
+      return {
+        success: true,
+        data: { previousStock: currentStock, newStock: currentStock, movementId: "no-change" },
+      };
+    }
+    return await adjustProductStockViaApi(
+      productId,
+      delta,
+      "manual_adjustment",
+      "Manual stock adjustment from products dashboard"
     );
-
-    return { success: true };
   } catch (error: any) {
-    console.error("Error updating product stock in Firestore:", error);
+    console.error("Error updating product stock:", error);
     return {
       success: false,
       error: error?.message || "Failed to update stock quantity in database.",

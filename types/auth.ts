@@ -164,6 +164,18 @@ export interface ShippingAddress {
   notes?: string;
 }
 
+export interface OrderHistoryEvent {
+  status: OrderStatus;
+  updatedAt: string;
+  updatedBy?: string;
+  actorUid?: string;
+  actorEmail?: string;
+  actorRole?: string;
+  note?: string;
+  eventType?: "status" | "tracking" | "note" | "fulfillment";
+  trackingNumber?: string;
+}
+
 export interface Order {
   id: string;
   orderNumber: string;
@@ -182,12 +194,7 @@ export interface Order {
   paystackReference?: string;
   trackingNumber?: string;
   notes?: string;
-  statusHistory?: {
-    status: OrderStatus;
-    updatedAt: string;
-    updatedBy?: string;
-    note?: string;
-  }[];
+  statusHistory?: OrderHistoryEvent[];
   createdAt: string;
   updatedAt: string;
 }
