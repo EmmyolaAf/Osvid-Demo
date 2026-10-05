@@ -1,4 +1,5 @@
 import { adminDb } from "@/lib/firebase/admin";
+import { Timestamp } from "firebase-admin/firestore";
 import { ServerAuthUser, AuthError } from "@/lib/server/auth";
 import { OSVID_CLIENT_CONFIG } from "@/config/client";
 
@@ -12,7 +13,7 @@ import { OSVID_CLIENT_CONFIG } from "@/config/client";
  * 1. Document runtime_settings/subscription must exist.
  * 2. clientId must match "osvid".
  * 3. isSuspended must be boolean false.
- * 4. hardSuspendAt must exist, be a valid timestamp/date, and be strictly in the future.
+ * 4. hardSuspendAt must exist, be a genuine Firestore Timestamp, and be strictly in the future.
  *
  * Super Admin provider recovery bypasses subscription gating.
  */
@@ -60,21 +61,29 @@ export async function assertOperationalSubscription(
       throw new AuthError("Subscription runtime hardSuspendAt timestamp is missing.", 503);
     }
 
-    // Determine timestamp milliseconds
-    let hardSuspendMs: number;
-    if (typeof data.hardSuspendAt.toMillis === "function") {
-      hardSuspendMs = data.hardSuspendAt.toMillis();
-    } else if (typeof data.hardSuspendAt.toDate === "function") {
-      hardSuspendMs = data.hardSuspendAt.toDate().getTime();
-    } else if (typeof data.hardSuspendAt === "string") {
-      hardSuspendMs = new Date(data.hardSuspendAt).getTime();
-    } else if (data.hardSuspendAt._seconds) {
-      hardSuspendMs = data.hardSuspendAt._seconds * 1000;
-    } else {
+    // Fail-closed unless hardSuspendAt is a genuine Firestore/Admin Timestamp
+    const isTimestamp =
+      data.hardSuspendAt instanceof Timestamp ||
+      (typeof data.hardSuspendAt === "object" &&
+        data.hardSuspendAt !== null &&
+        typeof data.hardSuspendAt.toMillis === "function" &&
+        typeof data.hardSuspendAt.toDate === "function" &&
+        typeof data.hardSuspendAt.seconds === "number" &&
+        typeof data.hardSuspendAt.nanoseconds === "number");
+
+    if (!isTimestamp) {
+      throw new AuthError(
+        "Subscription runtime hardSuspendAt is not a valid Firestore Timestamp.",
+        503
+      );
+    }
+
+    const hardSuspendMs = data.hardSuspendAt.toMillis();
+    if (typeof hardSuspendMs !== "number" || isNaN(hardSuspendMs)) {
       throw new AuthError("Malformed hardSuspendAt timestamp in runtime subscription.", 503);
     }
 
-    if (isNaN(hardSuspendMs) || Date.now() >= hardSuspendMs) {
+    if (Date.now() >= hardSuspendMs) {
       throw new AuthError(
         "Operation forbidden: Hard subscription cutoff reached. Operational mutations are suspended.",
         403

@@ -77,6 +77,12 @@ test("firestore.rules denies direct client order creation entirely (server Admin
   assert.match(blockSnippet, /allow create:\s*if false;/);
   assert.match(blockSnippet, /allow update:\s*if false;/);
   assert.match(blockSnippet, /allow delete:\s*if false;/);
+
+  // Order reads require canManageOrders permission for staff, or customer ownership with verified email fallback (Packet 3B)
+  assert.match(blockSnippet, /hasManagerPermission\('canManageOrders'\)/);
+  assert.match(blockSnippet, /resource\.data\.userId == request\.auth\.uid/);
+  assert.match(blockSnippet, /request\.auth\.token\.email_verified == true/);
+  assert.doesNotMatch(blockSnippet, /allow read:\s*if isStaff\(\)/);
 });
 
 test("firestore.rules restricts system_settings read to Super Admin and staff excluding subscription docs", () => {

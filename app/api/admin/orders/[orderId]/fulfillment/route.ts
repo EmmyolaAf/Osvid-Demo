@@ -27,16 +27,16 @@ export function validateOrderStatusTransition(
   requestedStatus: OrderStatus,
   deliveryMethod: "pickup" | "delivery"
 ): { valid: boolean; reason?: string } {
-  if (currentStatus === requestedStatus) {
-    return { valid: true };
-  }
-
   if (currentStatus === "delivered") {
     return { valid: false, reason: "Order is already delivered. Terminal state cannot be altered." };
   }
 
   if (currentStatus === "cancelled") {
     return { valid: false, reason: "Order is cancelled. Terminal state cannot be altered." };
+  }
+
+  if (currentStatus === requestedStatus) {
+    return { valid: true };
   }
 
   if (deliveryMethod === "pickup") {
@@ -183,6 +183,14 @@ export async function POST(
       const currentStatus = currentOrder.orderStatus || "pending";
       const deliveryMethod = currentOrder.deliveryMethod || "delivery";
       const requestedStatus = status ? (status as OrderStatus) : currentStatus;
+
+      // Terminal fulfillment states are completely immutable to status transitions, tracking modifications, and fulfillment notes
+      if (currentStatus === "delivered" || currentStatus === "cancelled") {
+        throw new AuthError(
+          `Order is in terminal state '${currentStatus}'. Terminal orders are immutable and cannot receive status transitions, tracking modifications, or fulfillment notes.`,
+          400
+        );
+      }
 
       // Validate status transition against state machine
       const transitionValidation = validateOrderStatusTransition(

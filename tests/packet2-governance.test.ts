@@ -379,10 +379,10 @@ test("firestore.rules enforces tamper-resistance on audit_logs and separates cat
   assert.match(rules, /allow write: if false;/);
   assert.match(rules, /allow read: if isSuperAdmin\(\);/);
 
-  // Products collection enforces catalogue permission and strictly forbids direct client stockQuantity updates (Packet 3)
+  // Products collection enforces catalogue permission and strictly forbids direct client stockQuantity updates via explicit allowlist (Packet 3)
   assert.match(rules, /match \/products\/\{productId\}/);
   assert.match(rules, /hasManagerPermission\('canManageProducts'\)/);
-  assert.match(rules, /!request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\.hasAny\(\['stockQuantity'\]\)/);
+  assert.match(rules, /affectedKeys\(\)\.hasOnly\(\[/);
 
   // Inventory movements ledger: staff read with canManageInventory, client writes denied
   assert.match(rules, /match \/inventory_movements\/\{movementId\}/);

@@ -133,26 +133,30 @@ service cloud.firestore {
     match /products/{productId} {
       allow read: if true; // Public catalog
 
-      // Product creation: requires catalogue permission and operational subscription.
-      // Direct browser writes must persist stockQuantity == 0 (or omit it); positive stock enters via ledger API.
-      allow create: if isSuperAdmin() || (
-        isSubscriptionOperational() &&
-        hasManagerPermission('canManageProducts') &&
-        (!('stockQuantity' in request.resource.data) || request.resource.data.stockQuantity == 0)
-      );
+      // Product creation: requires catalogue permission.
+      // Super Admin may bypass subscription gating for administrative recovery,
+      // but stockQuantity MUST still be 0 or omitted for ALL client callers!
+      allow create: if hasManagerPermission('canManageProducts') &&
+        (isSuperAdmin() || isSubscriptionOperational()) &&
+        (!('stockQuantity' in request.resource.data) || request.resource.data.stockQuantity == 0);
 
-      // Product updates: catalogue management allowed, but stockQuantity is strictly forbidden from client updates!
-      allow update: if isSuperAdmin() || (
-        isSubscriptionOperational() &&
-        hasManagerPermission('canManageProducts') &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['stockQuantity'])
-      );
+      // Product updates: catalogue management allowed, but stockQuantity MUST NOT be
+      // directly changed by ANY browser caller (including Super Admin).
+      // Uses explicit catalogue field allowlist to protect future server-owned product fields.
+      allow update: if hasManagerPermission('canManageProducts') &&
+        (isSuperAdmin() || isSubscriptionOperational()) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'name', 'slug', 'description', 'price', 'discountPrice',
+          'category', 'categorySlug', 'categoryName',
+          'imageUrl', 'images', 'galleryImages',
+          'unit', 'sku', 'isFeatured', 'isActive',
+          'features', 'specifications', 'suggestedProductIds', 'crossSells', 'tags',
+          'updatedAt'
+        ]);
 
-      // Catalogue deletion strictly requires catalogue authority and operational subscription
-      allow delete: if isSuperAdmin() || (
-        isSubscriptionOperational() &&
-        hasManagerPermission('canManageProducts')
-      );
+      // Catalogue deletion strictly requires catalogue authority and operational subscription (or Super Admin recovery)
+      allow delete: if hasManagerPermission('canManageProducts') &&
+        (isSuperAdmin() || isSubscriptionOperational());
     }
 
     match /categories/{categoryId} {
@@ -169,11 +173,17 @@ service cloud.firestore {
     // 3. ORDERS & COMMERCE
     // ===============================================================
     match /orders/{orderId} {
-      // Customer reads their own orders; Live Staff reads all orders
-      allow read: if isStaff() || (
+      // Order authority (Super Admin, Admin, Manager with canManageOrders) reads all orders.
+      // Customer reads their own orders by authenticated UID or verified email fallback.
+      allow read: if hasManagerPermission('canManageOrders') || (
         isAuthenticated() && (
-          resource.data.userId == request.auth.uid ||
-          resource.data.customerEmail == request.auth.token.email
+          ('userId' in resource.data && resource.data.userId == request.auth.uid) ||
+          (
+            'customerEmail' in resource.data &&
+            request.auth.token.email != null &&
+            resource.data.customerEmail == request.auth.token.email &&
+            request.auth.token.email_verified == true
+          )
         )
       );
 

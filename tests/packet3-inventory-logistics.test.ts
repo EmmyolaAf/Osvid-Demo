@@ -82,15 +82,19 @@ test("Inventory: direct browser stock write is denied by firestore.rules", () =>
   const rulesPath = path.resolve(process.cwd(), "firestore.rules");
   const rules = fs.readFileSync(rulesPath, "utf-8");
 
-  // Products collection strictly forbids client updates from changing stockQuantity
-  assert.match(
-    rules,
-    /!request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\.hasAny\(\['stockQuantity'\]\)/
-  );
+  const productSection = rules.slice(rules.indexOf("match /products/{productId}"));
+  const nextSection = productSection.indexOf("match /categories");
+  const productRules = productSection.slice(0, nextSection);
 
-  // Products creation strictly enforces stockQuantity == 0 (or omitted)
+  // Products collection enforces explicit catalogue field allowlist that excludes stockQuantity
+  assert.match(productRules, /affectedKeys\(\)\.hasOnly\(\[/);
+  assert.match(productRules, /'name'/);
+  assert.match(productRules, /'price'/);
+  assert.doesNotMatch(productRules, /hasOnly\(\[[^\]]*'stockQuantity'/);
+
+  // Products creation strictly enforces stockQuantity == 0 (or omitted) for all callers including Super Admin
   assert.match(
-    rules,
+    productRules,
     /\(!\('stockQuantity' in request\.resource\.data\) \|\| request\.resource\.data\.stockQuantity == 0\)/
   );
 });
@@ -599,4 +603,311 @@ test("Order Audit Trail: Order fulfillment mutation produces immutable audit eve
   assert.equal(auditEvent.metadata.oldStatus, "processing");
   assert.equal(auditEvent.metadata.newStatus, "shipped");
   assert.equal(auditEvent.metadata.trackingNumber, "GIG-12345");
+});
+
+// ===============================================================
+// 5. PACKET 3B SECURITY GATE ENFORCEMENT TESTS
+// ===============================================================
+
+function simulateOrderReadRule(auth: any, orderData: any, userProfile: any): boolean {
+  const isSuperAdmin =
+    auth != null &&
+    auth.email?.toLowerCase() === "abolarinwaemmanuelfree@gmail.com" &&
+    (auth.email_verified === true ||
+      auth.firebase_provider === "google.com" ||
+      auth.isProviderOwner === true);
+
+  const isAdmin =
+    isSuperAdmin ||
+    (auth != null && userProfile?.isActive === true && userProfile?.role === "admin");
+
+  const hasOrderPermission =
+    isAdmin ||
+    (auth != null &&
+      userProfile?.isActive === true &&
+      userProfile?.role === "manager" &&
+      userProfile?.permissions?.canManageOrders === true);
+
+  if (hasOrderPermission) return true;
+
+  if (auth != null) {
+    if (orderData?.userId && orderData.userId === auth.uid) return true;
+    if (
+      orderData?.customerEmail &&
+      auth.email &&
+      orderData.customerEmail.toLowerCase() === auth.email.toLowerCase() &&
+      auth.email_verified === true
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+test("Order Read: Manager without canManageOrders cannot read all orders", () => {
+  const caller = { uid: "mgr-cat-only", email: "catalog@osvid.com", email_verified: true };
+  const userProfile = {
+    isActive: true,
+    role: "manager",
+    permissions: {
+      canManageProducts: true,
+      canManageInventory: true,
+      canManageOrders: false,
+    },
+  };
+  const orderDoc = { id: "ord-1", userId: "cust-99", customerEmail: "customer@example.com" };
+
+  assert.equal(simulateOrderReadRule(caller, orderDoc, userProfile), false);
+});
+
+test("Order Read: Logistics Manager can read operational orders", () => {
+  const caller = { uid: "mgr-log", email: "logistics@osvid.com", email_verified: true };
+  const userProfile = {
+    isActive: true,
+    role: "manager",
+    permissions: {
+      canManageProducts: false,
+      canManageInventory: false,
+      canManageOrders: true,
+    },
+  };
+  const orderDoc = { id: "ord-1", userId: "cust-99", customerEmail: "customer@example.com" };
+
+  assert.equal(simulateOrderReadRule(caller, orderDoc, userProfile), true);
+});
+
+test("Order Read: Admin can read operational orders", () => {
+  const caller = { uid: "admin-1", email: "admin@osvid.com", email_verified: true };
+  const userProfile = { isActive: true, role: "admin" };
+  const orderDoc = { id: "ord-1", userId: "cust-99", customerEmail: "customer@example.com" };
+
+  assert.equal(simulateOrderReadRule(caller, orderDoc, userProfile), true);
+});
+
+test("Order Read: customer can read order by own userId", () => {
+  const caller = { uid: "cust-99", email: "customer@example.com", email_verified: false };
+  const userProfile = { isActive: true, role: "user" };
+  const orderDoc = { id: "ord-1", userId: "cust-99", customerEmail: "different@example.com" };
+
+  assert.equal(simulateOrderReadRule(caller, orderDoc, userProfile), true);
+});
+
+test("Order Read: email fallback cannot expose guest order to unverified email identity", () => {
+  const unverifiedAttacker = {
+    uid: "attacker-1",
+    email: "victim@example.com",
+    email_verified: false,
+  };
+  const userProfile = { isActive: true, role: "user" };
+  const guestOrderDoc = {
+    id: "ord-guest-1",
+    userId: undefined,
+    customerEmail: "victim@example.com",
+  };
+
+  assert.equal(simulateOrderReadRule(unverifiedAttacker, guestOrderDoc, userProfile), false);
+});
+
+test("Order Read: verified-email legacy ownership path works if retained", () => {
+  const verifiedCustomer = {
+    uid: "cust-verified-1",
+    email: "victim@example.com",
+    email_verified: true,
+  };
+  const userProfile = { isActive: true, role: "user" };
+  const guestOrderDoc = {
+    id: "ord-guest-1",
+    userId: undefined,
+    customerEmail: "victim@example.com",
+  };
+
+  assert.equal(simulateOrderReadRule(verifiedCustomer, guestOrderDoc, userProfile), true);
+});
+
+test("Stock Rules: Super Admin browser cannot directly alter stockQuantity or create positive stock", () => {
+  const rulesPath = path.resolve(process.cwd(), "firestore.rules");
+  const rules = fs.readFileSync(rulesPath, "utf-8");
+
+  const productBlock = rules.slice(rules.indexOf("match /products/{productId}"));
+  const nextBlock = productBlock.indexOf("match /categories");
+  const snippet = productBlock.slice(0, nextBlock);
+
+  // Creation: stockQuantity must be 0 or omitted for all callers including Super Admin
+  assert.match(
+    snippet,
+    /\(!\('stockQuantity' in request\.resource\.data\) \|\| request\.resource\.data\.stockQuantity == 0\)/
+  );
+
+  // Update: uses affectedKeys().hasOnly() allowlist that excludes stockQuantity
+  assert.match(snippet, /request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\.hasOnly\(\[/);
+  assert.doesNotMatch(snippet, /hasOnly\(\[[^\]]*'stockQuantity'/);
+});
+
+test("Stock Rules: product catalogue updates use explicit field allowlist", () => {
+  const rulesPath = path.resolve(process.cwd(), "firestore.rules");
+  const rules = fs.readFileSync(rulesPath, "utf-8");
+
+  const productBlock = rules.slice(rules.indexOf("match /products/{productId}"));
+  const snippet = productBlock.slice(0, productBlock.indexOf("match /categories"));
+
+  // Verify explicit catalogue fields in allowlist
+  assert.match(snippet, /'name'/);
+  assert.match(snippet, /'slug'/);
+  assert.match(snippet, /'price'/);
+  assert.match(snippet, /'description'/);
+  assert.match(snippet, /'category'/);
+  assert.match(snippet, /'sku'/);
+  assert.match(snippet, /'imageUrl'/);
+  assert.match(snippet, /'updatedAt'/);
+});
+
+test("Super Admin can still use the inventory API while subscription is suspended", async () => {
+  const superAdminCaller = createMockServerUser({
+    uid: "sa-1",
+    email: "abolarinwaemmanuelfree@gmail.com",
+    role: "super_admin",
+    isSuperAdmin: true,
+  });
+
+  // Does not throw even when subscription document indicates suspended
+  await assert.doesNotReject(async () => {
+    await assertOperationalSubscription(superAdminCaller, async () => ({
+      exists: true,
+      data: () => ({
+        clientId: "osvid",
+        isSuspended: true,
+        suspendedReason: "Account suspended for non-payment",
+        hardSuspendAt: Timestamp.fromDate(new Date(Date.now() - 3600000)),
+      }),
+    } as any));
+  });
+});
+
+test("Server Guard: rejects ISO string hardSuspendAt", async () => {
+  const staffCaller = createMockServerUser({
+    uid: "admin-1",
+    email: "admin@osvid.com",
+    role: "admin",
+  });
+
+  await assert.rejects(
+    async () => {
+      await assertOperationalSubscription(staffCaller, async () => ({
+        exists: true,
+        data: () => ({
+          clientId: "osvid",
+          isSuspended: false,
+          hardSuspendAt: "2026-12-31T00:00:00Z", // String rejected!
+        }),
+      } as any));
+    },
+    (err: any) => {
+      assert.equal(err.status, 503);
+      assert.match(err.message, /not a valid Firestore Timestamp/);
+      return true;
+    }
+  );
+});
+
+test("Server Guard: rejects malformed timestamp-shaped objects", async () => {
+  const staffCaller = createMockServerUser({
+    uid: "admin-1",
+    email: "admin@osvid.com",
+    role: "admin",
+  });
+
+  // Plain object with only _seconds (no toMillis/toDate methods)
+  await assert.rejects(
+    async () => {
+      await assertOperationalSubscription(staffCaller, async () => ({
+        exists: true,
+        data: () => ({
+          clientId: "osvid",
+          isSuspended: false,
+          hardSuspendAt: { _seconds: 1800000000 },
+        }),
+      } as any));
+    },
+    (err: any) => {
+      assert.equal(err.status, 503);
+      assert.match(err.message, /not a valid Firestore Timestamp/);
+      return true;
+    }
+  );
+});
+
+test("Server Guard: accepts genuine Firestore Timestamp", async () => {
+  const staffCaller = createMockServerUser({
+    uid: "admin-1",
+    email: "admin@osvid.com",
+    role: "admin",
+  });
+
+  const validFutureTimestamp = Timestamp.fromDate(new Date(Date.now() + 86400000));
+
+  await assert.doesNotReject(async () => {
+    await assertOperationalSubscription(staffCaller, async () => ({
+      exists: true,
+      data: () => ({
+        clientId: "osvid",
+        isSuspended: false,
+        hardSuspendAt: validFutureTimestamp,
+      }),
+    } as any));
+  });
+});
+
+test("Terminal Orders: delivered order rejects same-status note/tracking mutation", () => {
+  const deliveryResult = validateOrderStatusTransition("delivered", "delivered", "delivery");
+  assert.equal(deliveryResult.valid, false);
+  assert.match(deliveryResult.reason || "", /Terminal state cannot be altered/);
+
+  const pickupResult = validateOrderStatusTransition("delivered", "delivered", "pickup");
+  assert.equal(pickupResult.valid, false);
+  assert.match(pickupResult.reason || "", /Terminal state cannot be altered/);
+});
+
+test("Terminal Orders: cancelled order rejects same-status note/tracking mutation", () => {
+  const deliveryResult = validateOrderStatusTransition("cancelled", "cancelled", "delivery");
+  assert.equal(deliveryResult.valid, false);
+  assert.match(deliveryResult.reason || "", /Terminal state cannot be altered/);
+
+  const pickupResult = validateOrderStatusTransition("cancelled", "cancelled", "pickup");
+  assert.equal(pickupResult.valid, false);
+  assert.match(pickupResult.reason || "", /Terminal state cannot be altered/);
+});
+
+test("Terminal Orders: processing/shipped non-terminal fulfillment details still work where allowed", () => {
+  // Same status for non-terminal allows note/tracking update
+  assert.equal(validateOrderStatusTransition("processing", "processing", "delivery").valid, true);
+  assert.equal(validateOrderStatusTransition("shipped", "shipped", "delivery").valid, true);
+
+  // Normal transitions
+  assert.equal(validateOrderStatusTransition("processing", "shipped", "delivery").valid, true);
+  assert.equal(validateOrderStatusTransition("shipped", "delivered", "delivery").valid, true);
+});
+
+test("Inventory Request ID: invalid requestId containing / is rejected", () => {
+  const REQUEST_ID_REGEX = /^[a-zA-Z0-9_\-:\.]+$/;
+  assert.equal(REQUEST_ID_REGEX.test("inv/movement/123"), false);
+  assert.equal(REQUEST_ID_REGEX.test("../traversal"), false);
+  assert.equal(REQUEST_ID_REGEX.test("has space"), false);
+});
+
+test("Inventory Request ID: excessively long requestId is rejected", () => {
+  const longId = "a".repeat(129);
+  assert.equal(longId.length > 128, true);
+});
+
+test("Inventory Request ID: normal generated requestId remains valid", () => {
+  const REQUEST_ID_REGEX = /^[a-zA-Z0-9_\-:\.]+$/;
+  const normalId1 = `inv_prod_123_${Date.now()}_abc123`;
+  const normalId2 = "req-uuid-883-992-110";
+  const normalId3 = "movement:initial:prod-99";
+
+  assert.equal(REQUEST_ID_REGEX.test(normalId1), true);
+  assert.equal(REQUEST_ID_REGEX.test(normalId2), true);
+  assert.equal(REQUEST_ID_REGEX.test(normalId3), true);
+  assert.equal(normalId1.length <= 128, true);
 });

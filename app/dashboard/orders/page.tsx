@@ -489,7 +489,8 @@ export default function OrdersManagementPage() {
                           placeholder="e.g. GIG-998242-NG"
                           value={modalTrackingNumber}
                           onChange={(e) => setModalTrackingNumber(e.target.value)}
-                          className="rounded-xl border-slate-300 text-xs bg-white"
+                          disabled={selectedOrder.orderStatus === "delivered" || selectedOrder.orderStatus === "cancelled"}
+                          className="rounded-xl border-slate-300 text-xs bg-white disabled:bg-slate-100 disabled:text-slate-500"
                         />
                       </div>
                       <div>
@@ -500,24 +501,31 @@ export default function OrdersManagementPage() {
                           placeholder="e.g. Dispatched via Lagos hub"
                           value={modalNote}
                           onChange={(e) => setModalNote(e.target.value)}
-                          className="rounded-xl border-slate-300 text-xs bg-white"
+                          disabled={selectedOrder.orderStatus === "delivered" || selectedOrder.orderStatus === "cancelled"}
+                          className="rounded-xl border-slate-300 text-xs bg-white disabled:bg-slate-100 disabled:text-slate-500"
                         />
                       </div>
                     </div>
                   </div>
-                  <Button
-                    size="sm"
-                    onClick={handleSaveModalDetails}
-                    disabled={isSavingModal}
-                    className="w-full bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold gap-2 mt-2"
-                  >
-                    {isSavingModal ? (
-                      <Loader2 size={13} className="animate-spin" />
-                    ) : (
-                      <Save size={13} />
-                    )}
-                    Save Shipment Updates
-                  </Button>
+                  {selectedOrder.orderStatus === "delivered" || selectedOrder.orderStatus === "cancelled" ? (
+                    <div className="w-full p-2.5 bg-slate-100 border border-slate-200 rounded-xl text-xs text-slate-500 font-medium text-center mt-2">
+                      Order is in terminal state ({selectedOrder.orderStatus}). Fulfillment details and tracking are locked.
+                    </div>
+                  ) : (
+                    <Button
+                      size="sm"
+                      onClick={handleSaveModalDetails}
+                      disabled={isSavingModal}
+                      className="w-full bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold gap-2 mt-2"
+                    >
+                      {isSavingModal ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <Save size={13} />
+                      )}
+                      Save Shipment Updates
+                    </Button>
+                  )}
                 </div>
 
                 {/* Items in order */}

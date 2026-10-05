@@ -91,6 +91,26 @@ export async function POST(req: NextRequest) {
     }
 
     const cleanRequestId = requestId.trim();
+
+    if (cleanRequestId.length > 128) {
+      return NextResponse.json(
+        { error: "requestId exceeds maximum length of 128 characters." },
+        { status: 400 }
+      );
+    }
+
+    // Must be a safe, bounded Firestore document ID (alphanumeric, -, _, :, .)
+    // Reject path separators such as '/' or whitespace
+    const REQUEST_ID_REGEX = /^[a-zA-Z0-9_\-:\.]+$/;
+    if (!REQUEST_ID_REGEX.test(cleanRequestId)) {
+      return NextResponse.json(
+        {
+          error:
+            "requestId contains invalid characters. Only letters, numbers, hyphens, underscores, colons, and periods are permitted.",
+        },
+        { status: 400 }
+      );
+    }
     const cleanProductId = productId.trim();
     const movementType = type as InventoryMovementType;
     const cleanReason =
