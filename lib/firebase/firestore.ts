@@ -127,28 +127,13 @@ export async function getTenantAdministrators(): Promise<UserProfile[]> {
         }
       }
     } catch (apiErr) {
-      console.warn("API admin list query fallback to client firestore:", apiErr);
+      console.warn("API admin list query failed:", apiErr);
     }
   }
 
-  // 2. Client Firestore direct collection query
-  try {
-    const snap = await getDocs(collection(db, "users"));
-    const allUsers = snap.docs.map((d) => ({ ...(d.data() as UserProfile), uid: d.id }));
-
-    // Return all non-super admins (tenant administrators, managers, and staff)
-    const tenantAdmins = allUsers.filter((u) => {
-      const isSuper =
-        u.email?.trim().toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase() ||
-        u.role === "super_admin";
-      return !isSuper;
-    });
-
-    return tenantAdmins;
-  } catch (error) {
-    console.error("Error fetching tenant administrators:", error);
-    return [];
-  }
+  // FAIL-SAFE: If privileged API is unavailable or non-authenticated caller tries to read staff list,
+  // NEVER fall back to exposing general customer profiles from the "users" collection.
+  return [];
 }
 
 export async function getAllStaffMembers(): Promise<UserProfile[]> {
@@ -569,7 +554,8 @@ export async function getProductsFromDb(): Promise<Product[]> {
 }
 
 export async function saveProductToDb(
-  productData: Partial<Product>
+  productData: Partial<Product>,
+  options?: { omitStock?: boolean }
 ): Promise<MutationResult<Product>> {
   try {
     if (!productData.name || !productData.name.trim()) {
@@ -580,6 +566,7 @@ export async function saveProductToDb(
     }
 
     const productId = productData.id || doc(collection(db, "products")).id;
+    const isUpdate = Boolean(productData.id);
     const docRef = doc(db, "products", productId);
     const now = new Date().toISOString();
 
@@ -590,6 +577,57 @@ export async function saveProductToDb(
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/(^-|-$)/g, "");
 
+    if (isUpdate && options?.omitStock) {
+      // Field-level catalogue update strictly omitting stockQuantity so catalogue-only managers
+      // satisfy !request.resource.data.diff(resource.data).affectedKeys().hasAny(['stockQuantity'])
+      const updatePayload: Record<string, any> = {
+        name: productData.name.trim(),
+        slug,
+        description: productData.description?.trim() || "",
+        price: Number(productData.price),
+        category: productData.category?.trim() || "Industrial Chemicals",
+        categorySlug:
+          productData.categorySlug ||
+          productData.category
+            ?.toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/(^-|-$)/g, "") ||
+          "industrial-chemicals",
+        imageUrl: productData.imageUrl?.trim() || "/images/placeholder.webp",
+        galleryImages: Array.isArray(productData.galleryImages) ? productData.galleryImages : [],
+        unit: productData.unit?.trim() || "kg",
+        sku: productData.sku?.trim() || "",
+        isFeatured: Boolean(productData.isFeatured),
+        features: Array.isArray(productData.features) ? productData.features : [],
+        specifications: productData.specifications || {},
+        suggestedProductIds: Array.isArray(productData.suggestedProductIds)
+          ? productData.suggestedProductIds
+          : [],
+        isActive: productData.isActive !== false,
+        updatedAt: now,
+      };
+      if (productData.discountPrice !== undefined) {
+        updatePayload.discountPrice = Number(productData.discountPrice);
+      }
+
+      await withDbTimeout(
+        updateDoc(docRef, updatePayload),
+        15000,
+        "Failed to save product: Firestore operation timed out."
+      );
+
+      return {
+        success: true,
+        data: {
+          id: productId,
+          stockQuantity: productData.stockQuantity ?? 0,
+          ...updatePayload,
+        } as Product,
+      };
+    }
+
+    const initialStock = options?.omitStock ? 0 : (Number(productData.stockQuantity) || 0);
+
     const newProduct: Product = {
       id: productId,
       name: productData.name.trim(),
@@ -597,7 +635,7 @@ export async function saveProductToDb(
       description: productData.description?.trim() || "",
       price: Number(productData.price),
       discountPrice: productData.discountPrice ? Number(productData.discountPrice) : undefined,
-      stockQuantity: Number(productData.stockQuantity) || 0,
+      stockQuantity: initialStock,
       category: productData.category?.trim() || "Industrial Chemicals",
       categorySlug:
         productData.categorySlug ||

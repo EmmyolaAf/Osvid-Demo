@@ -73,6 +73,16 @@ service cloud.firestore {
       );
     }
 
+    // Evaluates whether the tenant application is active or suspended using the minimal runtime document.
+    // Checks both the manual killswitch flag and the server-calculated hardSuspendAt timestamp threshold.
+    function isSubscriptionOperational() {
+      let subDoc = /databases/$(database)/documents/runtime_settings/subscription;
+      return !exists(subDoc) || (
+        get(subDoc).data.isSuspended != true &&
+        (!('hardSuspendAt' in get(subDoc).data) || get(subDoc).data.hardSuspendAt == null || request.time < get(subDoc).data.hardSuspendAt)
+      );
+    }
+
     // ===============================================================
     // 1. USERS & RBAC COLLECTION
     // ===============================================================
@@ -83,43 +93,33 @@ service cloud.firestore {
         isStaff()
       );
 
-      // Customer account creation on register: strictly role 'user'
-      allow create: if isAuthenticated() && (
-        (request.auth.uid == userId &&
-         request.resource.data.role == 'user' &&
-         !('permissions' in request.resource.data))
-        ||
-        isSuperAdmin()
-      );
+      // Customer account creation on register: strictly role 'user', no permissions allowed
+      allow create: if isAuthenticated() &&
+        request.auth.uid == userId &&
+        request.resource.data.role == 'user' &&
+        !('permissions' in request.resource.data);
 
       // Updates:
-      // Customers can update self via field-level allowlist, strictly protecting server-owned
+      // Customers can update self via strict field-level allowlist, strictly protecting server-owned
       // and identity-managed fields (role, permissions, isActive, email, lastLoginAt, etc.).
-      // Admins can update managers.
-      // Super Admin can update accounts.
+      // Direct client updates to staff roles/permissions are forbidden; must use Admin API endpoints.
       allow update: if isAuthenticated() && (
-        (request.auth.uid == userId &&
-         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-           'displayName', 'firstName', 'lastName', 'fullName',
-           'phoneNumber', 'photoURL', 'avatar',
-           'addresses', 'shippingAddress', 'billingAddress',
-           'preferences', 'updatedAt'
-         ]) &&
-         !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-           'role', 'permissions', 'isActive', 'createdBy', 'createdAt',
-           'totalOrders', 'totalSpent', 'lastOrderDate', 'subscription',
-           'lastLoginAt', 'email'
-         ]))
-        ||
-        (isAdmin() &&
-         resource.data.role == 'manager' &&
-         request.resource.data.role == 'manager')
-        ||
-        isSuperAdmin()
+        request.auth.uid == userId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'displayName', 'firstName', 'lastName', 'fullName',
+          'phoneNumber', 'photoURL', 'avatar',
+          'addresses', 'shippingAddress', 'billingAddress',
+          'preferences', 'updatedAt'
+        ]) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'role', 'permissions', 'isActive', 'createdBy', 'createdAt',
+          'totalOrders', 'totalSpent', 'lastOrderDate', 'subscription',
+          'lastLoginAt', 'email'
+        ])
       );
 
-      // Staff deletion is restricted to Super Admin (or server Admin SDK)
-      allow delete: if isSuperAdmin();
+      // Direct client deletion of accounts is forbidden; must use authenticated Admin API
+      allow delete: if false;
     }
 
     // ===============================================================
@@ -127,24 +127,40 @@ service cloud.firestore {
     // ===============================================================
     match /products/{productId} {
       allow read: if true; // Public catalog
-      // Catalogue creation and deletion strictly requires canManageProducts
-      allow create, delete: if hasManagerPermission('canManageProducts');
-      // Full catalogue edits require canManageProducts.
-      // Stock adjustments require canManageInventory.
-      allow update: if hasManagerPermission('canManageProducts') || (
-        hasManagerPermission('canManageInventory') &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stockQuantity', 'updatedAt'])
+
+      // Product creation requires catalogue permission and operational subscription.
+      // Product Manager without Inventory permission CANNOT create initial positive stock.
+      allow create: if (isSuperAdmin() || isSubscriptionOperational()) &&
+        hasManagerPermission('canManageProducts') &&
+        (hasManagerPermission('canManageInventory') || !('stockQuantity' in request.resource.data) || request.resource.data.stockQuantity == 0);
+
+      // Product updates: strictly isolate catalogue authority from inventory stock adjustments.
+      allow update: if (isSuperAdmin() || isSubscriptionOperational()) && (
+        // Case 1: Caller holds both Catalogue and Inventory permissions (or Admin / Super Admin)
+        (hasManagerPermission('canManageProducts') && hasManagerPermission('canManageInventory'))
+        ||
+        // Case 2: Catalogue-only Manager cannot modify stockQuantity
+        (hasManagerPermission('canManageProducts') &&
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['stockQuantity']))
+        ||
+        // Case 3: Inventory-only Manager can ONLY modify stockQuantity and updatedAt
+        (hasManagerPermission('canManageInventory') &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stockQuantity', 'updatedAt']))
       );
+
+      // Catalogue deletion strictly requires catalogue authority and operational subscription
+      allow delete: if (isSuperAdmin() || isSubscriptionOperational()) &&
+        hasManagerPermission('canManageProducts');
     }
 
     match /categories/{categoryId} {
       allow read: if true;
-      allow write: if hasManagerPermission('canManageProducts');
+      allow write: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageProducts'));
     }
 
     match /product_categories/{categoryId} {
       allow read: if true;
-      allow write: if hasManagerPermission('canManageProducts');
+      allow write: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageProducts'));
     }
 
     // ===============================================================
@@ -163,10 +179,10 @@ service cloud.firestore {
       // All orders are securely verified and written server-side by the Firebase Admin SDK.
       allow create: if false;
 
-      // Updates: only staff with live order management permission
-      allow update: if hasManagerPermission('canManageOrders');
+      // Updates: only staff with live order management permission and operational subscription
+      allow update: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageOrders'));
 
-      allow delete: if isAdmin();
+      allow delete: if isSuperAdmin() || (isSubscriptionOperational() && isAdmin());
     }
 
     // ===============================================================
@@ -174,17 +190,23 @@ service cloud.firestore {
     // ===============================================================
     match /discounts/{discountId} {
       allow read: if true; // Public checkout code validation
-      allow write: if hasManagerPermission('canManageDiscounts');
+      allow write: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageDiscounts'));
     }
 
     // ===============================================================
-    // 5. SYSTEM SETTINGS & LEASE CONTROL (LANDLORD)
+    // 5. RUNTIME & SYSTEM SETTINGS
     // ===============================================================
-    match /system_settings/{settingId} {
-      // Accessible to live staff to evaluate lease status and display warnings/suspension
-      allow read: if isStaff() || isSuperAdmin();
+    match /runtime_settings/{settingId} {
+      // Minimal safe client-runtime subscription document (publicly readable)
+      allow read: if true;
+      // All mutations must go through authenticated Super Admin API via Firebase Admin SDK
+      allow write: if false;
+    }
 
-      // STRICT PROTECTION: Only primary Super Admin landlord can modify licensing/killswitch
+    match /system_settings/{settingId} {
+      // Accessible to live staff / super admin to evaluate legacy lease parameters
+      allow read: if isStaff() || isSuperAdmin();
+      // STRICT PROTECTION: Direct client writes are forbidden; writes occur via Super Admin API
       allow write: if isSuperAdmin();
     }
 
@@ -193,27 +215,27 @@ service cloud.firestore {
     // ===============================================================
     match /site_content/{contentId} {
       allow read: if true;
-      allow write: if hasManagerPermission('canManageWebsite');
+      allow write: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageWebsite'));
     }
 
     match /services/{serviceId} {
       allow read: if true;
-      allow write: if hasManagerPermission('canManageWebsite');
+      allow write: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageWebsite'));
     }
 
     match /blog_posts/{postId} {
       allow read: if true;
-      allow write: if hasManagerPermission('canManageWebsite');
+      allow write: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageWebsite'));
     }
 
     match /testimonials/{id} {
       allow read: if true;
-      allow write: if hasManagerPermission('canManageWebsite');
+      allow write: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageWebsite'));
     }
 
     match /teams/{id} {
       allow read: if true;
-      allow write: if hasManagerPermission('canManageWebsite');
+      allow write: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageWebsite'));
     }
 
     // ===============================================================
@@ -221,14 +243,14 @@ service cloud.firestore {
     // ===============================================================
     match /contact_submissions/{submissionId} {
       allow create: if true;
-      allow read, delete: if hasManagerPermission('canManageCustomers');
-      allow update: if hasManagerPermission('canManageCustomers');
+      allow read, delete: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageCustomers'));
+      allow update: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageCustomers'));
     }
 
     match /back_in_stock_requests/{requestId} {
       allow create: if true;
-      allow read, delete: if hasManagerPermission('canManageProducts') || hasManagerPermission('canManageInventory');
-      allow update: if hasManagerPermission('canManageProducts') || hasManagerPermission('canManageInventory');
+      allow read, delete: if isSuperAdmin() || (isSubscriptionOperational() && (hasManagerPermission('canManageProducts') || hasManagerPermission('canManageInventory')));
+      allow update: if isSuperAdmin() || (isSubscriptionOperational() && (hasManagerPermission('canManageProducts') || hasManagerPermission('canManageInventory')));
     }
 
     // ===============================================================

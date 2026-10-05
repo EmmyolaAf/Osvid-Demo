@@ -1002,7 +1002,7 @@ export default function SuperAdminDashboard() {
 
                     <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
                       <span className="text-slate-400 block text-[11px] font-semibold uppercase">Hosting & Project</span>
-                      <span className="font-bold text-slate-900 text-sm mt-0.5 block font-mono">{OSVID_CLIENT_CONFIG.primaryDomain}</span>
+                      <span className="font-bold text-slate-900 text-sm mt-0.5 block font-mono">{OSVID_CLIENT_CONFIG.hostingSite}</span>
                       <span className="text-[11px] text-slate-500 block mt-0.5">Firebase: <code className="font-mono text-slate-700">{OSVID_CLIENT_CONFIG.firebaseProjectId}</code></span>
                     </div>
 
@@ -1012,14 +1012,16 @@ export default function SuperAdminDashboard() {
                         {admins.find((a) => a.role === "admin")?.displayName || admins[0]?.displayName || "Tenant Admin"}
                       </span>
                       <span className="text-[11px] text-slate-500 block mt-0.5 truncate font-mono">
-                        {admins.find((a) => a.role === "admin")?.email || admins[0]?.email || "admin@osvidcompany.com"}
+                        {admins.find((a) => a.role === "admin")?.email || admins[0]?.email || "Not Configured"}
                       </span>
                     </div>
 
                     <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/60">
                       <span className="text-slate-400 block text-[11px] font-semibold uppercase">Plan & Status</span>
                       <div className="flex items-center gap-2 mt-0.5">
-                        <span className="font-bold text-slate-900 text-sm">{OSVID_CLIENT_CONFIG.plan}</span>
+                        <span className="font-bold text-slate-900 text-sm uppercase">
+                          {subscription?.hostingPlan || "Enterprise"}
+                        </span>
                         <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
                           subscription?.isSuspended
                             ? "bg-red-100 text-red-800"

@@ -1,45 +1,32 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import {
   AlertOctagon,
-  CreditCard,
-  ShieldAlert,
-  ExternalLink,
   LogOut,
-  PhoneCall,
   Crown,
-  MessageSquare,
   Building2,
   Calendar,
   Lock,
+  ArrowLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
-import { BusinessSubscription } from "@/types/auth";
+import { OSVID_CLIENT_CONFIG } from "@/config/client";
 import Link from "next/link";
 
 interface SuspensionBarrierProps {
-  subscription: BusinessSubscription | null;
+  subscription?: {
+    businessName?: string;
+    hostingExpiryDate?: string;
+    suspendedReason?: string;
+    isSuspended?: boolean;
+    status?: string;
+  } | null;
 }
 
 export default function SuspensionBarrier({ subscription }: SuspensionBarrierProps) {
   const { logout, isSuperAdmin, user } = useAuth();
-  const [isCopied, setIsCopied] = useState(false);
-
-  const formatNaira = (amount: number) => {
-    return new Intl.NumberFormat("en-NG", {
-      style: "currency",
-      currency: "NGN",
-      maximumFractionDigits: 0,
-    }).format(amount || 250000);
-  };
-
-  const handleCopyAccount = () => {
-    navigator.clipboard.writeText("0123456789 - OSVID Chemicals Ltd - Access Bank");
-    setIsCopied(true);
-    setTimeout(() => setIsCopied(false), 3000);
-  };
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-2xl flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
@@ -64,78 +51,74 @@ export default function SuspensionBarrier({ subscription }: SuspensionBarrierPro
             </h2>
             <p className="text-slate-300 text-sm sm:text-base leading-relaxed max-w-md mx-auto">
               {subscription?.suspendedReason ||
-                "Access to this portal has been restricted due to an overdue annual hosting and licensing subscription."}
+                "Access to this portal has been restricted by the platform provider due to an overdue annual hosting and licensing subscription."}
             </p>
           </div>
 
-          {/* Account & Billing Breakdown */}
+          {/* Account & Status Breakdown */}
           <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-5 text-left space-y-3 text-xs text-slate-300">
             <div className="flex justify-between items-center pb-2.5 border-b border-slate-800">
               <span className="text-slate-400 flex items-center gap-1.5">
                 <Building2 size={14} className="text-slate-500" />
-                Business Entity:
+                Organization:
               </span>
-              <span className="font-bold text-white">{subscription?.businessName || "OSVID Chemicals Limited"}</span>
+              <span className="font-bold text-white">
+                {subscription?.businessName || OSVID_CLIENT_CONFIG.businessName}
+              </span>
             </div>
 
             <div className="flex justify-between items-center pb-2.5 border-b border-slate-800">
               <span className="text-slate-400 flex items-center gap-1.5">
                 <Calendar size={14} className="text-slate-500" />
-                License Expiry:
+                Subscription Status:
               </span>
               <span className="font-semibold text-red-400">
-                {subscription?.hostingExpiryDate
-                  ? new Date(subscription.hostingExpiryDate).toLocaleDateString("en-NG", {
-                      year: "numeric",
-                      month: "long",
-                      day: "numeric",
-                    })
-                  : "Expired"}
+                Access Suspended
               </span>
             </div>
 
-            <div className="flex justify-between items-center pb-2.5 border-b border-slate-800">
-              <span className="text-slate-400 flex items-center gap-1.5">
-                <CreditCard size={14} className="text-slate-500" />
-                Renewal Settlement:
-              </span>
-              <span className="font-bold text-emerald-400 text-sm">
-                {formatNaira(subscription?.renewalAmountNgn || 250000)}
-              </span>
-            </div>
+            {subscription?.hostingExpiryDate && (
+              <div className="flex justify-between items-center pb-2.5 border-b border-slate-800">
+                <span className="text-slate-400 flex items-center gap-1.5">
+                  <Calendar size={14} className="text-slate-500" />
+                  License Expiration:
+                </span>
+                <span className="font-medium text-slate-300">
+                  {new Date(subscription.hostingExpiryDate).toLocaleDateString("en-NG", {
+                    year: "numeric",
+                    month: "long",
+                    day: "numeric",
+                  })}
+                </span>
+              </div>
+            )}
 
-            <div className="flex justify-between items-center">
-              <span className="text-slate-400">Support / Billing Desk:</span>
-              <span className="font-semibold text-white">billing@osvidchemicals.com</span>
+            <div className="pt-2 text-slate-400 text-center leading-relaxed text-[11px]">
+              Please contact the platform service provider or designated system administrator to resolve hosting renewal and restore operations.
             </div>
           </div>
 
           {/* Action Buttons */}
           <div className="pt-2 flex flex-col sm:flex-row gap-3 justify-center">
-            <a
-              href="mailto:billing@osvidchemicals.com?subject=Hosting%20Reactivation%20%26%20Settlement"
-              className="inline-flex w-full sm:w-auto"
-            >
-              <Button className="w-full bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 text-white font-bold h-11 px-6 rounded-xl shadow-lg shadow-red-600/30 gap-2 text-xs uppercase tracking-wider">
-                <CreditCard size={16} />
-                <span>Contact Billing to Reactivate</span>
-              </Button>
-            </a>
-
-            <a
-              href="https://wa.me/2349121090303?text=Hello%20OSVID%20Billing,%20I%20would%20like%20to%20settle%20our%20hosting%20subscription%20renewal."
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex w-full sm:w-auto"
-            >
+            <Link href="/" className="inline-flex w-full sm:w-auto">
               <Button
                 variant="outline"
-                className="w-full border-slate-700 bg-slate-800/80 text-emerald-400 hover:bg-slate-800 hover:text-emerald-300 h-11 px-4 rounded-xl gap-2 text-xs font-semibold"
+                className="w-full border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white h-11 px-5 rounded-xl gap-2 text-xs font-semibold"
               >
-                <MessageSquare size={16} />
-                <span>WhatsApp Desk</span>
+                <ArrowLeft size={16} />
+                <span>Return to Storefront</span>
               </Button>
-            </a>
+            </Link>
+
+            {user && (
+              <Button
+                onClick={logout}
+                className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-bold h-11 px-6 rounded-xl shadow-lg shadow-red-600/30 gap-2 text-xs uppercase tracking-wider"
+              >
+                <LogOut size={16} />
+                <span>Sign Out</span>
+              </Button>
+            )}
           </div>
 
           {/* Footer Controls: Sign Out or Super Admin Bypass */}
@@ -152,15 +135,7 @@ export default function SuspensionBarrier({ subscription }: SuspensionBarrierPro
               <span>Locked by Platform Governor</span>
             )}
 
-            {user ? (
-              <button
-                onClick={logout}
-                className="inline-flex items-center gap-1 text-slate-400 hover:text-white transition-colors"
-              >
-                <LogOut size={14} />
-                <span>Sign Out</span>
-              </button>
-            ) : (
+            {!user && (
               <Link href="/login" className="text-slate-400 hover:text-white transition-colors">
                 Admin Sign In
               </Link>

@@ -135,7 +135,7 @@ export default function ProductsManagementPage() {
       category: defaultCat,
       price: "",
       discountPrice: "",
-      stockQuantity: "50",
+      stockQuantity: canManageInventory ? "50" : "0",
       unit: "kg",
       sku: `SKU-${Date.now().toString().slice(-6)}`,
       imageUrl: "/images/placeholder.webp",
@@ -153,7 +153,7 @@ export default function ProductsManagementPage() {
       category: p.category || (categories[0]?.name || "Industrial Chemicals"),
       price: p.price.toString(),
       discountPrice: p.discountPrice ? p.discountPrice.toString() : "",
-      stockQuantity: p.stockQuantity.toString(),
+      stockQuantity: (p.stockQuantity ?? 0).toString(),
       unit: p.unit || "kg",
       sku: p.sku || "",
       imageUrl: p.imageUrl || "/images/placeholder.webp",
@@ -183,21 +183,30 @@ export default function ProductsManagementPage() {
         .map((f) => f.trim())
         .filter(Boolean);
 
-      const result = await saveProductToDb({
-        id: editingProduct?.id,
-        name: productForm.name.trim(),
-        category: productForm.category.trim(),
-        price: numPrice,
-        discountPrice: productForm.discountPrice ? parseFloat(productForm.discountPrice) : undefined,
-        stockQuantity: parseInt(productForm.stockQuantity) || 0,
-        unit: productForm.unit.trim() || "kg",
-        sku: productForm.sku.trim(),
-        imageUrl: productForm.imageUrl.trim() || "/images/placeholder.webp",
-        description: productForm.description.trim(),
-        features: featuresArray,
-        suggestedProductIds: productForm.suggestedProductIds,
-        isActive: true,
-      });
+      const isEditing = Boolean(editingProduct?.id);
+      const shouldOmitStock = !canManageInventory && isEditing;
+      const initialStock = canManageInventory ? (parseInt(productForm.stockQuantity) || 0) : 0;
+
+      const result = await saveProductToDb(
+        {
+          id: editingProduct?.id,
+          name: productForm.name.trim(),
+          category: productForm.category.trim(),
+          price: numPrice,
+          discountPrice: productForm.discountPrice ? parseFloat(productForm.discountPrice) : undefined,
+          stockQuantity: isEditing
+            ? (canManageInventory ? parseInt(productForm.stockQuantity) || 0 : (editingProduct?.stockQuantity ?? 0))
+            : initialStock,
+          unit: productForm.unit.trim() || "kg",
+          sku: productForm.sku.trim(),
+          imageUrl: productForm.imageUrl.trim() || "/images/placeholder.webp",
+          description: productForm.description.trim(),
+          features: featuresArray,
+          suggestedProductIds: productForm.suggestedProductIds,
+          isActive: true,
+        },
+        { omitStock: shouldOmitStock }
+      );
 
       if (!result.success) {
         toast.error(result.error || "Failed to save product document in Firestore.");
@@ -884,11 +893,17 @@ export default function ProductsManagementPage() {
                   type="number"
                   required
                   min={0}
-                  placeholder="50"
-                  value={productForm.stockQuantity}
+                  placeholder={canManageInventory ? "50" : "0"}
+                  value={canManageInventory ? productForm.stockQuantity : (editingProduct ? (editingProduct.stockQuantity ?? 0).toString() : "0")}
+                  disabled={!canManageInventory}
                   onChange={(e) => setProductForm({ ...productForm, stockQuantity: e.target.value })}
-                  className="mt-1 h-10 rounded-xl text-sm"
+                  className={`mt-1 h-10 rounded-xl text-sm ${!canManageInventory ? "bg-slate-100 text-slate-500 cursor-not-allowed" : ""}`}
                 />
+                {!canManageInventory && (
+                  <p className="text-[11px] text-amber-600 mt-1 flex items-center gap-1 font-medium">
+                    <Lock size={12} /> Stock levels require Inventory Management authority.
+                  </p>
+                )}
               </div>
             </div>
 

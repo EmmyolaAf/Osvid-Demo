@@ -14,8 +14,14 @@ const SENSITIVE_KEYS = new Set([
   "apikey",
 ]);
 
+export interface AuditLogResult {
+  success: boolean;
+  logId?: string;
+  error?: string;
+}
+
 /**
- * Recursively sanitizes metadata to ensure no sensitive credentials or tokens
+ * Recursively sanitizes metadata to ensure no sensitive credentials, secrets, or tokens
  * are persisted in audit trails.
  */
 export function sanitizeMetadata(data: any): any {
@@ -42,34 +48,46 @@ export function sanitizeMetadata(data: any): any {
 }
 
 /**
- * Appends an immutable audit log record to Cloud Firestore via Firebase Admin SDK.
- * Denied from browser writes via firestore.rules.
+ * Constructs an immutable audit record and document reference without writing.
+ * Used for atomic Firestore batch commits alongside business document mutations.
  */
-export async function logAuditEvent(input: AuditLogCreateInput): Promise<string> {
+export function buildAuditLogRecord(input: AuditLogCreateInput): {
+  docRef: FirebaseFirestore.DocumentReference;
+  entry: AuditLogEntry;
+} {
+  const docRef = adminDb.collection("audit_logs").doc();
+  const now = new Date().toISOString();
+
+  const entry: AuditLogEntry = {
+    id: docRef.id,
+    clientId: input.clientId || OSVID_CLIENT_CONFIG.clientId,
+    timestamp: now,
+    actorUid: input.actor.uid,
+    actorEmail: input.actor.email,
+    actorRole: input.actor.role,
+    action: input.action,
+    targetType: input.targetType,
+    targetId: input.targetId,
+    summary: input.summary,
+    metadata: input.metadata ? sanitizeMetadata(input.metadata) : undefined,
+  };
+
+  return { docRef, entry };
+}
+
+/**
+ * Appends an immutable audit log record to Cloud Firestore via Firebase Admin SDK.
+ * Returns structured result indicating success or failure.
+ */
+export async function logAuditEvent(input: AuditLogCreateInput): Promise<AuditLogResult> {
   try {
-    const docRef = adminDb.collection("audit_logs").doc();
-    const now = new Date().toISOString();
-
-    const entry: AuditLogEntry = {
-      id: docRef.id,
-      clientId: input.clientId || OSVID_CLIENT_CONFIG.clientId,
-      timestamp: now,
-      actorUid: input.actor.uid,
-      actorEmail: input.actor.email,
-      actorRole: input.actor.role,
-      action: input.action,
-      targetType: input.targetType,
-      targetId: input.targetId,
-      summary: input.summary,
-      metadata: input.metadata ? sanitizeMetadata(input.metadata) : undefined,
-    };
-
+    const { docRef, entry } = buildAuditLogRecord(input);
     await docRef.set(entry);
-    return docRef.id;
+    return { success: true, logId: docRef.id };
   } catch (err: any) {
-    // Non-blocking for primary transaction but logged to server console
-    console.error("Failed to write to audit_logs:", err?.message || err);
-    return "";
+    const errorMsg = err?.message || String(err);
+    console.error("AUDIT WARNING: Failed to record audit log:", errorMsg);
+    return { success: false, error: errorMsg };
   }
 }
 

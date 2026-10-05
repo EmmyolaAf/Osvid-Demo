@@ -1,18 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
 import { requireSuperAdmin, authErrorResponse } from "@/lib/server/auth";
-import { logAuditEvent } from "@/lib/server/audit";
+import { buildAuditLogRecord } from "@/lib/server/audit";
 import { OSVID_CLIENT_CONFIG } from "@/config/client";
-import { ClientSubscription } from "@/types/subscription";
+import {
+  ClientSubscription,
+  RuntimeSubscriptionState,
+  SubscriptionStatus,
+  HostingPlan,
+} from "@/types/subscription";
+import { Timestamp } from "firebase-admin/firestore";
 
 const PRIMARY_SUBSCRIPTION_DOC = "subscription";
 const LEGACY_SUBSCRIPTION_DOC = "main_business";
 const COLLECTION_NAME = "system_settings";
+const RUNTIME_COLLECTION_NAME = "runtime_settings";
 
 export const DEFAULT_SERVER_SUBSCRIPTION: ClientSubscription = {
   clientId: OSVID_CLIENT_CONFIG.clientId,
   businessName: OSVID_CLIENT_CONFIG.clientName,
-  adminEmail: OSVID_CLIENT_CONFIG.defaultAdminEmail,
+  adminEmail: undefined,
   hostingPlan: "enterprise",
   status: "active",
   isSuspended: false,
@@ -27,7 +34,7 @@ export const DEFAULT_SERVER_SUBSCRIPTION: ClientSubscription = {
 };
 
 /**
- * Reads existing subscription state with dual-read fallback.
+ * Reads existing authoritative subscription state from Firestore.
  */
 async function getExistingSubscription(): Promise<ClientSubscription> {
   try {
@@ -57,24 +64,54 @@ async function getExistingSubscription(): Promise<ClientSubscription> {
       };
     }
   } catch (err) {
-    console.warn("Could not read subscription from Firestore, using default:", err);
+    console.warn("Could not read subscription from Firestore, using default fallback:", err);
   }
 
   return { ...DEFAULT_SERVER_SUBSCRIPTION };
 }
 
 /**
- * Synchronizes updates to both primary and legacy documents to prevent divergence.
+ * Computes deterministic subscription lifecycle status and hard suspension threshold.
  */
-async function persistDualSubscription(payload: ClientSubscription): Promise<void> {
-  const batch = adminDb.batch();
-  const primaryRef = adminDb.collection(COLLECTION_NAME).doc(PRIMARY_SUBSCRIPTION_DOC);
-  const legacyRef = adminDb.collection(COLLECTION_NAME).doc(LEGACY_SUBSCRIPTION_DOC);
+function computeLifecycle(
+  expiryDateStr: string,
+  gracePeriodDays: number,
+  isExplicitlySuspended: boolean,
+  showWarning: boolean
+): {
+  status: SubscriptionStatus;
+  isSuspended: boolean;
+  hardSuspendMs: number;
+  daysRemaining: number;
+} {
+  const expiryDate = new Date(expiryDateStr);
+  const graceDays = Number.isInteger(gracePeriodDays) && gracePeriodDays >= 0 ? gracePeriodDays : 7;
+  const hardSuspendMs = expiryDate.getTime() + graceDays * 24 * 60 * 60 * 1000;
+  const now = Date.now();
 
-  batch.set(primaryRef, payload, { merge: true });
-  batch.set(legacyRef, payload, { merge: true });
+  const isHardExpired = now > hardSuspendMs;
+  const isPastDue = now > expiryDate.getTime();
+  const isGracePeriod = isPastDue && !isHardExpired;
+  const daysRemaining = Math.ceil((expiryDate.getTime() - now) / (1000 * 60 * 60 * 24));
+  const effectiveSuspended = isExplicitlySuspended || isHardExpired;
 
-  await batch.commit();
+  let computedStatus: SubscriptionStatus = "active";
+  if (effectiveSuspended) {
+    computedStatus = "suspended";
+  } else if (isGracePeriod) {
+    computedStatus = "grace";
+  } else if (showWarning || daysRemaining <= 14) {
+    computedStatus = "warning";
+  } else {
+    computedStatus = "active";
+  }
+
+  return {
+    status: computedStatus,
+    isSuspended: effectiveSuspended,
+    hardSuspendMs,
+    daysRemaining,
+  };
 }
 
 /**
@@ -92,12 +129,17 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST: Mutates provider subscription state (Super Admin only).
+ * Executes atomic batch write across authoritative, runtime, legacy, and audit collections.
  */
 export async function POST(req: NextRequest) {
   try {
     const caller = await requireSuperAdmin(req);
     const body = await req.json();
-    const { action, payload } = body;
+    const { action, payload } = body || {};
+
+    if (!action) {
+      return NextResponse.json({ error: "Missing required action parameter" }, { status: 400 });
+    }
 
     const currentSub = await getExistingSubscription();
     const now = new Date().toISOString();
@@ -117,26 +159,77 @@ export async function POST(req: NextRequest) {
           businessName,
         } = payload || {};
 
-        if (hostingExpiryDate && isNaN(new Date(hostingExpiryDate).getTime())) {
-          return NextResponse.json(
-            { error: "Invalid hostingExpiryDate format" },
-            { status: 400 }
-          );
+        // 1. Validation
+        if (hostingExpiryDate !== undefined) {
+          const parsed = new Date(hostingExpiryDate);
+          if (isNaN(parsed.getTime())) {
+            return NextResponse.json(
+              { error: "Invalid hostingExpiryDate format. Expected valid ISO date." },
+              { status: 400 }
+            );
+          }
         }
+
+        if (renewalAmountNgn !== undefined) {
+          const num = Number(renewalAmountNgn);
+          if (isNaN(num) || !Number.isFinite(num) || num < 0) {
+            return NextResponse.json(
+              { error: "renewalAmountNgn must be a valid non-negative number." },
+              { status: 400 }
+            );
+          }
+        }
+
+        if (gracePeriodDays !== undefined) {
+          const days = Number(gracePeriodDays);
+          if (!Number.isInteger(days) || days < 0 || days > 90) {
+            return NextResponse.json(
+              { error: "gracePeriodDays must be an integer between 0 and 90." },
+              { status: 400 }
+            );
+          }
+        }
+
+        if (hostingPlan !== undefined) {
+          const allowedPlans: HostingPlan[] = ["standard", "professional", "enterprise"];
+          if (!allowedPlans.includes(hostingPlan)) {
+            return NextResponse.json(
+              { error: `hostingPlan must be one of [${allowedPlans.join(", ")}]` },
+              { status: 400 }
+            );
+          }
+        }
+
+        if (businessName !== undefined) {
+          if (typeof businessName !== "string" || businessName.trim().length === 0 || businessName.length > 150) {
+            return NextResponse.json(
+              { error: "businessName must be between 1 and 150 characters." },
+              { status: 400 }
+            );
+          }
+        }
+
+        const newExpiryStr = hostingExpiryDate
+          ? new Date(hostingExpiryDate).toISOString()
+          : currentSub.hostingExpiryDate;
+        const newGrace = gracePeriodDays !== undefined ? Number(gracePeriodDays) : currentSub.gracePeriodDays;
+        const lifecycle = computeLifecycle(newExpiryStr, newGrace, currentSub.isSuspended, currentSub.showWarning);
 
         updatedSub = {
           ...currentSub,
-          ...(hostingExpiryDate ? { hostingExpiryDate: new Date(hostingExpiryDate).toISOString() } : {}),
+          hostingExpiryDate: newExpiryStr,
           ...(renewalAmountNgn !== undefined ? { renewalAmountNgn: Number(renewalAmountNgn) } : {}),
-          ...(gracePeriodDays !== undefined ? { gracePeriodDays: Number(gracePeriodDays) } : {}),
+          gracePeriodDays: newGrace,
           ...(hostingPlan ? { hostingPlan } : {}),
           ...(businessName ? { businessName: businessName.trim() } : {}),
+          status: lifecycle.status,
+          isSuspended: lifecycle.isSuspended,
           updatedAt: now,
           updatedBy: caller.email,
         };
 
         auditAction = "subscription.update_terms";
-        auditSummary = `Updated subscription license terms (Expiry: ${updatedSub.hostingExpiryDate}, Fee: ₦${updatedSub.renewalAmountNgn.toLocaleString()})`;
+        auditSummary = `Updated subscription license terms (Expiry: ${updatedSub.hostingExpiryDate}, Fee: ₦${updatedSub.renewalAmountNgn.toLocaleString()}, Grace: ${updatedSub.gracePeriodDays}d)`;
         auditMeta.before = {
           hostingExpiryDate: currentSub.hostingExpiryDate,
           renewalAmountNgn: currentSub.renewalAmountNgn,
@@ -153,10 +246,26 @@ export async function POST(req: NextRequest) {
       case "set-warning": {
         const { showWarning, warningNotice } = payload || {};
 
+        if (warningNotice !== undefined && typeof warningNotice === "string" && warningNotice.length > 500) {
+          return NextResponse.json(
+            { error: "warningNotice exceeds maximum allowed length of 500 characters." },
+            { status: 400 }
+          );
+        }
+
+        const nextShowWarning = Boolean(showWarning);
+        const lifecycle = computeLifecycle(
+          currentSub.hostingExpiryDate,
+          currentSub.gracePeriodDays,
+          currentSub.isSuspended,
+          nextShowWarning
+        );
+
         updatedSub = {
           ...currentSub,
-          showWarning: Boolean(showWarning),
+          showWarning: nextShowWarning,
           ...(warningNotice !== undefined ? { warningNotice: String(warningNotice).trim() } : {}),
+          status: lifecycle.status,
           updatedAt: now,
           updatedBy: caller.email,
         };
@@ -172,7 +281,10 @@ export async function POST(req: NextRequest) {
 
       case "suspend": {
         const { reason } = payload || {};
-        const suspendReason = reason?.trim() || "Annual hosting and licensing subscription is past due.";
+        const suspendReason =
+          typeof reason === "string" && reason.trim().length > 0
+            ? reason.trim().slice(0, 500)
+            : "Annual hosting and licensing subscription is past due.";
 
         updatedSub = {
           ...currentSub,
@@ -190,16 +302,46 @@ export async function POST(req: NextRequest) {
       }
 
       case "reactivate": {
+        const { hostingExpiryDate } = payload || {};
+        let targetExpiryStr = currentSub.hostingExpiryDate;
+
+        if (hostingExpiryDate) {
+          const parsed = new Date(hostingExpiryDate);
+          if (isNaN(parsed.getTime())) {
+            return NextResponse.json({ error: "Invalid hostingExpiryDate format" }, { status: 400 });
+          }
+          targetExpiryStr = parsed.toISOString();
+        }
+
+        // Validate that subscription is not past grace period without a renewed date
+        const lifecycle = computeLifecycle(
+          targetExpiryStr,
+          currentSub.gracePeriodDays,
+          false, // request un-suspension
+          currentSub.showWarning
+        );
+
+        if (lifecycle.status === "suspended") {
+          return NextResponse.json(
+            {
+              error:
+                "Cannot reactivate subscription: lease is expired past the grace period. Please extend hostingExpiryDate to reactivate.",
+            },
+            { status: 400 }
+          );
+        }
+
         updatedSub = {
           ...currentSub,
+          hostingExpiryDate: targetExpiryStr,
           isSuspended: false,
-          status: "active",
+          status: lifecycle.status,
           updatedAt: now,
           updatedBy: caller.email,
         };
 
         auditAction = "subscription.reactivate";
-        auditSummary = "Reactivated business application: restored normal operations";
+        auditSummary = `Reactivated business application (Status: ${lifecycle.status}, Expiry: ${updatedSub.hostingExpiryDate})`;
         break;
       }
 
@@ -210,11 +352,34 @@ export async function POST(req: NextRequest) {
         );
     }
 
-    // Persist synchronously to both documents
-    await persistDualSubscription(updatedSub);
+    // Compute hard suspension timestamp for backend rules evaluation
+    const lifecycle = computeLifecycle(
+      updatedSub.hostingExpiryDate,
+      updatedSub.gracePeriodDays,
+      updatedSub.isSuspended,
+      updatedSub.showWarning
+    );
 
-    // Emit tamper-resistant audit event
-    await logAuditEvent({
+    const runtimePayload: RuntimeSubscriptionState = {
+      clientId: updatedSub.clientId,
+      isSuspended: updatedSub.isSuspended,
+      suspendedReason: updatedSub.isSuspended ? updatedSub.suspendedReason : undefined,
+      hostingExpiryDate: updatedSub.hostingExpiryDate,
+      gracePeriodDays: updatedSub.gracePeriodDays,
+      hardSuspendAt: Timestamp.fromMillis(lifecycle.hardSuspendMs),
+      hardSuspendAtIso: new Date(lifecycle.hardSuspendMs).toISOString(),
+      showWarning: updatedSub.showWarning,
+      warningNotice: updatedSub.warningNotice,
+      updatedAt: now,
+      businessName: updatedSub.businessName,
+    };
+
+    // ATOMIC BATCH WRITE: commit authoritative, runtime, legacy, and audit record in one transaction
+    const batch = adminDb.batch();
+    const primaryRef = adminDb.collection(COLLECTION_NAME).doc(PRIMARY_SUBSCRIPTION_DOC);
+    const legacyRef = adminDb.collection(COLLECTION_NAME).doc(LEGACY_SUBSCRIPTION_DOC);
+    const runtimeRef = adminDb.collection(RUNTIME_COLLECTION_NAME).doc(PRIMARY_SUBSCRIPTION_DOC);
+    const { docRef: auditRef, entry: auditEntry } = buildAuditLogRecord({
       clientId: OSVID_CLIENT_CONFIG.clientId,
       actor: {
         uid: caller.uid,
@@ -228,9 +393,17 @@ export async function POST(req: NextRequest) {
       metadata: auditMeta,
     });
 
+    batch.set(primaryRef, updatedSub, { merge: true });
+    batch.set(legacyRef, updatedSub, { merge: true });
+    batch.set(runtimeRef, runtimePayload, { merge: true });
+    batch.set(auditRef, auditEntry);
+
+    await batch.commit();
+
     return NextResponse.json({
       success: true,
       subscription: updatedSub,
+      runtime: runtimePayload,
     });
   } catch (err) {
     return authErrorResponse(err);

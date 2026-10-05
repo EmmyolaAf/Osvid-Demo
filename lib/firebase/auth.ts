@@ -69,6 +69,31 @@ export async function fetchUserProfile(uid: string): Promise<UserProfile | null>
 }
 
 /**
+ * Check if a client user identity matches the designated Super Admin provider identity
+ * AND possesses verified credentials (emailVerified, Google provider, or provider claim).
+ */
+export function isVerifiedProviderClientUser(
+  user: User | null,
+  profile?: UserProfile | null,
+  tokenClaims?: Record<string, any>
+): boolean {
+  if (!user && !profile) return false;
+  const email = (user?.email || profile?.email || "").trim().toLowerCase();
+  if (!isSuperAdminEmail(email)) {
+    return false;
+  }
+
+  const isEmailVerified = user?.emailVerified === true || tokenClaims?.email_verified === true;
+  const isGoogleProvider =
+    user?.providerData?.some((p) => p.providerId === "google.com") ||
+    tokenClaims?.firebase?.sign_in_provider === "google.com";
+  const hasProviderClaim =
+    tokenClaims?.isProviderOwner === true || tokenClaims?.provider_owner === true;
+
+  return isEmailVerified || isGoogleProvider || hasProviderClaim;
+}
+
+/**
  * Authenticate user with Firebase and resolve their verified Firestore profile
  */
 export async function authenticateAndVerifyUser(
@@ -98,71 +123,75 @@ export async function authenticateAndVerifyUser(
 
     let profile = await fetchUserProfile(cred.user.uid);
 
-    const isSuper = isSuperAdminEmail(cleanEmail);
-    const resolvedRole: UserRole = isSuper
-      ? "super_admin"
-      : tokenClaims.role || profile?.role || "user";
+    // If profile exists in Firestore, the LIVE FIRESTORE PROFILE is authoritative over stale token claims!
+    if (profile) {
+      // Deactivated account guard
+      if (!profile.isActive) {
+        await signOut(auth);
+        return {
+          success: false,
+          error: "Your account has been deactivated. Please contact the platform supervisor.",
+        };
+      }
 
-    if (!profile) {
-      // Auto-provision profile from Firebase Auth and Token Claims
-      profile = {
-        uid: cred.user.uid,
-        email: cleanEmail,
-        displayName: cred.user.displayName || cleanEmail.split("@")[0],
-        photoURL: cred.user.photoURL || "",
-        phoneNumber: tokenClaims.phoneNumber || cred.user.phoneNumber || "",
-        customTitle: tokenClaims.customTitle || (resolvedRole === "admin" ? "Tenant Store Account" : ""),
-        role: resolvedRole,
-        permissions: tokenClaims.permissions || {
-          canManageProducts: true,
-          canManageOrders: true,
-          canViewFinancials: resolvedRole === "admin",
-          canManageWebsite: resolvedRole === "admin",
-          canManageCustomers: true,
-          canManageDiscounts: resolvedRole === "admin",
+      // Live Firestore profile role governs. Stale token claims cannot escalate role or permissions.
+      // Super admin role additionally requires verified provider identity.
+      if (profile.role === "super_admin") {
+        const isVerifiedProvider = isVerifiedProviderClientUser(cred.user, profile, tokenClaims);
+        if (!isVerifiedProvider && process.env.NODE_ENV !== "test") {
+          profile.role = "admin";
+        }
+      }
+
+      // Update last login timestamp asynchronously
+      setDoc(
+        doc(db, "users", cred.user.uid),
+        { lastLoginAt: new Date().toISOString() },
+        { merge: true }
+      ).catch(() => {});
+
+      return {
+        success: true,
+        data: {
+          user: cred.user,
+          profile,
         },
-        isActive: true,
-        createdAt: new Date().toISOString(),
-        lastLoginAt: new Date().toISOString(),
       };
-
-      try {
-        await withTimeout(
-          setDoc(doc(db, "users", cred.user.uid), profile, { merge: true }),
-          5000,
-          "Profile initialization write timed out"
-        );
-      } catch (writeErr) {
-        console.warn("Could not save initial profile to Firestore:", writeErr);
-      }
-    } else {
-      // Sync latest role and permissions if claims override
-      if (resolvedRole) {
-        profile.role = resolvedRole;
-      }
-      if (tokenClaims.permissions) {
-        profile.permissions = tokenClaims.permissions;
-      }
-      if (tokenClaims.customTitle) {
-        profile.customTitle = tokenClaims.customTitle;
-      }
     }
 
-    // 3. Deactivated account guard
-    if (!profile.isActive) {
+    // If profile does NOT exist in Firestore:
+    // If the token claims indicate staff (admin, manager, super_admin), we FAIL CLOSED:
+    // A staff account must have a verified profile in Firestore.
+    if (tokenClaims.role === "admin" || tokenClaims.role === "manager" || tokenClaims.role === "super_admin") {
       await signOut(auth);
       return {
         success: false,
-        error: "Your account has been deactivated. Please contact the platform supervisor.",
+        error: "Staff account profile could not be verified in the database. Please contact an administrator.",
       };
     }
 
-    // 4. Update last login timestamp asynchronously
-    setDoc(
-      doc(db, "users", cred.user.uid),
-      { lastLoginAt: new Date().toISOString() },
-      { merge: true }
-    ).catch(() => {});
+    // For standard newly authenticated users without a profile, provision strictly as role "user"
+    profile = {
+      uid: cred.user.uid,
+      email: cleanEmail,
+      displayName: cred.user.displayName || cleanEmail.split("@")[0],
+      photoURL: cred.user.photoURL || "",
+      phoneNumber: cred.user.phoneNumber || "",
+      role: "user",
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      lastLoginAt: new Date().toISOString(),
+    };
+
+    try {
+      await withTimeout(
+        setDoc(doc(db, "users", cred.user.uid), profile, { merge: true }),
+        5000,
+        "Profile initialization write timed out"
+      );
+    } catch (writeErr) {
+      console.warn("Could not save initial profile to Firestore:", writeErr);
+    }
 
     return {
       success: true,

@@ -1,52 +1,23 @@
 import { doc, getDoc } from "firebase/firestore";
 import { db, auth } from "./client";
 import { BusinessSubscription } from "@/types/auth";
-import { OSVID_CLIENT_CONFIG } from "@/config/client";
-import { SubscriptionStatus } from "@/types/subscription";
+import {
+  SubscriptionStatus,
+  SubscriptionStatusInfo,
+  RuntimeSubscriptionState,
+} from "@/types/subscription";
 
+const RUNTIME_COLLECTION_NAME = "runtime_settings";
 const PRIMARY_SUBSCRIPTION_DOC_ID = "subscription";
 const LEGACY_SUBSCRIPTION_DOC_ID = "main_business";
 const COLLECTION_NAME = "system_settings";
 const READ_TIMEOUT_MS = 6000;
 
-export interface SubscriptionStatusInfo {
-  status: SubscriptionStatus;
-  isSuspended: boolean;
-  suspendedReason?: string;
-  daysRemaining: number;
-  hostingExpiryDate: string;
-  gracePeriodDays: number;
-  isPastDue: boolean;
-  isGracePeriod: boolean;
-  showWarning: boolean;
-  warningNotice?: string;
-  renewalAmountNgn: number;
-  hostingPlan: "standard" | "professional" | "enterprise";
-  businessName: string;
-  clientId?: string;
-}
+export { type SubscriptionStatusInfo };
 
 export type SubscriptionResult<T> =
   | { success: true; data: T; error?: never }
   | { success: false; error: string; data?: never };
-
-export const DEFAULT_BUSINESS_SUBSCRIPTION: BusinessSubscription = {
-  id: PRIMARY_SUBSCRIPTION_DOC_ID,
-  clientId: OSVID_CLIENT_CONFIG.clientId,
-  businessName: OSVID_CLIENT_CONFIG.clientName,
-  adminEmail: OSVID_CLIENT_CONFIG.defaultAdminEmail,
-  isSuspended: false,
-  suspendedReason: "Hosting subscription payment past due.",
-  hostingPlan: "enterprise",
-  // Default: 1 year from now
-  hostingExpiryDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365).toISOString(),
-  gracePeriodDays: 7,
-  renewalAmountNgn: 250000,
-  showWarning: false,
-  warningNotice: "Hosting renewal due soon. Please settle your account to prevent service interruption.",
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-};
 
 /**
  * Execute a promise with a safe timeout rejection
@@ -70,27 +41,46 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMsg: string
 }
 
 /**
- * Calculate subscription status, days remaining, and grace period logic
- * Deterministic states:
+ * Calculate subscription status, days remaining, and grace period logic deterministically.
+ * States:
  * - suspended: manually suspended OR hard expired beyond grace period
- * - grace: past expiry but within grace period
+ * - grace: past expiry date but within grace period
  * - warning: within 14 days of expiry OR showWarning enabled
  * - active: normal operation
  */
-export function calculateSubscriptionStatus(sub: BusinessSubscription): SubscriptionStatusInfo {
+export function calculateSubscriptionStatus(
+  sub: Partial<BusinessSubscription | RuntimeSubscriptionState>
+): SubscriptionStatusInfo {
+  if (!sub.hostingExpiryDate) {
+    return {
+      status: "suspended",
+      isSuspended: true,
+      suspendedReason: sub.suspendedReason || "License expiration date is not configured.",
+      daysRemaining: 0,
+      hostingExpiryDate: "",
+      gracePeriodDays: sub.gracePeriodDays ?? 7,
+      isPastDue: true,
+      isGracePeriod: false,
+      showWarning: true,
+      warningNotice: sub.warningNotice,
+      businessName: sub.businessName,
+    };
+  }
+
   const now = new Date();
-  const expiry = new Date(sub.hostingExpiryDate || Date.now());
+  const expiry = new Date(sub.hostingExpiryDate);
   const diffTime = expiry.getTime() - now.getTime();
   const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  const gracePeriodDays = sub.gracePeriodDays ?? 7;
+  const gracePeriodDays = typeof sub.gracePeriodDays === "number" && sub.gracePeriodDays >= 0 ? sub.gracePeriodDays : 7;
 
   const isPastDue = daysRemaining < 0;
   const isGracePeriod = isPastDue && Math.abs(daysRemaining) <= gracePeriodDays;
   const isHardExpired = isPastDue && Math.abs(daysRemaining) > gracePeriodDays;
 
-  let computedStatus: SubscriptionStatus = "active";
+  const effectiveSuspended = Boolean(sub.isSuspended || isHardExpired);
 
-  if (sub.isSuspended || isHardExpired) {
+  let computedStatus: SubscriptionStatus = "active";
+  if (effectiveSuspended) {
     computedStatus = "suspended";
   } else if (isGracePeriod) {
     computedStatus = "grace";
@@ -99,8 +89,6 @@ export function calculateSubscriptionStatus(sub: BusinessSubscription): Subscrip
   } else {
     computedStatus = "active";
   }
-
-  const effectiveSuspended = sub.isSuspended || isHardExpired;
 
   return {
     status: computedStatus,
@@ -115,25 +103,24 @@ export function calculateSubscriptionStatus(sub: BusinessSubscription): Subscrip
     gracePeriodDays,
     isPastDue,
     isGracePeriod,
-    showWarning: sub.showWarning || daysRemaining <= 14 || isGracePeriod,
+    showWarning: Boolean(sub.showWarning || daysRemaining <= 14 || isGracePeriod),
     warningNotice:
       sub.warningNotice ||
       (isGracePeriod
-        ? `Account in ${gracePeriodDays}-day grace period! Please renew immediately to avoid shutdown.`
-        : daysRemaining <= 14
-        ? `Hosting renewal due in ${daysRemaining} day(s).`
-        : ""),
-    renewalAmountNgn: sub.renewalAmountNgn || 250000,
-    hostingPlan: sub.hostingPlan || "enterprise",
-    businessName: sub.businessName || OSVID_CLIENT_CONFIG.clientName,
-    clientId: sub.clientId || OSVID_CLIENT_CONFIG.clientId,
+        ? `ANNUAL HOSTING PAST DUE: Operating in grace period (${gracePeriodDays - Math.abs(daysRemaining)} days remaining). Settle renewal promptly to avoid service suspension.`
+        : undefined),
+    businessName: sub.businessName,
+    hardSuspendAtIso: (sub as any).hardSuspendAtIso,
+    renewalAmountNgn: (sub as any).renewalAmountNgn,
+    hostingPlan: (sub as any).hostingPlan,
   };
 }
 
 /**
- * Get direct database subscription object with safe dual-read fallback
+ * Reads the authoritative provider subscription record (Super Admin only).
+ * Does NOT fabricate fail-open active terms if database read fails.
  */
-export async function getBusinessSubscription(): Promise<BusinessSubscription> {
+export async function getBusinessSubscription(): Promise<BusinessSubscription | null> {
   try {
     // 1. Try primary authoritative document
     const primaryRef = doc(db, COLLECTION_NAME, PRIMARY_SUBSCRIPTION_DOC_ID);
@@ -144,10 +131,8 @@ export async function getBusinessSubscription(): Promise<BusinessSubscription> {
     );
 
     if (primarySnap.exists()) {
-      const data = primarySnap.data() as BusinessSubscription;
       return {
-        ...DEFAULT_BUSINESS_SUBSCRIPTION,
-        ...data,
+        ...(primarySnap.data() as BusinessSubscription),
         id: primarySnap.id,
       };
     }
@@ -161,39 +146,64 @@ export async function getBusinessSubscription(): Promise<BusinessSubscription> {
     );
 
     if (legacySnap.exists()) {
-      const data = legacySnap.data() as BusinessSubscription;
       return {
-        ...DEFAULT_BUSINESS_SUBSCRIPTION,
-        ...data,
+        ...(legacySnap.data() as BusinessSubscription),
         id: legacySnap.id,
       };
     }
 
-    return DEFAULT_BUSINESS_SUBSCRIPTION;
+    return null;
   } catch (err) {
-    console.warn("getBusinessSubscription returned fallback due to:", err);
-    return DEFAULT_BUSINESS_SUBSCRIPTION;
+    console.error("Error reading business subscription from Firestore:", err);
+    return null;
   }
 }
 
 /**
- * Fetch current subscription status with graceful offline / timeout tolerance
+ * Fetch current operational subscription status from the minimal safe runtime record
+ * (`runtime_settings/subscription`).
+ * Publicly accessible and does not expose provider billing secrets.
+ * Fails safely with structured error if Firestore is unavailable.
  */
 export async function getSubscriptionStatus(): Promise<SubscriptionResult<SubscriptionStatusInfo>> {
   try {
-    const subData = await getBusinessSubscription();
-    const statusInfo = calculateSubscriptionStatus(subData);
-    return { success: true, data: statusInfo };
+    // 1. Primary: read minimal runtime status document
+    const runtimeRef = doc(db, RUNTIME_COLLECTION_NAME, PRIMARY_SUBSCRIPTION_DOC_ID);
+    const runtimeSnap = await withTimeout(
+      getDoc(runtimeRef),
+      READ_TIMEOUT_MS,
+      "Runtime subscription query timed out"
+    );
+
+    if (runtimeSnap.exists()) {
+      const runtimeData = runtimeSnap.data() as RuntimeSubscriptionState;
+      const statusInfo = calculateSubscriptionStatus(runtimeData);
+      return { success: true, data: statusInfo };
+    }
+
+    // 2. Fallback during initial setup/migration: check authoritative doc
+    const fallbackSub = await getBusinessSubscription();
+    if (fallbackSub) {
+      const statusInfo = calculateSubscriptionStatus(fallbackSub);
+      return { success: true, data: statusInfo };
+    }
+
+    // Unconfigured state: return error without fabricating active license
+    return {
+      success: false,
+      error: "Subscription record not found in database. Platform initialization required.",
+    };
   } catch (error: any) {
-    console.warn("getSubscriptionStatus using active fallback cache:", error?.message || error);
-    const fallbackStatus = calculateSubscriptionStatus(DEFAULT_BUSINESS_SUBSCRIPTION);
-    return { success: true, data: fallbackStatus };
+    console.error("getSubscriptionStatus database query failure:", error?.message || error);
+    return {
+      success: false,
+      error: error?.message || "Failed to reach database to verify subscription status.",
+    };
   }
 }
 
 /**
  * Update subscription parameters via secure server API route (Super Admin only).
- * Replaces direct browser Firestore writes with authenticated server endpoint.
  */
 export async function updateSubscriptionSettings(
   data: Partial<BusinessSubscription>
@@ -212,7 +222,10 @@ export async function updateSubscriptionSettings(
 
     if (data.isSuspended !== undefined) {
       action = data.isSuspended ? "suspend" : "reactivate";
-      payload = { reason: data.suspendedReason };
+      payload = {
+        reason: data.suspendedReason,
+        hostingExpiryDate: data.hostingExpiryDate,
+      };
     } else if (data.showWarning !== undefined || data.warningNotice !== undefined) {
       action = "set-warning";
       payload = {
@@ -275,7 +288,8 @@ export async function updateBusinessSubscription(
  */
 export async function toggleAppSuspension(
   isSuspended: boolean,
-  reason?: string
+  reason?: string,
+  renewalExpiryDate?: string
 ): Promise<SubscriptionResult<BusinessSubscription>> {
   try {
     const token = await auth.currentUser?.getIdToken();
@@ -294,7 +308,10 @@ export async function toggleAppSuspension(
       },
       body: JSON.stringify({
         action: isSuspended ? "suspend" : "reactivate",
-        payload: { reason: reason?.trim() },
+        payload: {
+          reason: reason?.trim(),
+          hostingExpiryDate: renewalExpiryDate,
+        },
       }),
     });
 

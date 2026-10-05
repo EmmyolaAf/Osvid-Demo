@@ -56,7 +56,20 @@ service firebase.storage {
       return isAdmin() || (
         isManager() &&
         ('permissions' in getUserData()) &&
-        getUserData().permissions[perm] == true
+        (
+          getUserData().permissions[perm] == true ||
+          (perm == 'canManageInventory' &&
+           !('canManageInventory' in getUserData().permissions) &&
+           getUserData().permissions.canManageProducts == true)
+        )
+      );
+    }
+
+    function isSubscriptionOperational() {
+      let subDoc = /databases/(default)/documents/runtime_settings/subscription;
+      return !firestore.exists(subDoc) || (
+        firestore.get(subDoc).data.isSuspended != true &&
+        (!('hardSuspendAt' in firestore.get(subDoc).data) || firestore.get(subDoc).data.hardSuspendAt == null || request.time < firestore.get(subDoc).data.hardSuspendAt)
       );
     }
 
@@ -67,28 +80,28 @@ service firebase.storage {
     // Public storefront images (product catalog)
     match /products/{allPaths=**} {
       allow read: if true;
-      allow write: if hasManagerPermission('canManageProducts')
+      allow write: if (isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageProducts')))
         && isImageFile()
         && request.resource.size < 10 * 1024 * 1024;
     }
 
     match /categories/{allPaths=**} {
       allow read: if true;
-      allow write: if hasManagerPermission('canManageProducts')
+      allow write: if (isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageProducts')))
         && isImageFile()
         && request.resource.size < 5 * 1024 * 1024;
     }
 
     match /site/{allPaths=**} {
       allow read: if true;
-      allow write: if hasManagerPermission('canManageWebsite')
+      allow write: if (isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageWebsite')))
         && isImageFile()
         && request.resource.size < 10 * 1024 * 1024;
     }
 
     match /blog/{allPaths=**} {
       allow read: if true;
-      allow write: if hasManagerPermission('canManageWebsite')
+      allow write: if (isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageWebsite')))
         && isImageFile()
         && request.resource.size < 10 * 1024 * 1024;
     }

@@ -13,8 +13,9 @@ import {
   ManagerPermissions,
 } from "@/types/auth";
 import { calculateSubscriptionStatus } from "@/lib/firebase/subscription";
-import { sanitizeMetadata } from "@/lib/server/audit";
+import { sanitizeMetadata, buildAuditLogRecord } from "@/lib/server/audit";
 import { OSVID_CLIENT_CONFIG } from "@/config/client";
+import { RuntimeSubscriptionState } from "@/types/subscription";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -355,10 +356,14 @@ test("sanitizeMetadata strips sensitive passwords, tokens, and secret keys", () 
 // 6. CLIENT CONFIG & ARCHITECTURE VERIFICATION
 // ===============================================================
 
-test("Client configuration defines stable client identity without altering collections", () => {
+test("Client configuration defines stable client identity grounded in repository facts (.firebaserc)", () => {
   assert.equal(OSVID_CLIENT_CONFIG.clientId, "osvid");
   assert.equal(OSVID_CLIENT_CONFIG.clientName, "OSVID Chemicals Limited");
-  assert.equal(OSVID_CLIENT_CONFIG.controlPlaneReady, true);
+  assert.equal(OSVID_CLIENT_CONFIG.firebaseProjectId, "osvid-9d4d6");
+  assert.equal(OSVID_CLIENT_CONFIG.hostingSite, "osvid.web.app");
+  assert.equal(OSVID_CLIENT_CONFIG.primaryDomain, undefined);
+  assert.equal(OSVID_CLIENT_CONFIG.defaultAdminEmail, undefined);
+  assert.equal(OSVID_CLIENT_CONFIG.controlPlaneReady, false);
 });
 
 // ===============================================================
@@ -378,6 +383,41 @@ test("firestore.rules enforces tamper-resistance on audit_logs and separates cat
   assert.match(rules, /match \/products\/\{productId\}/);
   assert.match(rules, /hasManagerPermission\('canManageProducts'\)/);
   assert.match(rules, /hasManagerPermission\('canManageInventory'\)/);
+  assert.match(rules, /!request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\.hasAny\(\['stockQuantity'\]\)/);
+  assert.match(rules, /request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\.hasOnly\(\['stockQuantity', 'updatedAt'\]\)/);
+});
+
+test("firestore.rules enforces isSubscriptionOperational() on staff mutations and isolates runtime_settings", () => {
+  const rulesPath = path.resolve(process.cwd(), "firestore.rules");
+  const rules = fs.readFileSync(rulesPath, "utf-8");
+
+  // isSubscriptionOperational helper
+  assert.match(rules, /function isSubscriptionOperational\(\)/);
+  assert.match(rules, /let subDoc = \/databases\/\$\(database\)\/documents\/runtime_settings\/subscription;/);
+  assert.match(rules, /request\.time < get\(subDoc\)\.data\.hardSuspendAt/);
+
+  // Gated staff writes
+  assert.match(rules, /match \/categories\/\{categoryId\}[\s\S]*?isSubscriptionOperational\(\)/);
+  assert.match(rules, /match \/orders\/\{orderId\}[\s\S]*?isSubscriptionOperational\(\)/);
+  assert.match(rules, /match \/discounts\/\{discountId\}[\s\S]*?isSubscriptionOperational\(\)/);
+
+  // runtime_settings collection: public read, write denied
+  assert.match(rules, /match \/runtime_settings\/\{settingId\}/);
+  assert.match(rules, /allow read: if true;/);
+  assert.match(rules, /allow write: if false;/);
+
+  // users collection: direct delete forbidden
+  assert.match(rules, /match \/users\/\{userId\}[\s\S]*?allow delete: if false;/);
+});
+
+test("storage.rules gates staff uploads behind isSubscriptionOperational()", () => {
+  const rulesPath = path.resolve(process.cwd(), "storage.rules");
+  const rules = fs.readFileSync(rulesPath, "utf-8");
+
+  assert.match(rules, /function isSubscriptionOperational\(\)/);
+  assert.match(rules, /let subDoc = \/databases\/\(default\)\/documents\/runtime_settings\/subscription;/);
+  assert.match(rules, /firestore\.get\(subDoc\)/);
+  assert.match(rules, /isSubscriptionOperational\(\)/);
 });
 
 // ===============================================================
@@ -439,5 +479,198 @@ test("Admin and Manager callers cannot mutate provider subscription (enforced vi
     role: "super_admin",
   });
   assert.equal(superAdminCaller.isSuperAdmin, true);
+});
+
+// ===============================================================
+// 9. FIRESTORE DIFF LOGIC & INVENTORY ISOLATION SIMULATION
+// ===============================================================
+
+function simulateRulesUpdate(params: {
+  isSuperAdmin: boolean;
+  isSubscriptionOperational: boolean;
+  canManageProducts: boolean;
+  canManageInventory: boolean;
+  existingDoc: Record<string, any>;
+  incomingDoc: Record<string, any>;
+}): boolean {
+  if (params.isSuperAdmin) return true;
+  if (!params.isSubscriptionOperational) return false;
+
+  const allKeys = Array.from(new Set([...Object.keys(params.existingDoc), ...Object.keys(params.incomingDoc)]));
+  const affectedKeys = allKeys.filter((k) => params.incomingDoc[k] !== params.existingDoc[k]);
+
+  if (params.canManageProducts && !params.canManageInventory) {
+    return !affectedKeys.includes("stockQuantity");
+  }
+
+  if (params.canManageInventory && !params.canManageProducts) {
+    return affectedKeys.every((k) => k === "stockQuantity" || k === "updatedAt");
+  }
+
+  if (params.canManageProducts && params.canManageInventory) {
+    return true;
+  }
+
+  return false;
+}
+
+function simulateRulesCreate(params: {
+  isSuperAdmin: boolean;
+  isSubscriptionOperational: boolean;
+  canManageProducts: boolean;
+  canManageInventory: boolean;
+  incomingDoc: Record<string, any>;
+}): boolean {
+  if (params.isSuperAdmin) return true;
+  if (!params.isSubscriptionOperational) return false;
+  if (!params.canManageProducts) return false;
+
+  return params.canManageInventory || params.incomingDoc.stockQuantity === 0;
+}
+
+test("Product Manager without inventory authority cannot modify stockQuantity", () => {
+  const existingDoc = { name: "Chemical A", price: 5000, stockQuantity: 100, updatedAt: "2026-10-01" };
+
+  // Can update metadata
+  const allowed = simulateRulesUpdate({
+    isSuperAdmin: false,
+    isSubscriptionOperational: true,
+    canManageProducts: true,
+    canManageInventory: false,
+    existingDoc,
+    incomingDoc: { ...existingDoc, name: "Chemical A+", price: 6000 },
+  });
+  assert.equal(allowed, true);
+
+  // Cannot modify stock
+  const denied = simulateRulesUpdate({
+    isSuperAdmin: false,
+    isSubscriptionOperational: true,
+    canManageProducts: true,
+    canManageInventory: false,
+    existingDoc,
+    incomingDoc: { ...existingDoc, stockQuantity: 200 },
+  });
+  assert.equal(denied, false);
+});
+
+test("Inventory Manager without product authority can only modify stockQuantity and updatedAt", () => {
+  const existingDoc = { name: "Chemical A", price: 5000, stockQuantity: 100, updatedAt: "2026-10-01" };
+
+  // Can adjust stockQuantity and updatedAt
+  const allowed = simulateRulesUpdate({
+    isSuperAdmin: false,
+    isSubscriptionOperational: true,
+    canManageProducts: false,
+    canManageInventory: true,
+    existingDoc,
+    incomingDoc: { ...existingDoc, stockQuantity: 80, updatedAt: "2026-10-05" },
+  });
+  assert.equal(allowed, true);
+
+  // Cannot touch catalogue metadata (name, price)
+  const denied = simulateRulesUpdate({
+    isSuperAdmin: false,
+    isSubscriptionOperational: true,
+    canManageProducts: false,
+    canManageInventory: true,
+    existingDoc,
+    incomingDoc: { ...existingDoc, stockQuantity: 80, price: 4000 },
+  });
+  assert.equal(denied, false);
+});
+
+test("Product Manager without inventory authority cannot create positive initial stock", () => {
+  // Creating product with stock 0 is allowed
+  const allowed = simulateRulesCreate({
+    isSuperAdmin: false,
+    isSubscriptionOperational: true,
+    canManageProducts: true,
+    canManageInventory: false,
+    incomingDoc: { name: "Chemical B", stockQuantity: 0 },
+  });
+  assert.equal(allowed, true);
+
+  // Creating product with stock > 0 is denied
+  const denied = simulateRulesCreate({
+    isSuperAdmin: false,
+    isSubscriptionOperational: true,
+    canManageProducts: true,
+    canManageInventory: false,
+    incomingDoc: { name: "Chemical B", stockQuantity: 50 },
+  });
+  assert.equal(denied, false);
+});
+
+test("Operational mutations are blocked when subscription is suspended", () => {
+  const existingDoc = { name: "Chemical A", price: 5000, stockQuantity: 100 };
+
+  const blocked = simulateRulesUpdate({
+    isSuperAdmin: false,
+    isSubscriptionOperational: false,
+    canManageProducts: true,
+    canManageInventory: true,
+    existingDoc,
+    incomingDoc: { ...existingDoc, price: 6000 },
+  });
+  assert.equal(blocked, false);
+
+  // Super admin can bypass for recovery
+  const superAllowed = simulateRulesUpdate({
+    isSuperAdmin: true,
+    isSubscriptionOperational: false,
+    canManageProducts: false,
+    canManageInventory: false,
+    existingDoc,
+    incomingDoc: { ...existingDoc, price: 6000 },
+  });
+  assert.equal(superAllowed, true);
+});
+
+// ===============================================================
+// 10. RUNTIME SUBSCRIPTION PRIVACY & AUDIT LOGGING
+// ===============================================================
+
+test("RuntimeSubscriptionState contains no provider-private billing info or renewal fees", () => {
+  const runtimeState: RuntimeSubscriptionState = {
+    clientId: "osvid",
+    isSuspended: false,
+    businessName: "OSVID Chemicals Limited",
+    hostingExpiryDate: "2027-10-01T00:00:00.000Z",
+    gracePeriodDays: 7,
+    hardSuspendAt: null,
+    hardSuspendAtIso: "2027-10-08T00:00:00.000Z",
+    showWarning: false,
+    updatedAt: "2026-10-05T00:00:00.000Z",
+  };
+
+  const keys = Object.keys(runtimeState);
+  assert.equal(keys.includes("renewalAmountNgn"), false);
+  assert.equal(keys.includes("billingContactEmail"), false);
+  assert.equal(keys.includes("providerNotes"), false);
+  assert.equal(keys.includes("adminEmail"), false);
+});
+
+test("buildAuditLogRecord produces immutable, properly structured audit record", () => {
+  const { docRef, entry } = buildAuditLogRecord({
+    actor: {
+      uid: "super-1",
+      email: PRIMARY_SUPER_ADMIN_EMAIL,
+      role: "super_admin",
+    },
+    action: "subscription_update",
+    targetType: "subscription",
+    targetId: "subscription",
+    summary: "Updated subscription",
+    metadata: { newStatus: "active", plan: "pro" },
+  });
+
+  assert.equal(entry.actorUid, "super-1");
+  assert.equal(entry.actorEmail, PRIMARY_SUPER_ADMIN_EMAIL);
+  assert.equal(entry.actorRole, "super_admin");
+  assert.equal(entry.action, "subscription_update");
+  assert.equal(typeof entry.timestamp, "string");
+  assert.deepEqual(entry.metadata, { newStatus: "active", plan: "pro" });
+  assert.ok(docRef);
 });
 

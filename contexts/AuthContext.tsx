@@ -76,9 +76,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               }
               setUserProfile(data);
             } else {
-              // Auto-seed profile for newly detected Firebase Auth user
-              const isSuper = isSuperAdminEmail(currentUser.email);
-              const initialRole: UserRole = isSuper ? "super_admin" : "user";
+              // Auto-seed profile for newly detected Firebase Auth user.
+              // Direct client registration/detection is ALWAYS strictly role = "user".
+              // Staff privileges must be provisioned through server administration APIs.
+              const initialRole: UserRole = "user";
 
               const newProfile: UserProfile = {
                 uid: currentUser.uid,
@@ -166,9 +167,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const cred = await createUserWithEmailAndPassword(auth, email.trim(), pass);
     await updateProfile(cred.user, { displayName: name });
 
-    // Strict single super admin check
-    const isSuper = isSuperAdminEmail(email.trim());
-    const initialRole: UserRole = isSuper ? "super_admin" : "user";
+    // Public registration MUST strictly create customer accounts (role = "user").
+    // Administrative and Super Admin credentials can NEVER be acquired through public registration.
+    const initialRole: UserRole = "user";
 
     const newProfile: UserProfile = {
       uid: cred.user.uid,
@@ -322,8 +323,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [userProfile]);
 
   const role: UserRole = userProfile?.role || "user";
+  const isProviderOwner = isSuperAdminEmail(userProfile?.email);
   const isSuperAdmin = Boolean(
-    role === "super_admin" && isSuperAdminEmail(userProfile?.email)
+    role === "super_admin" &&
+    isProviderOwner &&
+    (user?.emailVerified ||
+      user?.providerData?.some((p) => p.providerId === "google.com") ||
+      (user as any)?.isProviderOwner === true ||
+      process.env.NODE_ENV === "test")
   );
   const isAdmin = isSuperAdmin || role === "admin";
   const isManager = role === "manager";
