@@ -49,27 +49,45 @@ export async function saveUserProfile(profile: Partial<UserProfile> & { uid: str
     const docRef = doc(db, "users", profile.uid);
     const existing = await getDoc(docRef);
 
+    const p = profile as any;
     if (!existing.exists()) {
-      // New User
-      const newProfile: UserProfile = {
+      // New Customer Account - strictly role 'user', no permissions
+      const newProfile: Record<string, any> = {
         uid: profile.uid,
         email: profile.email.toLowerCase(),
         displayName: profile.displayName || profile.email.split("@")[0],
         phoneNumber: profile.phoneNumber || "",
         photoURL: profile.photoURL || "",
-        role: profile.role || "user",
+        role: "user",
         isActive: true,
-        createdBy: profile.createdBy || undefined,
         createdAt: new Date().toISOString(),
-        lastLoginAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       };
+      if (p.addresses) newProfile.addresses = p.addresses;
+      if (p.shippingAddress) newProfile.shippingAddress = p.shippingAddress;
+      if (p.billingAddress) newProfile.billingAddress = p.billingAddress;
+      if (p.preferences) newProfile.preferences = p.preferences;
       await setDoc(docRef, newProfile);
     } else {
-      // Update existing
-      await updateDoc(docRef, {
-        ...profile,
-        lastLoginAt: new Date().toISOString(),
-      });
+      // Update existing customer profile - field-level allowlist strictly protecting
+      // server-owned and identity-managed fields (role, permissions, isActive, email, lastLoginAt, etc.)
+      const allowedUpdates: Record<string, any> = {
+        updatedAt: new Date().toISOString(),
+      };
+      const p = profile as any;
+      if (p.displayName !== undefined) allowedUpdates.displayName = p.displayName;
+      if (p.firstName !== undefined) allowedUpdates.firstName = p.firstName;
+      if (p.lastName !== undefined) allowedUpdates.lastName = p.lastName;
+      if (p.fullName !== undefined) allowedUpdates.fullName = p.fullName;
+      if (p.phoneNumber !== undefined) allowedUpdates.phoneNumber = p.phoneNumber;
+      if (p.photoURL !== undefined) allowedUpdates.photoURL = p.photoURL;
+      if (p.avatar !== undefined) allowedUpdates.avatar = p.avatar;
+      if (p.addresses !== undefined) allowedUpdates.addresses = p.addresses;
+      if (p.shippingAddress !== undefined) allowedUpdates.shippingAddress = p.shippingAddress;
+      if (p.billingAddress !== undefined) allowedUpdates.billingAddress = p.billingAddress;
+      if (p.preferences !== undefined) allowedUpdates.preferences = p.preferences;
+
+      await updateDoc(docRef, allowedUpdates);
     }
   } catch (error) {
     console.error("Error saving user profile:", error);
@@ -148,32 +166,59 @@ export async function getAllStaffMembers(): Promise<UserProfile[]> {
 }
 
 export async function updateUserRole(uid: string, newRole: UserRole): Promise<void> {
-  try {
-    const docRef = doc(db, "users", uid);
-    await updateDoc(docRef, { role: newRole });
-  } catch (error) {
-    console.error("Error updating user role:", error);
-    throw error;
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) {
+    throw new Error("Authentication required to update user role. Direct client database writes are forbidden.");
+  }
+  const res = await fetch("/api/admin/update", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ uid, role: newRole }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "Failed to update user role");
   }
 }
 
 export async function toggleUserStatus(uid: string, isActive: boolean): Promise<void> {
-  try {
-    const docRef = doc(db, "users", uid);
-    await updateDoc(docRef, { isActive });
-  } catch (error) {
-    console.error("Error toggling user status:", error);
-    throw error;
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) {
+    throw new Error("Authentication required to update user status. Direct client database writes are forbidden.");
+  }
+  const res = await fetch("/api/admin/toggle-status", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ uid, isActive }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "Failed to update user status");
   }
 }
 
 export async function deleteUserRecord(uid: string): Promise<void> {
-  try {
-    const docRef = doc(db, "users", uid);
-    await deleteDoc(docRef);
-  } catch (error) {
-    console.error("Error deleting user document:", error);
-    throw error;
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) {
+    throw new Error("Authentication required to delete user account. Direct client database writes are forbidden.");
+  }
+  const res = await fetch("/api/admin/delete", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ uid }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "Failed to delete user account");
   }
 }
 
@@ -691,43 +736,30 @@ export async function updateManagerProfile(
   uid: string,
   data: Partial<UserProfile>
 ): Promise<void> {
-  if (typeof window !== "undefined") {
-    try {
-      const token = await auth.currentUser?.getIdToken();
-      if (token) {
-        const res = await fetch("/api/admin/update", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            uid,
-            displayName: data.displayName,
-            phoneNumber: data.phoneNumber,
-            businessName: data.customTitle,
-            permissions: data.permissions,
-            role: "manager",
-          }),
-        });
-        if (res.ok) {
-          return;
-        }
-      }
-    } catch (apiErr) {
-      console.warn("API update fallback to direct Firestore:", apiErr);
-    }
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) {
+    throw new Error("Authentication required to update manager profile. Direct database writes are forbidden.");
   }
 
-  try {
-    const docRef = doc(db, "users", uid);
-    await updateDoc(docRef, {
-      ...data,
-      lastLoginAt: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error("Error updating manager profile:", error);
-    throw error;
+  const res = await fetch("/api/admin/update", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      uid,
+      displayName: data.displayName,
+      phoneNumber: data.phoneNumber,
+      businessName: data.customTitle,
+      permissions: data.permissions,
+      role: "manager",
+    }),
+  });
+
+  if (!res.ok) {
+    const result = await res.json().catch(() => ({}));
+    throw new Error(result.error || "Failed to update manager profile");
   }
 }
 

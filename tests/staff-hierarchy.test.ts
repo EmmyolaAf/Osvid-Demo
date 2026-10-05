@@ -282,3 +282,34 @@ test("generateSecureTemporaryPassword produces strong, non-predictable temporary
   assert.match(pwd1, /[0-9]/);
   assert.match(pwd1, /[!@#$%&*#]/);
 });
+
+// ===============================================================
+// 7. NON-PRIMARY SUPER_ADMIN CLAIM HARDENING
+// ===============================================================
+
+test("Non-primary account with stale super_admin claim is NOT immutable (Super Admin can demote and delete them)", () => {
+  const nonPrimaryFakeSuper = {
+    uid: "fake-super-123",
+    email: "fake-super@example.com",
+    role: "super_admin",
+  };
+
+  // Super Admin CAN manage this account
+  assert.doesNotThrow(() => assertCanManageTargetStaff(superAdminCaller, nonPrimaryFakeSuper));
+
+  // Super Admin CAN demote this non-primary account to admin or manager
+  assert.doesNotThrow(() =>
+    assertCanUpdateStaffFields(superAdminCaller, nonPrimaryFakeSuper, { role: "admin" })
+  );
+  assert.doesNotThrow(() =>
+    assertCanUpdateStaffFields(superAdminCaller, nonPrimaryFakeSuper, { role: "manager" })
+  );
+
+  // Super Admin CAN deactivate this non-primary account
+  assert.doesNotThrow(() =>
+    assertCanUpdateStaffFields(superAdminCaller, nonPrimaryFakeSuper, { isActive: false })
+  );
+
+  // Super Admin CAN delete this non-primary account
+  assert.doesNotThrow(() => assertCanDeleteStaff(superAdminCaller, nonPrimaryFakeSuper));
+});

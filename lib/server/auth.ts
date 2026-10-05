@@ -70,7 +70,7 @@ export async function resolveServerUser(
 
   // 1. Determine baseline role:
   // Sole authorized Super Admin is PRIMARY_SUPER_ADMIN_EMAIL.
-  // Any token attempting to claim 'super_admin' with a different email is demoted to 'admin' or checked in Firestore.
+  // Any token attempting to claim 'super_admin' with a different email is demoted to 'user'.
   const isSuper = isSuperAdminEmail(tokenEmail);
 
   let effectiveRole: UserRole = isSuper
@@ -78,11 +78,12 @@ export async function resolveServerUser(
     : (decodedToken.role as UserRole) || "user";
 
   if (!isSuper && effectiveRole === "super_admin") {
-    // Prevent privilege escalation via forged claims
-    effectiveRole = "admin";
+    // Non-primary tokens claiming super_admin receive zero elevated authority by default
+    effectiveRole = "user";
   }
 
-  let permissions = (decodedToken.permissions as ManagerPermissions) || undefined;
+  let permissions: ManagerPermissions | undefined =
+    (decodedToken.permissions as ManagerPermissions) || undefined;
   let customTitle = (decodedToken.customTitle as string) || undefined;
   let isActive = true;
 
@@ -98,22 +99,41 @@ export async function resolveServerUser(
 
         // If not super admin, adopt authoritative Firestore role & permissions
         if (!isSuper) {
-          if (data.role && data.role !== "super_admin") {
+          if (data.role === "admin" || data.role === "manager") {
             effectiveRole = data.role;
-          } else if (data.role === "super_admin") {
-            effectiveRole = "admin"; // clamp
+          } else {
+            effectiveRole = "user";
           }
 
-          if (data.permissions) {
-            permissions = data.permissions;
-          }
+          permissions = data.permissions;
           if (data.customTitle) {
             customTitle = data.customTitle;
           }
         }
       }
+    } else {
+      // User doc does not exist in Firestore.
+      // If not primary Super Admin, cannot hold staff authority without a valid profile.
+      if (!isSuper) {
+        effectiveRole = "user";
+        permissions = undefined;
+      }
     }
   } catch (dbErr: any) {
+    // Primary Super Admin retains documented emergency bootstrap safeguard against lockout.
+    // For all other callers claiming privileged roles, fail closed on database errors.
+    if (!isSuper) {
+      const hasPrivilegedClaim =
+        decodedToken.role === "admin" ||
+        decodedToken.role === "manager" ||
+        decodedToken.role === "super_admin";
+      if (hasPrivilegedClaim) {
+        throw new AuthError(
+          "Service Unavailable: Database error preventing live staff authorization verification",
+          503
+        );
+      }
+    }
     console.warn("Server auth: Firestore profile lookup warning:", dbErr.message);
   }
 
@@ -316,7 +336,7 @@ export function assertCanManageTargetStaff(
   caller: ServerAuthUser,
   target: TargetStaffAccount
 ): void {
-  const isTargetSuper = isSuperAdminEmail(target.email) || target.role === "super_admin";
+  const isTargetSuper = isSuperAdminEmail(target.email);
 
   // Prevent tampering with customer accounts via staff endpoints
   assertStaffEndpointTarget(target.role);
@@ -349,7 +369,7 @@ export function assertCanUpdateStaffFields(
   target: TargetStaffAccount,
   updates: { role?: string; isActive?: boolean }
 ): void {
-  const isTargetSuper = isSuperAdminEmail(target.email) || target.role === "super_admin";
+  const isTargetSuper = isSuperAdminEmail(target.email);
 
   // 1. Super Admin protections
   if (isTargetSuper) {
@@ -397,7 +417,7 @@ export function assertCanDeleteStaff(
     throw new AuthError("Forbidden: Self-deletion is not permitted", 400);
   }
 
-  const isTargetSuper = isSuperAdminEmail(target.email) || target.role === "super_admin";
+  const isTargetSuper = isSuperAdminEmail(target.email);
   if (isTargetSuper) {
     throw new AuthError("Forbidden: The primary Super Admin account cannot be deleted", 403);
   }

@@ -6,27 +6,51 @@ service firebase.storage {
       return request.auth != null;
     }
 
+    // Authoritative Super Admin: strictly the designated primary provider account
     function isSuperAdmin() {
-      return isAuthenticated() && (
-        (request.auth.token.email != null &&
-         request.auth.token.email.lower() == 'abolarinwaemmanuelfree@gmail.com') ||
-        request.auth.token.role == 'super_admin'
+      return isAuthenticated() &&
+        request.auth.token.email != null &&
+        request.auth.token.email.lower() == 'abolarinwaemmanuelfree@gmail.com';
+    }
+
+    // Live Firestore user profile checks for storage authorization
+    function userDocExists() {
+      return firestore.exists(/databases/(default)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserData() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isLiveActiveStaff() {
+      return isSuperAdmin() || (
+        isAuthenticated() &&
+        userDocExists() &&
+        getUserData().isActive == true
       );
     }
 
     function isAdmin() {
       return isSuperAdmin() || (
-        isAuthenticated() && request.auth.token.role == 'admin'
+        isLiveActiveStaff() &&
+        getUserData().role == 'admin'
       );
     }
 
     function isManager() {
-      return isAuthenticated() && request.auth.token.role == 'manager';
+      return isLiveActiveStaff() &&
+        getUserData().role == 'manager';
+    }
+
+    function isStaff() {
+      return isAdmin() || isManager();
     }
 
     function hasManagerPermission(perm) {
       return isAdmin() || (
-        isManager() && request.auth.token.permissions[perm] == true
+        isManager() &&
+        ('permissions' in getUserData()) &&
+        getUserData().permissions[perm] == true
       );
     }
 

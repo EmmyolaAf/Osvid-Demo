@@ -15,9 +15,6 @@ import { auth, db, googleProvider } from "@/lib/firebase/client";
 import { UserProfile, UserRole, ManagerCreateInput } from "@/types/auth";
 import {
   getUserProfile,
-  updateUserRole as updateRoleInDb,
-  toggleUserStatus as toggleStatusInDb,
-  deleteUserRecord,
 } from "@/lib/firebase/firestore";
 import {
   PRIMARY_SUPER_ADMIN_EMAIL,
@@ -253,7 +250,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!userProfile || (userProfile.role !== "super_admin" && userProfile.role !== "admin")) {
       throw new Error("Unauthorized: Insufficient permissions to change roles");
     }
-    await updateRoleInDb(uid, newRole);
+
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) {
+      throw new Error("Authentication required to update user role");
+    }
+
+    const res = await fetch("/api/admin/update", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ uid, role: newRole }),
+    });
+
+    if (!res.ok) {
+      const result = await res.json().catch(() => ({}));
+      throw new Error(result.error || "Failed to update user role");
+    }
   }, [userProfile]);
 
   const toggleUserStatus = useCallback(async (uid: string, isActive: boolean) => {
@@ -262,22 +277,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const token = await auth.currentUser?.getIdToken();
-    if (token) {
-      const res = await fetch("/api/admin/toggle-status", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ uid, isActive }),
-      });
+    if (!token) {
+      throw new Error("Authentication required to update user status");
+    }
 
-      if (!res.ok) {
-        const result = await res.json().catch(() => ({}));
-        throw new Error(result.error || "Failed to update user status");
-      }
-    } else {
-      await toggleStatusInDb(uid, isActive);
+    const res = await fetch("/api/admin/toggle-status", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ uid, isActive }),
+    });
+
+    if (!res.ok) {
+      const result = await res.json().catch(() => ({}));
+      throw new Error(result.error || "Failed to update user status");
     }
   }, [userProfile]);
 
@@ -287,22 +302,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const token = await auth.currentUser?.getIdToken();
-    if (token) {
-      const res = await fetch("/api/admin/delete", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ uid }),
-      });
+    if (!token) {
+      throw new Error("Authentication required to delete user account");
+    }
 
-      if (!res.ok) {
-        const result = await res.json().catch(() => ({}));
-        throw new Error(result.error || "Failed to delete user account");
-      }
-    } else {
-      await deleteUserRecord(uid);
+    const res = await fetch("/api/admin/delete", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ uid }),
+    });
+
+    if (!res.ok) {
+      const result = await res.json().catch(() => ({}));
+      throw new Error(result.error || "Failed to delete user account");
     }
   }, [userProfile]);
 

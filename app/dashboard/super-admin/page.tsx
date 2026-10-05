@@ -10,8 +10,6 @@ import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import {
   getExecutiveGovernanceStats,
   getTenantAdministrators,
-  saveUserProfile,
-  toggleUserStatus,
 } from "@/lib/firebase/firestore";
 import {
   getSubscriptionStatus,
@@ -235,11 +233,6 @@ export default function SuperAdminDashboard() {
 
       if (data.user) {
         setAdmins((prev) => [data.user, ...prev.filter((a) => a.uid !== data.user.uid)]);
-        try {
-          await saveUserProfile(data.user);
-        } catch (syncErr) {
-          console.warn("Client fallback user profile sync warning:", syncErr);
-        }
       }
 
       if (data.temporaryPassword) {
@@ -338,7 +331,6 @@ export default function SuperAdminDashboard() {
         throw new Error(data.error || "Failed to change admin status");
       }
 
-      await toggleUserStatus(adm.uid, newStatus);
       toast.success(`Tenant Admin status changed to ${newStatus ? "Active" : "Disabled"}`);
       setAdmins((prev) =>
         prev.map((a) => (a.uid === adm.uid ? { ...a, isActive: newStatus } : a))

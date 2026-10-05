@@ -92,17 +92,75 @@ test("firestore.rules restricts system_settings read to staff and write strictly
   assert.match(blockSnippet, /allow write:\s*if isSuperAdmin\(\);/);
 });
 
-test("storage.rules enforces default deny, granular permissions, and strict image constraints", () => {
+test("firestore.rules strictly restricts Super Admin to primary email and rejects token role", () => {
+  const content = fs.readFileSync(rulesPath, "utf8");
+  const superAdminFn = content.slice(content.indexOf("function isSuperAdmin()"));
+  const nextFn = superAdminFn.indexOf("function userDocExists()");
+  const fnBody = superAdminFn.slice(0, nextFn);
+
+  // Must check the primary email
+  assert.match(fnBody, /abolarinwaemmanuelfree@gmail\.com/);
+  // Must NOT allow token.role == 'super_admin' as fallback
+  assert.doesNotMatch(fnBody, /token\.role\s*==\s*['"]super_admin['"]/);
+});
+
+test("firestore.rules enforces live staff profile existence and active status (deactivated staff blocked)", () => {
+  const content = fs.readFileSync(rulesPath, "utf8");
+
+  // Live profile helpers
+  assert.match(content, /function userDocExists\(\)/);
+  assert.match(content, /function getUserData\(\)/);
+  assert.match(content, /function isLiveActiveStaff\(\)/);
+
+  // Live active check requires userDocExists and isActive == true
+  assert.match(content, /userDocExists\(\)\s*&&\s*getUserData\(\)\.isActive\s*==\s*true/);
+
+  // isAdmin and isManager both require isLiveActiveStaff
+  assert.match(content, /function isAdmin\(\)\s*\{\s*return isSuperAdmin\(\)\s*\|\|\s*\(\s*isLiveActiveStaff\(\)/);
+  assert.match(content, /function isManager\(\)\s*\{\s*return isLiveActiveStaff\(\)\s*&&\s*getUserData\(\)\.role\s*==\s*'manager';/);
+
+  // hasManagerPermission relies on live profile permissions, NOT request.auth.token
+  assert.match(content, /getUserData\(\)\.permissions\[perm\]\s*==\s*true/);
+  assert.doesNotMatch(content, /request\.auth\.token\.permissions/);
+});
+
+test("firestore.rules customer self-update strictly forbids email, lastLoginAt, and server-owned metrics", () => {
+  const content = fs.readFileSync(rulesPath, "utf8");
+  const updateBlock = content.slice(content.indexOf("match /users/{userId}"));
+  const allowUpdateSection = updateBlock.slice(updateBlock.indexOf("allow update:"));
+  const endUpdate = allowUpdateSection.indexOf("allow delete:");
+  const updateRule = allowUpdateSection.slice(0, endUpdate);
+
+  // Customer cannot change authentication email directly
+  assert.match(updateRule, /'email'/);
+  // Customer cannot touch lastLoginAt
+  assert.match(updateRule, /'lastLoginAt'/);
+  // Customer cannot touch metrics or server state
+  assert.match(updateRule, /'totalOrders'/);
+  assert.match(updateRule, /'totalSpent'/);
+  assert.match(updateRule, /'lastOrderDate'/);
+  assert.match(updateRule, /'subscription'/);
+  assert.match(updateRule, /'role'/);
+  assert.match(updateRule, /'permissions'/);
+  assert.match(updateRule, /'isActive'/);
+  assert.match(updateRule, /'createdBy'/);
+  assert.match(updateRule, /'createdAt'/);
+});
+
+test("storage.rules enforces strict primary Super Admin and cross-service live Firestore lookups", () => {
   assert.equal(fs.existsSync(storageRulesPath), true, "storage.rules file must exist");
   const content = fs.readFileSync(storageRulesPath, "utf8");
 
-  assert.match(content, /service firebase\.storage/);
-  assert.match(content, /match \/products\/\{allPaths=\*\*\}/);
-  assert.match(content, /hasManagerPermission\('canManageProducts'\)/);
-  assert.match(content, /hasManagerPermission\('canManageWebsite'\)/);
-  assert.match(content, /match \/users\/\{userId\}\/\{allPaths=\*\*\}/);
-  assert.match(content, /contentType\.matches\('image\/\.\*'\)/);
+  // Strict Super Admin email
+  assert.match(content, /abolarinwaemmanuelfree@gmail\.com/);
+  assert.doesNotMatch(content, /token\.role\s*==\s*['"]super_admin['"]/);
 
-  // Default deny for unmatched storage paths
+  // Cross-service Firestore lookups
+  assert.match(content, /firestore\.exists\(\/databases\/\(default\)\/documents\/users\/\$\(request\.auth\.uid\)\)/);
+  assert.match(content, /firestore\.get\(\/databases\/\(default\)\/documents\/users\/\$\(request\.auth\.uid\)\)\.data/);
+  assert.match(content, /getUserData\(\)\.isActive\s*==\s*true/);
+  assert.match(content, /getUserData\(\)\.permissions\[perm\]\s*==\s*true/);
+
+  // Default deny unmatched paths
   assert.match(content, /match \/\{allPaths=\*\*\}\s*\{\s*allow read, write:\s*if false;\s*\}/);
 });

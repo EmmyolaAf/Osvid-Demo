@@ -131,3 +131,194 @@ test("AuthError correctly exposes status code for API responses", () => {
   assert.equal(err403.message, "Forbidden role");
   assert.equal(err403.status, 403);
 });
+
+// ===============================================================
+// LIVE PROFILE & SERVER AUTH CONSISTENCY TESTS
+// ===============================================================
+
+import { adminDb } from "@/lib/firebase/admin";
+import { resolveServerUser } from "@/lib/server/auth";
+import {
+  updateManagerProfile,
+  updateUserRole,
+  toggleUserStatus,
+  deleteUserRecord,
+} from "@/lib/firebase/firestore";
+
+const mockUserStore: Record<string, any> = {};
+let simulateDbError = false;
+
+const origCollection = adminDb.collection.bind(adminDb);
+(adminDb as any).collection = (colName: string) => {
+  if (colName === "users") {
+    return {
+      doc: (docId: string) => ({
+        get: async () => {
+          if (simulateDbError) {
+            throw new Error("Firestore connection timeout simulated");
+          }
+          const docData = mockUserStore[docId];
+          return {
+            exists: docData !== undefined && docData !== null,
+            data: () => docData,
+          };
+        },
+      }),
+    };
+  }
+  return origCollection(colName);
+};
+
+test("resolveServerUser: non-primary super_admin claim does NOT grant Super Admin authority", async () => {
+  mockUserStore["attacker-uid"] = {
+    email: "attacker@evil.com",
+    role: "user",
+    isActive: true,
+  };
+  const token: any = {
+    uid: "attacker-uid",
+    email: "attacker@evil.com",
+    role: "super_admin",
+  };
+  const user = await resolveServerUser(token);
+  assert.equal(user.isSuperAdmin, false);
+  assert.equal(user.role, "user");
+  assert.equal(user.isAdmin, false);
+  assert.equal(user.isStaff, false);
+});
+
+test("resolveServerUser: primary provider account receives Super Admin authority", async () => {
+  const token: any = {
+    uid: "primary-super-uid",
+    email: PRIMARY_SUPER_ADMIN_EMAIL,
+    role: "super_admin",
+  };
+  const user = await resolveServerUser(token);
+  assert.equal(user.isSuperAdmin, true);
+  assert.equal(user.isAdmin, true);
+  assert.equal(user.isStaff, true);
+  assert.equal(user.role, "super_admin");
+});
+
+test("resolveServerUser: deactivated Manager is blocked from privileged operations", async () => {
+  mockUserStore["deactivated-mgr-uid"] = {
+    email: "manager@osvid.com",
+    role: "manager",
+    isActive: false,
+    permissions: { canManageProducts: true },
+  };
+  const token: any = {
+    uid: "deactivated-mgr-uid",
+    email: "manager@osvid.com",
+    role: "manager",
+  };
+  await assert.rejects(
+    async () => resolveServerUser(token),
+    (err: any) => err instanceof AuthError && err.status === 403 && /deactivated/.test(err.message)
+  );
+});
+
+test("resolveServerUser: revoked Manager permission cannot be recovered through stale token claims", async () => {
+  mockUserStore["mgr-revoked-uid"] = {
+    email: "manager@osvid.com",
+    role: "manager",
+    isActive: true,
+    permissions: {
+      canManageProducts: false, // REVOKED in live database
+      canManageOrders: true,
+    },
+  };
+  // Token has stale permissions where canManageProducts was true
+  const staleToken: any = {
+    uid: "mgr-revoked-uid",
+    email: "manager@osvid.com",
+    role: "manager",
+    permissions: {
+      canManageProducts: true, // STALE token claim
+      canManageOrders: true,
+    },
+  };
+  const resolved = await resolveServerUser(staleToken);
+  assert.equal(resolved.permissions?.canManageProducts, false);
+  assert.equal(hasPermission(resolved, "canManageProducts"), false);
+  assert.equal(hasPermission(resolved, "canManageOrders"), true);
+});
+
+test("resolveServerUser: staff role changes adopt live Firestore profile state over stale token", async () => {
+  // Stale token says "manager", but DB says "admin"
+  mockUserStore["promoted-uid"] = {
+    email: "staff@osvid.com",
+    role: "admin",
+    isActive: true,
+  };
+  const token1: any = {
+    uid: "promoted-uid",
+    email: "staff@osvid.com",
+    role: "manager",
+  };
+  const resolvedAdmin = await resolveServerUser(token1);
+  assert.equal(resolvedAdmin.role, "admin");
+  assert.equal(resolvedAdmin.isAdmin, true);
+
+  // Stale token says "admin", but DB says "user" (demoted)
+  mockUserStore["demoted-uid"] = {
+    email: "formeradmin@osvid.com",
+    role: "user",
+    isActive: true,
+  };
+  const token2: any = {
+    uid: "demoted-uid",
+    email: "formeradmin@osvid.com",
+    role: "admin",
+  };
+  const resolvedUser = await resolveServerUser(token2);
+  assert.equal(resolvedUser.role, "user");
+  assert.equal(resolvedUser.isAdmin, false);
+  assert.equal(resolvedUser.isStaff, false);
+});
+
+test("resolveServerUser: fails closed with 503 when live staff profile cannot be resolved due to DB error", async () => {
+  simulateDbError = true;
+  try {
+    const privilegedToken: any = {
+      uid: "staff-outage-uid",
+      email: "staff@osvid.com",
+      role: "admin",
+    };
+    await assert.rejects(
+      async () => resolveServerUser(privilegedToken),
+      (err: any) => err instanceof AuthError && err.status === 503
+    );
+
+    // Primary Super Admin emergency bootstrap bypass remains functional
+    const superToken: any = {
+      uid: "super-bootstrap-uid",
+      email: PRIMARY_SUPER_ADMIN_EMAIL,
+      role: "super_admin",
+    };
+    const superUser = await resolveServerUser(superToken);
+    assert.equal(superUser.isSuperAdmin, true);
+  } finally {
+    simulateDbError = false;
+  }
+});
+
+test("Privileged staff helpers do NOT fall back to direct Firestore when unauthenticated or failing", async () => {
+  // All helpers must reject when unauthenticated, never falling back to direct updateDoc/deleteDoc
+  await assert.rejects(
+    async () => updateManagerProfile("uid-1", { customTitle: "New Title" }),
+    /Authentication required/
+  );
+  await assert.rejects(
+    async () => updateUserRole("uid-1", "admin"),
+    /Authentication required/
+  );
+  await assert.rejects(
+    async () => toggleUserStatus("uid-1", false),
+    /Authentication required/
+  );
+  await assert.rejects(
+    async () => deleteUserRecord("uid-1"),
+    /Authentication required/
+  );
+});

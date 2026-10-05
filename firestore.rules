@@ -3,54 +3,61 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ===============================================================
-    // AUTHORIZATION HELPERS
+    // AUTHORIZATION HELPERS (LIVE FIRESTORE STATE ENFORCEMENT)
     // ===============================================================
 
     function isAuthenticated() {
       return request.auth != null;
     }
 
+    // Authoritative Super Admin: strictly the designated primary provider account
     function isSuperAdmin() {
-      return isAuthenticated() && (
-        (request.auth.token.email != null &&
-         request.auth.token.email.lower() == 'abolarinwaemmanuelfree@gmail.com') ||
-        request.auth.token.role == 'super_admin'
-      );
+      return isAuthenticated() &&
+        request.auth.token.email != null &&
+        request.auth.token.email.lower() == 'abolarinwaemmanuelfree@gmail.com';
+    }
+
+    function userDocExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
     function getUserData() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    function isAdmin() {
+    // Live staff verification: must have an existing profile with isActive == true
+    function isLiveActiveStaff() {
       return isSuperAdmin() || (
-        isAuthenticated() && (
-          request.auth.token.role == 'admin' ||
-          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-           getUserData().role == 'admin')
-        )
+        isAuthenticated() &&
+        userDocExists() &&
+        getUserData().isActive == true
       );
     }
 
-    function isManager() {
-      return isAuthenticated() && (
-        request.auth.token.role == 'manager' ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         getUserData().role == 'manager')
+    // Admin requires live active profile with role == 'admin' (or primary Super Admin)
+    function isAdmin() {
+      return isSuperAdmin() || (
+        isLiveActiveStaff() &&
+        getUserData().role == 'admin'
       );
+    }
+
+    // Manager requires live active profile with role == 'manager'
+    function isManager() {
+      return isLiveActiveStaff() &&
+        getUserData().role == 'manager';
     }
 
     function isStaff() {
       return isAdmin() || isManager();
     }
 
+    // Privileged operational permission: must be actively granted in the live profile
     function hasManagerPermission(perm) {
       return isAdmin() || (
-        isManager() && (
-          request.auth.token.permissions[perm] == true ||
-          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-           getUserData().permissions[perm] == true)
-        )
+        isManager() &&
+        ('permissions' in getUserData()) &&
+        getUserData().permissions[perm] == true
       );
     }
 
@@ -58,7 +65,7 @@ service cloud.firestore {
     // 1. USERS & RBAC COLLECTION
     // ===============================================================
     match /users/{userId} {
-      // User can read self; Staff can read directory for operations
+      // User can read self; Live Staff can read directory for operations
       allow read: if isAuthenticated() && (
         request.auth.uid == userId ||
         isStaff()
@@ -74,7 +81,8 @@ service cloud.firestore {
       );
 
       // Updates:
-      // Customers can update self via field-level allowlist, strictly protecting server-owned fields.
+      // Customers can update self via field-level allowlist, strictly protecting server-owned
+      // and identity-managed fields (role, permissions, isActive, email, lastLoginAt, etc.).
       // Admins can update managers.
       // Super Admin can update accounts.
       allow update: if isAuthenticated() && (
@@ -83,11 +91,12 @@ service cloud.firestore {
            'displayName', 'firstName', 'lastName', 'fullName',
            'phoneNumber', 'photoURL', 'avatar',
            'addresses', 'shippingAddress', 'billingAddress',
-           'preferences', 'updatedAt', 'lastLoginAt', 'email'
+           'preferences', 'updatedAt'
          ]) &&
          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
            'role', 'permissions', 'isActive', 'createdBy', 'createdAt',
-           'totalOrders', 'totalSpent', 'lastOrderDate', 'subscription'
+           'totalOrders', 'totalSpent', 'lastOrderDate', 'subscription',
+           'lastLoginAt', 'email'
          ]))
         ||
         (isAdmin() &&
@@ -123,7 +132,7 @@ service cloud.firestore {
     // 3. ORDERS & COMMERCE
     // ===============================================================
     match /orders/{orderId} {
-      // Customer reads their own orders; Staff reads all orders
+      // Customer reads their own orders; Live Staff reads all orders
       allow read: if isStaff() || (
         isAuthenticated() && (
           resource.data.userId == request.auth.uid ||
@@ -135,7 +144,7 @@ service cloud.firestore {
       // All orders are securely verified and written server-side by the Firebase Admin SDK.
       allow create: if false;
 
-      // Updates: only staff with order management permission
+      // Updates: only staff with live order management permission
       allow update: if hasManagerPermission('canManageOrders');
 
       allow delete: if isAdmin();
@@ -153,11 +162,10 @@ service cloud.firestore {
     // 5. SYSTEM SETTINGS & LEASE CONTROL (LANDLORD)
     // ===============================================================
     match /system_settings/{settingId} {
-      // Accessible to staff to evaluate lease status and display warnings/suspension
-      // Excludes unauthenticated public visitors from seeing provider billing/renewal amounts
+      // Accessible to live staff to evaluate lease status and display warnings/suspension
       allow read: if isStaff() || isSuperAdmin();
 
-      // STRICT PROTECTION: Only Super Admin landlord can modify licensing/killswitch
+      // STRICT PROTECTION: Only primary Super Admin landlord can modify licensing/killswitch
       allow write: if isSuperAdmin();
     }
 

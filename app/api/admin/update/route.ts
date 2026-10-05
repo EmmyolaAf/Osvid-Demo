@@ -71,8 +71,7 @@ export async function POST(req: NextRequest) {
     assertCanManageTargetStaff(caller, targetAccount);
     assertCanUpdateStaffFields(caller, targetAccount, { role, isActive });
 
-    const isTargetSuperAdmin =
-      isSuperAdminEmail(targetAuthUser.email) || targetRole === "super_admin";
+    const isTargetSuperAdmin = isSuperAdminEmail(targetAuthUser.email);
 
     // Determine final effective role for target
     const finalRole = isTargetSuperAdmin
@@ -82,7 +81,11 @@ export async function POST(req: NextRequest) {
       : targetRole;
 
     const authUpdates: any = {};
-    if (email) authUpdates.email = email.trim().toLowerCase();
+    const previousAuthProps: any = {};
+    if (email) {
+      authUpdates.email = email.trim().toLowerCase();
+      previousAuthProps.email = targetAuthUser.email;
+    }
     if (password && typeof password === "string" && password.trim().length > 0) {
       const trimmedPwd = password.trim();
       if (trimmedPwd.length < 8) {
@@ -90,8 +93,14 @@ export async function POST(req: NextRequest) {
       }
       authUpdates.password = trimmedPwd;
     }
-    if (displayName) authUpdates.displayName = displayName.trim();
-    if (isActive !== undefined) authUpdates.disabled = !isActive;
+    if (displayName) {
+      authUpdates.displayName = displayName.trim();
+      previousAuthProps.displayName = targetAuthUser.displayName;
+    }
+    if (isActive !== undefined) {
+      authUpdates.disabled = !isActive;
+      previousAuthProps.disabled = targetAuthUser.disabled;
+    }
 
     // 5. Commit core credentials to Firebase Auth
     if (Object.keys(authUpdates).length > 0) {
@@ -150,9 +159,27 @@ export async function POST(req: NextRequest) {
       await adminAuth.setCustomUserClaims(uid, updatedClaims);
     } catch (claimErr: any) {
       console.error("Custom claims write error:", claimErr);
+
+      // Best-effort compensation rollback for Auth updates
+      let rollbackAuthError: string | null = null;
+      if (Object.keys(previousAuthProps).length > 0) {
+        try {
+          await adminAuth.updateUser(uid, previousAuthProps);
+        } catch (rbAuthErr: any) {
+          rollbackAuthError = rbAuthErr.message;
+        }
+      }
+
       return NextResponse.json(
         {
           error: `Failed to persist custom authorization claims: ${claimErr.message}`,
+          inconsistency: true,
+          compensationFailed: Boolean(rollbackAuthError),
+          recoveryDetails: {
+            targetUid: uid,
+            stepFailed: "custom_claims",
+            rollbackAuthError,
+          },
         },
         { status: 500 }
       );
@@ -186,9 +213,35 @@ export async function POST(req: NextRequest) {
       await adminDb.collection("users").doc(uid).set(profileUpdates, { merge: true });
     } catch (dbErr: any) {
       console.error("Firestore database write error:", dbErr);
+
+      // Best-effort compensation rollback for custom claims and auth updates
+      let rollbackClaimsError: string | null = null;
+      try {
+        await adminAuth.setCustomUserClaims(uid, existingClaims);
+      } catch (rbClaimErr: any) {
+        rollbackClaimsError = rbClaimErr.message;
+      }
+
+      let rollbackAuthError: string | null = null;
+      if (Object.keys(previousAuthProps).length > 0) {
+        try {
+          await adminAuth.updateUser(uid, previousAuthProps);
+        } catch (rbAuthErr: any) {
+          rollbackAuthError = rbAuthErr.message;
+        }
+      }
+
       return NextResponse.json(
         {
           error: `Failed to persist updated user profile in database: ${dbErr.message}`,
+          inconsistency: true,
+          compensationFailed: Boolean(rollbackClaimsError || rollbackAuthError),
+          recoveryDetails: {
+            targetUid: uid,
+            stepFailed: "firestore_profile",
+            rollbackClaimsError,
+            rollbackAuthError,
+          },
         },
         { status: 500 }
       );
