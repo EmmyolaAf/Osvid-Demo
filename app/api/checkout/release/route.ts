@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { releaseCheckoutReservation } from "@/lib/server/checkout-session";
+import { releaseCheckoutReservationPublic } from "@/lib/server/checkout-session";
+import { CommerceValidationError } from "@/lib/server/pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -26,18 +27,28 @@ export async function POST(req: Request): Promise<NextResponse> {
       );
     }
 
-    const result = await releaseCheckoutReservation(
+    if (!releaseToken || typeof releaseToken !== "string" || !releaseToken.trim()) {
+      return NextResponse.json(
+        { error: "releaseToken is required for public checkout cancellation." },
+        { status: 400 }
+      );
+    }
+
+    const result = await releaseCheckoutReservationPublic(
       checkoutSessionId,
-      "client_cancelled",
-      releaseToken
+      releaseToken,
+      "client_cancelled"
     );
 
     return NextResponse.json({ ...result }, { status: 200 });
   } catch (err: any) {
+    if (err instanceof CommerceValidationError) {
+      return NextResponse.json({ error: err.message }, { status: err.statusCode });
+    }
     console.error("Error in /api/checkout/release:", err);
     return NextResponse.json(
       { error: err?.message || "Failed to release reservation." },
-      { status: err?.statusCode || 500 }
+      { status: 500 }
     );
   }
 }

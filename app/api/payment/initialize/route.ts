@@ -4,7 +4,8 @@ import { assertStoreOperationalSubscription } from "@/lib/server/subscription-gu
 import { extractBearerToken, verifyAuthToken } from "@/lib/server/auth";
 import {
   createCheckoutSession,
-  releaseCheckoutReservation,
+  releaseCheckoutReservationInternal,
+  cleanupExpiredCheckoutReservations,
 } from "@/lib/server/checkout-session";
 import { initializePaystackTransaction } from "@/lib/server/paystack";
 import { adminDb } from "@/lib/firebase/admin";
@@ -28,6 +29,11 @@ export async function POST(
 
     // 1. Enforce store operational subscription (fail closed)
     await assertStoreOperationalSubscription();
+
+    // 2. Best-effort lazy cleanup of expired reservations (Requirement 9)
+    cleanupExpiredCheckoutReservations(5).catch((cleanErr) =>
+      console.warn("Lazy reservation cleanup notice:", cleanErr)
+    );
 
     let body: any;
     try {
@@ -56,22 +62,39 @@ export async function POST(
       );
     }
 
-    // 2. Authenticate Firebase user from Authorization Bearer token if provided
-    // NEVER trust a browser-provided userId in the request body
-    const token = extractBearerToken(req);
+    // 3. Strict Optional Auth Token Semantics (Requirement 21)
+    // No Authorization header -> legitimate guest checkout
+    // Authorization header present and valid -> authenticated checkout
+    // Authorization header present but invalid/expired -> reject with 401
+    const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
     let authenticatedUserId: string | undefined = undefined;
-    if (token) {
+
+    if (authHeader) {
+      const token = extractBearerToken(req);
+      if (!token) {
+        return NextResponse.json(
+          { success: false, error: "Malformed Authorization Bearer header." },
+          { status: 401 }
+        );
+      }
       try {
         const verified = await verifyAuthToken(token);
-        if (verified?.uid) {
-          authenticatedUserId = verified.uid;
+        if (!verified?.uid) {
+          return NextResponse.json(
+            { success: false, error: "Invalid authentication credentials." },
+            { status: 401 }
+          );
         }
-      } catch (authErr) {
-        console.warn("Optional auth token verification failed during checkout:", authErr);
+        authenticatedUserId = verified.uid;
+      } catch {
+        return NextResponse.json(
+          { success: false, error: "Invalid, expired, or revoked authentication token." },
+          { status: 401 }
+        );
       }
     }
 
-    // 3. Create checkout session and reserve stock & coupon in a Firestore transaction
+    // 4. Create checkout session and reserve stock & coupon in a Firestore transaction
     const { session, releaseToken, replayed } = await createCheckoutSession({
       checkoutRequestId,
       items,
@@ -83,8 +106,15 @@ export async function POST(
       authenticatedUserId,
     });
 
-    // If this was an idempotent replay and Paystack is already initialized, return it
-    if (replayed && session.paystackAccessCode && session.paystackReference) {
+    const sessionDocRef = adminDb.collection("checkout_sessions").doc(session.id);
+
+    // 5. If this was an idempotent replay with initialized Paystack state, reuse it (Requirement 4 & 5)
+    if (
+      replayed &&
+      session.paymentInitializationStatus === "initialized" &&
+      session.paystackAccessCode &&
+      session.paystackReference
+    ) {
       return NextResponse.json(
         {
           success: true,
@@ -96,20 +126,28 @@ export async function POST(
             shippingFee: session.shippingFee,
             discountAmount: session.discountAmount,
             totalAmount: session.totalAmount,
+            totalAmountKobo: session.totalAmountKobo,
             currency: "NGN",
           },
           reservationExpiresAtIso: session.reservationExpiresAtIso,
-          releaseToken: undefined,
+          releaseToken: releaseToken || undefined,
         },
         { status: 200 }
       );
     }
 
-    // 4. Generate Paystack reference server-side
-    const paystackReference = `osvid_${Date.now()}_${crypto.randomBytes(5).toString("hex")}`;
-    const amountKobo = Math.round(session.totalAmount * 100);
+    // 6. Transition session to "initializing" state before external call (Requirement 5)
+    await sessionDocRef.update({
+      paymentInitializationStatus: "initializing",
+      paymentInitializationAttempt: FieldValue.increment(1),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
 
-    // 5. Initialize Paystack transaction server-side
+    // 7. Initialize Paystack transaction server-side
+    const paystackReference =
+      session.paystackReference || `osvid_${Date.now()}_${crypto.randomBytes(5).toString("hex")}`;
+    const amountKobo = session.totalAmountKobo;
+
     let accessCode = "";
     try {
       const paystackRes = await initializePaystackTransaction({
@@ -127,8 +165,13 @@ export async function POST(
       accessCode = paystackRes.access_code;
     } catch (paystackErr: any) {
       console.error("Paystack initialization failed, releasing reservation:", paystackErr);
-      // Immediately release stock and coupon reservation
-      await releaseCheckoutReservation(session.id, "paystack_init_failed");
+
+      // Mark session as failed and release reserved units
+      await sessionDocRef.update({
+        paymentInitializationStatus: "failed",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      await releaseCheckoutReservationInternal(session.id, "paystack_init_failed");
 
       return NextResponse.json(
         {
@@ -141,8 +184,9 @@ export async function POST(
       );
     }
 
-    // 6. Update checkout session with Paystack credentials
-    await adminDb.collection("checkout_sessions").doc(session.id).update({
+    // 8. Mark session as initialized in Firestore
+    await sessionDocRef.update({
+      paymentInitializationStatus: "initialized",
       paystackReference,
       paystackAccessCode: accessCode,
       updatedAt: FieldValue.serverTimestamp(),
@@ -159,6 +203,7 @@ export async function POST(
           shippingFee: session.shippingFee,
           discountAmount: session.discountAmount,
           totalAmount: session.totalAmount,
+          totalAmountKobo: session.totalAmountKobo,
           currency: "NGN",
         },
         reservationExpiresAtIso: session.reservationExpiresAtIso,

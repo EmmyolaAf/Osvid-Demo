@@ -1,7 +1,7 @@
 // components/checkout/OrderSummaryStep.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useCheckout } from "@/providers/CheckoutProvider";
 import { useCart } from "@/providers/CartProvider";
 import { useAuth } from "@/contexts/AuthContext";
@@ -22,6 +22,7 @@ import { OrderItemsList } from "./OrderItemsList";
 import formatCurrency from "@/helpers/formatCurrency";
 
 type PaymentStatus = "idle" | "processing" | "success" | "failed";
+type QuoteState = "loading" | "ready" | "error";
 
 export function OrderSummaryStep() {
   const { cart, clearCart } = useCart();
@@ -40,14 +41,14 @@ export function OrderSummaryStep() {
     discountValue: number;
   } | null>(null);
 
-  // Server Authoritative Quote State
+  // Server Authoritative Quote State (Requirement 7)
+  const [quoteState, setQuoteState] = useState<QuoteState>("loading");
   const [quoteTotals, setQuoteTotals] = useState<{
     subtotal: number;
     shippingFee: number;
     discountAmount: number;
     total: number;
   }>(() => {
-    // Initial fallback preview while server quote loads
     const fallbackSubtotal = cart.reduce(
       (sum, item) =>
         sum +
@@ -62,10 +63,42 @@ export function OrderSummaryStep() {
     };
   });
 
+  // Stable Client Checkout Request ID (Requirement 8)
+  const [checkoutRequestId, setCheckoutRequestId] = useState<string>(() =>
+    `crq_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+  );
+
+  const intentSignature = JSON.stringify({
+    items: cart
+      .map((i) => ({ id: i.id, q: i.quantity }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+    deliveryMethod: checkoutData.deliveryMethod,
+    shippingAddress: checkoutData.shippingAddress,
+    pickupLocationId: checkoutData.pickupLocationId,
+    coupon: appliedDiscount?.code || "",
+    contact: checkoutData.contactInfo,
+  });
+
+  const prevIntentRef = useRef(intentSignature);
+
+  useEffect(() => {
+    if (prevIntentRef.current !== intentSignature) {
+      prevIntentRef.current = intentSignature;
+      // Regenerate checkoutRequestId ONLY when checkout intent materially changes
+      setCheckoutRequestId(
+        `crq_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+      );
+    }
+  }, [intentSignature]);
+
   // Fetch Authoritative Server Quote
   const fetchAuthoritativeQuote = async (couponToUse?: string) => {
-    if (cart.length === 0) return;
+    if (cart.length === 0) {
+      setQuoteState("ready");
+      return;
+    }
 
+    setQuoteState("loading");
     try {
       const res = await fetch("/api/checkout/quote", {
         method: "POST",
@@ -99,11 +132,16 @@ export function OrderSummaryStep() {
             discountValue: data.coupon.discountValue,
           });
         }
+        setQuoteState("ready");
+      } else {
+        setQuoteState("error");
       }
     } catch (err) {
       console.warn("Could not retrieve server quote:", err);
+      setQuoteState("error");
     }
   };
+
 
   useEffect(() => {
     const initializePayment = async () => {
@@ -189,7 +227,12 @@ export function OrderSummaryStep() {
   };
 
   const handlePaymentClick = async () => {
-    if (!isPaystackReady || paymentStatus === "processing") return;
+    if (quoteState === "error") {
+      fetchAuthoritativeQuote();
+      return;
+    }
+
+    if (!isPaystackReady || paymentStatus === "processing" || quoteState !== "ready") return;
 
     setPaymentStatus("processing");
     const toastId = toast.loading("Preparing secure checkout session...");
@@ -206,8 +249,6 @@ export function OrderSummaryStep() {
       if (cart.length === 0) {
         throw new Error("Your cart is empty. Please add items before checking out.");
       }
-
-      const checkoutRequestId = `crq_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
       // Attach genuine authenticated ID token if customer is logged in
       let authHeaders: Record<string, string> = {};
@@ -230,7 +271,7 @@ export function OrderSummaryStep() {
           ...authHeaders,
         },
         body: JSON.stringify({
-          checkoutRequestId,
+          checkoutRequestId, // Stable client request ID (Requirement 8)
           items: cart.map((it) => ({
             productId: it.id,
             quantity: it.quantity,
@@ -249,6 +290,26 @@ export function OrderSummaryStep() {
         throw new Error(initData.error || "Failed to initialize payment session with server.");
       }
 
+      // Requirement 7: Prompt to reconfirm if authoritative server total changed
+      const serverTotal = initData.totals?.totalAmount;
+      if (
+        typeof serverTotal === "number" &&
+        Math.abs(serverTotal - quoteTotals.total) > 0.01
+      ) {
+        setQuoteTotals({
+          subtotal: initData.totals.subtotal,
+          shippingFee: initData.totals.shippingFee,
+          discountAmount: initData.totals.discountAmount,
+          total: initData.totals.totalAmount,
+        });
+        setPaymentStatus("idle");
+        toast.dismiss(toastId);
+        toast.error(
+          `Order total has been updated to ₦${serverTotal.toLocaleString()}. Please review and confirm your order.`
+        );
+        return;
+      }
+
       activeSessionId = initData.checkoutSessionId;
       activeReleaseToken = initData.releaseToken || null;
 
@@ -262,7 +323,7 @@ export function OrderSummaryStep() {
           accessCode: initData.accessCode,
           onCancel: () => {
             // Promptly release reservation on cancellation
-            if (activeSessionId) {
+            if (activeSessionId && activeReleaseToken) {
               fetch("/api/checkout/release", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -339,6 +400,10 @@ export function OrderSummaryStep() {
     }
   };
 
+  const isQuoteReady = quoteState === "ready";
+  const isQuoteLoading = quoteState === "loading";
+  const isQuoteError = quoteState === "error";
+
   const paymentButtonConfig = {
     processing: {
       text: "Processing Order & Payment...",
@@ -355,16 +420,25 @@ export function OrderSummaryStep() {
     failed: {
       text: "Retry Payment",
       icon: <AlertCircle className="mr-2 h-4 w-4" />,
-      disabled: false,
+      disabled: !isQuoteReady,
       variant: "destructive" as const,
     },
     idle: {
-      text: `Pay ${formatCurrency("NGN", quoteTotals.total)} with Paystack`,
-      icon: null,
-      disabled: !isPaystackReady || cart.length === 0,
-      variant: "default" as const,
+      text: isQuoteLoading
+        ? "Calculating latest prices..."
+        : isQuoteError
+        ? "Price check failed (Tap to retry)"
+        : `Pay ${formatCurrency("NGN", quoteTotals.total)} with Paystack`,
+      icon: isQuoteLoading ? (
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+      ) : isQuoteError ? (
+        <AlertCircle className="mr-2 h-4 w-4" />
+      ) : null,
+      disabled: !isQuoteReady || !isPaystackReady || cart.length === 0,
+      variant: isQuoteError ? ("destructive" as const) : ("default" as const),
     },
   }[paymentStatus];
+
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">

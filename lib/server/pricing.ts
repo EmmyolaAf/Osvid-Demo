@@ -75,6 +75,154 @@ export function canonicalizeCartItems(rawItems: any): CartInputItem[] {
   }));
 }
 
+/**
+ * Validates Paystack/system payment references before using them as document keys or parameters.
+ */
+export function validatePaymentReference(ref: any): string {
+  if (typeof ref !== "string") {
+    throw new CommerceValidationError("Payment reference must be a string.", 400);
+  }
+  const clean = ref.trim();
+  if (clean.length < 8 || clean.length > 128) {
+    throw new CommerceValidationError(
+      "Payment reference must be between 8 and 128 characters.",
+      400
+    );
+  }
+  if (!/^[a-zA-Z0-9_\-]+$/.test(clean)) {
+    throw new CommerceValidationError(
+      "Payment reference contains invalid characters.",
+      400
+    );
+  }
+  return clean;
+}
+
+/**
+ * Validates customer email format and length.
+ */
+export function validateCustomerEmail(email: any): string {
+  if (typeof email !== "string") {
+    throw new CommerceValidationError("Customer email must be a string.", 400);
+  }
+  const clean = email.trim().toLowerCase();
+  if (!clean || clean.length > 254) {
+    throw new CommerceValidationError(
+      "Customer email is invalid or exceeds maximum length.",
+      400
+    );
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
+    throw new CommerceValidationError("Please enter a valid customer email address.", 400);
+  }
+  return clean;
+}
+
+/**
+ * Validates customer contact name.
+ */
+export function validateCustomerName(name: any): string {
+  if (typeof name !== "string") {
+    throw new CommerceValidationError("Customer name must be a string.", 400);
+  }
+  const clean = name.trim();
+  if (!clean || clean.length > 100) {
+    throw new CommerceValidationError(
+      "Customer name is required and must not exceed 100 characters.",
+      400
+    );
+  }
+  return clean;
+}
+
+/**
+ * Validates customer contact phone.
+ */
+export function validateCustomerPhone(phone: any): string {
+  if (typeof phone !== "string") {
+    throw new CommerceValidationError("Customer phone must be a string.", 400);
+  }
+  const clean = phone.trim();
+  if (clean.length < 5 || clean.length > 30) {
+    throw new CommerceValidationError(
+      "Customer phone must be between 5 and 30 characters.",
+      400
+    );
+  }
+  if (!/^[0-9+\-\s()]+$/.test(clean)) {
+    throw new CommerceValidationError("Customer phone contains invalid characters.", 400);
+  }
+  return clean;
+}
+
+/**
+ * Validates delivery method and shipping/pickup particulars.
+ */
+export function validateDeliveryDetails(
+  deliveryMethod: any,
+  shippingAddress: any,
+  pickupLocationId: any
+): {
+  deliveryMethod: "shipping" | "pickup";
+  shippingAddress?: any;
+  pickupLocationId?: string;
+} {
+  if (deliveryMethod !== "shipping" && deliveryMethod !== "pickup") {
+    throw new CommerceValidationError(
+      `Invalid delivery method "${deliveryMethod}". Must be "shipping" or "pickup".`,
+      400
+    );
+  }
+
+  if (deliveryMethod === "pickup") {
+    if (!pickupLocationId || typeof pickupLocationId !== "string" || !pickupLocationId.trim()) {
+      throw new CommerceValidationError("pickupLocationId is required for pickup orders.", 400);
+    }
+    const cleanPickupId = pickupLocationId.trim();
+    if (cleanPickupId.length > 128) {
+      throw new CommerceValidationError("pickupLocationId exceeds maximum length.", 400);
+    }
+    return { deliveryMethod: "pickup", pickupLocationId: cleanPickupId };
+  }
+
+  // Shipping
+  if (!shippingAddress || typeof shippingAddress !== "object") {
+    throw new CommerceValidationError(
+      "Shipping address details are required for delivery orders.",
+      400
+    );
+  }
+
+  const street = (shippingAddress.streetAddress || shippingAddress.address || "").trim();
+  const city = (shippingAddress.city || "").trim();
+  const state = (shippingAddress.state || "").trim();
+
+  if (!street || street.length > 200) {
+    throw new CommerceValidationError(
+      "Street address is required and must not exceed 200 characters.",
+      400
+    );
+  }
+  if (!city || city.length > 100) {
+    throw new CommerceValidationError("City is required and must not exceed 100 characters.", 400);
+  }
+  if (!state || state.length > 100) {
+    throw new CommerceValidationError("State is required and must not exceed 100 characters.", 400);
+  }
+
+  return {
+    deliveryMethod: "shipping",
+    shippingAddress: {
+      ...shippingAddress,
+      streetAddress: street,
+      address: street,
+      city,
+      state,
+      postalCode: (shippingAddress.postalCode || "").trim().slice(0, 20),
+    },
+  };
+}
+
 export interface AuthoritativePricingResult {
   items: AuthoritativeQuoteItem[];
   subtotal: number;

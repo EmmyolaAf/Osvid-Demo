@@ -1,5 +1,5 @@
 /**
- * Packet 4: Authoritative Checkout, Sessions, Quotes & Commerce Types
+ * Packet 4 & 4B: Authoritative Checkout, Sessions, Quotes & Commerce Types
  */
 
 export interface ShippingAddress {
@@ -64,9 +64,16 @@ export type CheckoutSessionStatus =
   | "expired"
   | "anomaly_unfulfillable";
 
+export type PaymentInitializationStatus =
+  | "uninitialized"
+  | "initializing"
+  | "initialized"
+  | "failed";
+
 export interface CheckoutSession {
   id: string;
   checkoutRequestId: string;
+  requestFingerprint?: string;
   status: CheckoutSessionStatus;
   currency: "NGN";
   customerEmail: string;
@@ -81,10 +88,13 @@ export interface CheckoutSession {
   shippingFee: number;
   discountAmount: number;
   totalAmount: number;
+  totalAmountKobo: number;
   couponId?: string;
   couponCode?: string;
   paystackReference?: string;
   paystackAccessCode?: string;
+  paymentInitializationStatus?: PaymentInitializationStatus;
+  paymentInitializationAttempt?: number;
   reservationExpiresAt: any; // Firestore Timestamp
   reservationExpiresAtIso: string;
   reservationActive: boolean;
@@ -123,6 +133,7 @@ export interface PaymentInitializeResponse {
     shippingFee: number;
     discountAmount: number;
     totalAmount: number;
+    totalAmountKobo: number;
     currency: "NGN";
   };
   reservationExpiresAtIso?: string;
@@ -130,11 +141,22 @@ export interface PaymentInitializeResponse {
   error?: string;
 }
 
+export type ReceiptEmailStatus = "pending" | "sending" | "sent" | "failed";
+
+export type RefundStatus =
+  | "none"
+  | "initiating"
+  | "pending"
+  | "processing"
+  | "needs_attention"
+  | "processed"
+  | "failed";
+
 export interface PaymentTransactionRecord {
   id: string; // paystackReference
   reference: string;
   checkoutSessionId: string;
-  status: "finalized" | "anomaly_unfulfillable" | "failed";
+  status: "finalized" | "anomaly_unfulfillable" | "failed" | "refunded";
   amount: number; // in Naira
   amountKobo: number;
   currency: "NGN";
@@ -142,8 +164,19 @@ export interface PaymentTransactionRecord {
   customerEmail: string;
   paystackData?: any;
   receiptEmailSent?: boolean;
+  receiptEmailStatus?: ReceiptEmailStatus;
+  receiptEmailClaimedAt?: string;
+  receiptEmailSentAt?: string;
+  receiptEmailFailureReason?: string;
   anomalyReason?: string;
   needsRefund?: boolean;
+  refundStatus?: RefundStatus;
+  providerRefundId?: string;
+  refundReference?: string;
+  refundRequestedAt?: string;
+  refundReason?: string;
+  refundFailureReason?: string;
+  refundedAtIso?: string;
   refunds?: Array<{
     refundReference: string;
     amount: number;

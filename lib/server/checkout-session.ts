@@ -2,15 +2,20 @@ import crypto from "crypto";
 import { adminDb } from "@/lib/firebase/admin";
 import { Timestamp, FieldValue } from "firebase-admin/firestore";
 import {
-  AuthoritativePricingResult,
-  calculateAuthoritativeQuote,
+  canonicalizeCartItems,
   CommerceValidationError,
+  validateCustomerEmail,
+  validateCustomerName,
+  validateCustomerPhone,
+  validateDeliveryDetails,
 } from "@/lib/server/pricing";
 import {
+  AuthoritativeQuoteItem,
   CheckoutSession,
   CheckoutSessionStatus,
   ShippingAddress,
 } from "@/types/commerce";
+import { DiscountCode } from "@/types/auth";
 
 export const RESERVATION_EXPIRY_MINUTES = 30;
 
@@ -59,74 +64,84 @@ export function validateCheckoutRequestId(id: string): string {
 }
 
 /**
+ * Computes a deterministic session document ID from checkoutRequestId.
+ */
+export function getDeterministicSessionId(cleanRequestId: string): string {
+  const hash = crypto.createHash("sha256").update(cleanRequestId).digest("hex").slice(0, 32);
+  return `cs_${hash}`;
+}
+
+/**
+ * Computes a stable hash fingerprint of the normalized checkout intent.
+ */
+export function computeCheckoutRequestFingerprint(params: {
+  canonicalItems: Array<{ productId: string; quantity: number }>;
+  customerEmail: string;
+  customerName: string;
+  customerPhone: string;
+  deliveryMethod: "shipping" | "pickup";
+  shippingDetails: string;
+  couponCode?: string;
+  authenticatedUserId?: string;
+}): string {
+  const sortedItemsStr = [...params.canonicalItems]
+    .sort((a, b) => a.productId.localeCompare(b.productId))
+    .map((i) => `${i.productId}:${i.quantity}`)
+    .join(",");
+
+  const parts = [
+    sortedItemsStr,
+    (params.couponCode || "").trim().toUpperCase(),
+    params.customerEmail.toLowerCase().trim(),
+    params.customerName.trim(),
+    params.customerPhone.trim(),
+    params.deliveryMethod,
+    params.shippingDetails.trim(),
+    params.authenticatedUserId || "guest",
+  ];
+
+  return crypto.createHash("sha256").update(parts.join("|")).digest("hex");
+}
+
+/**
  * Creates an authoritative checkout session with atomic stock and coupon reservations.
- * If checkoutRequestId was already used with identical payload, returns existing session (Idempotent).
- * If payload differs on an existing checkoutRequestId, rejects with 409 Conflict.
+ * Resolves transactionally to ONE session via deterministic session ID.
+ * Re-reads and revalidates catalogue prices, stock, and coupon terms inside the reservation transaction.
  */
 export async function createCheckoutSession(
   params: CreateCheckoutSessionParams
 ): Promise<CreateCheckoutSessionResult> {
   const cleanRequestId = validateCheckoutRequestId(params.checkoutRequestId);
+  const cleanCustomerEmail = validateCustomerEmail(params.customerInfo?.email);
+  const cleanCustomerName = validateCustomerName(params.customerInfo?.name);
+  const cleanCustomerPhone = validateCustomerPhone(params.customerInfo?.phone);
 
-  const cleanCustomerEmail = params.customerInfo?.email?.toLowerCase()?.trim() || "";
-  const cleanCustomerName = params.customerInfo?.name?.trim() || "";
-  const cleanCustomerPhone = params.customerInfo?.phone?.trim() || "";
+  const deliveryResult = validateDeliveryDetails(
+    params.deliveryMethod,
+    params.shippingAddress,
+    params.pickupLocationId
+  );
 
-  if (!cleanCustomerEmail || !cleanCustomerName) {
-    throw new CommerceValidationError(
-      "Customer name and email are required to create a checkout session.",
-      400
-    );
-  }
+  const canonicalItems = canonicalizeCartItems(params.items);
+  const normalizedCoupon = params.couponCode ? params.couponCode.trim().toUpperCase() : "";
 
-  // 1. Check for existing session by checkoutRequestId
-  const existingSnap = await adminDb
-    .collection("checkout_sessions")
-    .where("checkoutRequestId", "==", cleanRequestId)
-    .limit(1)
-    .get();
+  const shippingDetailsStr =
+    deliveryResult.deliveryMethod === "pickup"
+      ? deliveryResult.pickupLocationId || ""
+      : `${deliveryResult.shippingAddress?.streetAddress || ""}|${deliveryResult.shippingAddress?.city || ""}|${deliveryResult.shippingAddress?.state || ""}`;
 
-  if (!existingSnap.empty) {
-    const existingDoc = existingSnap.docs[0];
-    const existingSession = { id: existingDoc.id, ...existingDoc.data() } as CheckoutSession;
-
-    // If active or already finalized, check for payload equality
-    if (existingSession.status === "active" || existingSession.status === "finalized") {
-      // Check customer email and total
-      if (
-        existingSession.customerEmail.toLowerCase() !== cleanCustomerEmail.toLowerCase()
-      ) {
-        throw new CommerceValidationError(
-          "checkoutRequestId conflict: request was previously used with different customer details.",
-          409
-        );
-      }
-
-      return {
-        session: existingSession,
-        releaseToken: "", // Token not exposed on replay
-        replayed: true,
-      };
-    }
-  }
-
-  // 2. Compute authoritative quote before entering reservation transaction
-  const quote = await calculateAuthoritativeQuote({
-    rawItems: params.items,
-    couponCode: params.couponCode,
-    deliveryMethod: params.deliveryMethod,
-    shippingAddress: params.shippingAddress,
-    pickupLocationId: params.pickupLocationId,
+  const requestFingerprint = computeCheckoutRequestFingerprint({
+    canonicalItems,
+    customerEmail: cleanCustomerEmail,
+    customerName: cleanCustomerName,
+    customerPhone: cleanCustomerPhone,
+    deliveryMethod: deliveryResult.deliveryMethod,
+    shippingDetails: shippingDetailsStr,
+    couponCode: normalizedCoupon,
+    authenticatedUserId: params.authenticatedUserId,
   });
 
-  // Generate unguessable release token and session ID
-  const rawReleaseToken = crypto.randomBytes(32).toString("hex");
-  const releaseTokenHash = crypto
-    .createHash("sha256")
-    .update(rawReleaseToken)
-    .digest("hex");
-
-  const sessionId = `cs_${Date.now()}_${crypto.randomBytes(6).toString("hex")}`;
+  const sessionId = getDeterministicSessionId(cleanRequestId);
   const sessionRef = adminDb.collection("checkout_sessions").doc(sessionId);
 
   const now = new Date();
@@ -135,112 +150,253 @@ export async function createCheckoutSession(
   const reservationExpiresAt = Timestamp.fromMillis(expiresAtMs);
   const reservationExpiresAtIso = new Date(expiresAtMs).toISOString();
 
-  // 3. Atomically reserve stock and coupon in a Firestore transaction
-  await adminDb.runTransaction(async (transaction) => {
-    // A. Re-check idempotency inside transaction
-    const existingInTx = await transaction.get(sessionRef);
-    if (existingInTx.exists) {
-      return;
-    }
+  let rawReleaseToken = crypto.randomBytes(32).toString("hex");
+  let releaseTokenHash = crypto
+    .createHash("sha256")
+    .update(rawReleaseToken)
+    .digest("hex");
 
-    // B. Read all products for the session
-    const productDocs: Array<{
-      ref: FirebaseFirestore.DocumentReference;
-      data: FirebaseFirestore.DocumentData;
-      requestedQty: number;
-      name: string;
-    }> = [];
+  return adminDb.runTransaction(async (transaction) => {
+    // 1. Transactional Idempotency Check using deterministic session document
+    const existingSnap = await transaction.get(sessionRef);
 
-    for (const item of quote.items) {
-      const pRef = adminDb.collection("products").doc(item.productId);
-      const pSnap = await transaction.get(pRef);
-      if (!pSnap.exists) {
+    if (existingSnap.exists) {
+      const existing = existingSnap.data() as CheckoutSession;
+
+      // Fingerprint match check
+      if (existing.requestFingerprint && existing.requestFingerprint !== requestFingerprint) {
         throw new CommerceValidationError(
-          `Product "${item.name}" (ID: ${item.productId}) no longer exists.`,
-          404
-        );
-      }
-      const pData = pSnap.data() || {};
-      productDocs.push({
-        ref: pRef,
-        data: pData,
-        requestedQty: item.quantity,
-        name: pData.name || item.name,
-      });
-    }
-
-    // C. Read coupon doc if applied
-    let discountDocRef: FirebaseFirestore.DocumentReference | null = null;
-    let discountData: FirebaseFirestore.DocumentData | null = null;
-
-    if (quote.coupon?.id) {
-      discountDocRef = adminDb.collection("discounts").doc(quote.coupon.id);
-      const dSnap = await transaction.get(discountDocRef);
-      if (!dSnap.exists) {
-        throw new CommerceValidationError("Applied coupon no longer exists.", 400);
-      }
-      discountData = dSnap.data() || {};
-    }
-
-    // D. Validate stock availability and apply stock reservations
-    for (const p of productDocs) {
-      const stock = Number(p.data.stockQuantity || 0);
-      const reserved = Number(p.data.reservedQuantity || 0);
-      const available = stock - reserved;
-
-      if (available < p.requestedQty) {
-        throw new CommerceValidationError(
-          `Insufficient stock available for "${p.name}". Available: ${Math.max(0, available)}, requested: ${p.requestedQty}.`,
+          "checkoutRequestId conflict: request was previously initialized with a different purchase intent.",
           409
         );
       }
 
-      transaction.update(p.ref, {
-        reservedQuantity: reserved + p.requestedQty,
-        updatedAt: nowIso,
+      // If active, rotate release token safely (Requirement 4)
+      if (existing.status === "active" && existing.reservationActive) {
+        const freshRawReleaseToken = crypto.randomBytes(32).toString("hex");
+        const freshReleaseTokenHash = crypto
+          .createHash("sha256")
+          .update(freshRawReleaseToken)
+          .digest("hex");
+
+        transaction.update(sessionRef, {
+          releaseTokenHash: freshReleaseTokenHash,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+        return {
+          session: {
+            ...existing,
+            id: sessionId,
+            releaseTokenHash: freshReleaseTokenHash,
+          },
+          releaseToken: freshRawReleaseToken,
+          replayed: true,
+        };
+      }
+
+      // If already finalized, return existing session
+      if (existing.status === "finalized") {
+        return {
+          session: { ...existing, id: sessionId },
+          releaseToken: "",
+          replayed: true,
+        };
+      }
+
+      // If released or expired, reject reuse
+      throw new CommerceValidationError(
+        "checkoutRequestId belongs to an expired or released checkout session. Please start a new purchase attempt.",
+        409
+      );
+    }
+
+    // 2. Transactionally Re-read and Revalidate Catalogue Items (Requirement 6)
+    const pricedItems: AuthoritativeQuoteItem[] = [];
+    const productDocs: Array<{
+      ref: FirebaseFirestore.DocumentReference;
+      data: FirebaseFirestore.DocumentData;
+      item: { productId: string; quantity: number };
+    }> = [];
+
+    for (const item of canonicalItems) {
+      const pRef = adminDb.collection("products").doc(item.productId);
+      const pSnap = await transaction.get(pRef);
+
+      if (!pSnap.exists) {
+        throw new CommerceValidationError(
+          `Product with ID "${item.productId}" does not exist in store catalogue.`,
+          404
+        );
+      }
+
+      const pData = pSnap.data() || {};
+      if (pData.isActive === false) {
+        throw new CommerceValidationError(
+          `Product "${pData.name || item.productId}" is currently inactive.`,
+          400
+        );
+      }
+
+      const basePrice = Number(pData.price);
+      if (isNaN(basePrice) || basePrice < 0) {
+        throw new CommerceValidationError(
+          `Product "${pData.name || item.productId}" has an invalid price configuration.`,
+          500
+        );
+      }
+
+      const hasDiscount =
+        pData.discountPrice !== undefined &&
+        Number(pData.discountPrice) > 0 &&
+        Number(pData.discountPrice) < basePrice;
+
+      const unitPrice = hasDiscount ? Number(pData.discountPrice) : basePrice;
+      const lineTotal = unitPrice * item.quantity;
+
+      // Available stock invariant check
+      const stock = Number(pData.stockQuantity || 0);
+      const reserved = Number(pData.reservedQuantity || 0);
+      const available = stock - reserved;
+
+      if (available < item.quantity) {
+        throw new CommerceValidationError(
+          `Insufficient stock available for "${pData.name || item.productId}". Available: ${Math.max(0, available)}, requested: ${item.quantity}.`,
+          409
+        );
+      }
+
+      productDocs.push({ ref: pRef, data: pData, item });
+      pricedItems.push({
+        productId: item.productId,
+        name: pData.name || "Product",
+        sku: pData.sku || "",
+        unit: pData.unit || "unit",
+        imageUrl: pData.imageUrl || "",
+        quantity: item.quantity,
+        unitPrice,
+        lineTotal,
       });
     }
 
-    // E. Validate coupon availability and apply coupon reservation
-    if (discountDocRef && discountData) {
-      const maxLimit = discountData.maxUsageLimit;
-      if (maxLimit !== undefined && maxLimit !== null) {
-        const usage = Number(discountData.usageCount || 0);
-        const reservedUsage = Number(discountData.reservedUsageCount || 0);
-        const effectiveAvailable = maxLimit - usage - reservedUsage;
+    // Authoritative subtotal
+    const subtotal = pricedItems.reduce((acc, it) => acc + it.lineTotal, 0);
+    const shippingFee = deliveryResult.deliveryMethod === "pickup" ? 0 : 0;
 
-        if (effectiveAvailable <= 0) {
+    // 3. Transactionally Re-read and Revalidate Coupon (Requirement 6)
+    let discountAmount = 0;
+    let couponDocRef: FirebaseFirestore.DocumentReference | null = null;
+    let couponDocData: DiscountCode | null = null;
+
+    if (normalizedCoupon) {
+      const qSnap = await adminDb
+        .collection("discounts")
+        .where("code", "==", normalizedCoupon)
+        .limit(1)
+        .get();
+
+      if (qSnap.empty) {
+        throw new CommerceValidationError(
+          `Coupon code "${normalizedCoupon}" is invalid or does not exist.`,
+          400
+        );
+      }
+
+      couponDocRef = adminDb.collection("discounts").doc(qSnap.docs[0].id);
+      const dSnap = await transaction.get(couponDocRef);
+
+      if (!dSnap.exists) {
+        throw new CommerceValidationError("Applied coupon no longer exists.", 400);
+      }
+
+      couponDocData = dSnap.data() as DiscountCode;
+
+      if (!couponDocData.isActive) {
+        throw new CommerceValidationError(
+          `Coupon code "${normalizedCoupon}" is deactivated.`,
+          400
+        );
+      }
+
+      if (couponDocData.expiryDate) {
+        const expiry = new Date(couponDocData.expiryDate);
+        if (!isNaN(expiry.getTime()) && expiry.getTime() < Date.now()) {
           throw new CommerceValidationError(
-            `Coupon "${quote.coupon?.code}" has reached its maximum redemption limit.`,
-            409
+            `Coupon code "${normalizedCoupon}" has expired.`,
+            400
           );
         }
       }
 
-      transaction.update(discountDocRef, {
-        reservedUsageCount: Number(discountData.reservedUsageCount || 0) + 1,
+      if (couponDocData.minOrderAmount && subtotal < couponDocData.minOrderAmount) {
+        throw new CommerceValidationError(
+          `Coupon "${normalizedCoupon}" requires a minimum order subtotal of ₦${couponDocData.minOrderAmount.toLocaleString()}.`,
+          400
+        );
+      }
+
+      const totalUsage =
+        Number(couponDocData.usageCount || 0) + Number(couponDocData.reservedUsageCount || 0);
+
+      if (couponDocData.maxUsageLimit && totalUsage >= couponDocData.maxUsageLimit) {
+        throw new CommerceValidationError(
+          `Coupon "${normalizedCoupon}" has reached its maximum redemption limit.`,
+          409
+        );
+      }
+
+      if (couponDocData.discountType === "percentage") {
+        const percentage = Math.min(100, Math.max(0, couponDocData.discountValue));
+        discountAmount = Math.round((subtotal * percentage) / 100);
+      } else {
+        discountAmount = Math.min(couponDocData.discountValue, subtotal);
+      }
+      discountAmount = Math.min(discountAmount, subtotal);
+    }
+
+    const totalAmount = Math.max(0, subtotal - discountAmount + shippingFee);
+    const totalAmountKobo = Math.round(totalAmount * 100);
+
+    // 4. Apply Product Stock Reservations
+    for (const p of productDocs) {
+      const curReserved = Number(p.data.reservedQuantity || 0);
+      transaction.update(p.ref, {
+        reservedQuantity: curReserved + p.item.quantity,
+        updatedAt: nowIso,
       });
     }
 
-    // F. Create checkout session document
+    // 5. Apply Coupon Usage Reservation
+    if (couponDocRef && couponDocData) {
+      const curReservedUsage = Number(couponDocData.reservedUsageCount || 0);
+      transaction.update(couponDocRef, {
+        reservedUsageCount: curReservedUsage + 1,
+      });
+    }
+
+    // 6. Persist Checkout Session with explicit provider state machine (Requirement 5)
     const newSessionData: Omit<CheckoutSession, "id"> = {
       checkoutRequestId: cleanRequestId,
+      requestFingerprint,
       status: "active",
       currency: "NGN",
       customerEmail: cleanCustomerEmail,
       customerName: cleanCustomerName,
       customerPhone: cleanCustomerPhone,
       authenticatedUserId: params.authenticatedUserId,
-      deliveryMethod: params.deliveryMethod,
-      shippingAddress: params.shippingAddress,
-      pickupLocationId: params.pickupLocationId,
-      items: quote.items,
-      subtotal: quote.subtotal,
-      shippingFee: quote.shippingFee,
-      discountAmount: quote.discountAmount,
-      totalAmount: quote.totalAmount,
-      couponId: quote.coupon?.id,
-      couponCode: quote.coupon?.code,
+      deliveryMethod: deliveryResult.deliveryMethod,
+      shippingAddress: deliveryResult.shippingAddress,
+      pickupLocationId: deliveryResult.pickupLocationId,
+      items: pricedItems,
+      subtotal,
+      shippingFee,
+      discountAmount,
+      totalAmount,
+      totalAmountKobo,
+      couponId: couponDocRef ? couponDocRef.id : undefined,
+      couponCode: couponDocData ? couponDocData.code : undefined,
+      paymentInitializationStatus: "uninitialized",
+      paymentInitializationAttempt: 0,
       reservationExpiresAt,
       reservationExpiresAtIso,
       reservationActive: true,
@@ -252,52 +408,29 @@ export async function createCheckoutSession(
     };
 
     transaction.set(sessionRef, newSessionData);
+
+    const createdSession: CheckoutSession = {
+      id: sessionId,
+      ...newSessionData,
+      createdAt: reservationExpiresAt,
+      updatedAt: reservationExpiresAt,
+    };
+
+    return {
+      session: createdSession,
+      releaseToken: rawReleaseToken,
+      replayed: false,
+    };
   });
-
-  const createdSession: CheckoutSession = {
-    id: sessionId,
-    checkoutRequestId: cleanRequestId,
-    status: "active",
-    currency: "NGN",
-    customerEmail: cleanCustomerEmail,
-    customerName: cleanCustomerName,
-    customerPhone: cleanCustomerPhone,
-    authenticatedUserId: params.authenticatedUserId,
-    deliveryMethod: params.deliveryMethod,
-    shippingAddress: params.shippingAddress,
-    pickupLocationId: params.pickupLocationId,
-    items: quote.items,
-    subtotal: quote.subtotal,
-    shippingFee: quote.shippingFee,
-    discountAmount: quote.discountAmount,
-    totalAmount: quote.totalAmount,
-    couponId: quote.coupon?.id,
-    couponCode: quote.coupon?.code,
-    reservationExpiresAt,
-    reservationExpiresAtIso,
-    reservationActive: true,
-    releaseTokenHash,
-    createdAt: reservationExpiresAt,
-    createdAtIso: nowIso,
-    updatedAt: reservationExpiresAt,
-    updatedAtIso: nowIso,
-  };
-
-  return {
-    session: createdSession,
-    releaseToken: rawReleaseToken,
-    replayed: false,
-  };
 }
 
 /**
- * Releases a checkout session's reserved stock and coupon atomically.
- * Safe and idempotent: will not double-decrement or make reservedQuantity negative.
+ * Internal core release logic enforcing strict reservation invariants (Requirement 10).
  */
-export async function releaseCheckoutReservation(
+async function executeReservationRelease(
   sessionId: string,
   reason: string,
-  providedReleaseToken?: string
+  requiredReleaseToken?: string
 ): Promise<{ success: boolean; alreadyReleased: boolean }> {
   if (!sessionId) {
     return { success: false, alreadyReleased: true };
@@ -313,31 +446,42 @@ export async function releaseCheckoutReservation(
 
     const session = snap.data() as CheckoutSession;
 
-    // If not active or already released/finalized, release is a no-op
+    // Idempotency check: if not active or already released, no-op
     if (session.status !== "active" || !session.reservationActive) {
       return { success: true, alreadyReleased: true };
     }
 
-    // Verify release token if provided
-    if (providedReleaseToken && session.releaseTokenHash) {
+    // If a release token is required (public path), compare cryptographically with timingSafeEqual (Requirement 3)
+    if (requiredReleaseToken) {
       const computedHash = crypto
         .createHash("sha256")
-        .update(providedReleaseToken)
+        .update(requiredReleaseToken)
         .digest("hex");
-      if (computedHash !== session.releaseTokenHash) {
+
+      const compBuf = Buffer.from(computedHash, "utf8");
+      const storedBuf = Buffer.from(session.releaseTokenHash || "", "utf8");
+
+      if (compBuf.length !== storedBuf.length || !crypto.timingSafeEqual(compBuf, storedBuf)) {
         throw new CommerceValidationError("Invalid release authorization token.", 403);
       }
     }
 
     const nowIso = new Date().toISOString();
 
-    // 1. Decrement reservedQuantity for each product safely
+    // 1. Strict reservation invariant check on each product (Requirement 10)
     for (const item of session.items || []) {
       const pRef = adminDb.collection("products").doc(item.productId);
       const pSnap = await transaction.get(pRef);
       if (pSnap.exists) {
         const pData = pSnap.data() || {};
         const currentReserved = Number(pData.reservedQuantity || 0);
+
+        if (currentReserved < item.quantity) {
+          console.error(
+            `CRITICAL RESERVATION INCONSISTENCY: Product ${item.productId} current reservedQuantity (${currentReserved}) is less than session requested quantity (${item.quantity}). Clamping safely to prevent negative counters.`
+          );
+        }
+
         const nextReserved = Math.max(0, currentReserved - item.quantity);
         transaction.update(pRef, {
           reservedQuantity: nextReserved,
@@ -346,13 +490,20 @@ export async function releaseCheckoutReservation(
       }
     }
 
-    // 2. Decrement reservedUsageCount on coupon if applicable
+    // 2. Strict coupon reservation invariant check (Requirement 10)
     if (session.couponId) {
       const dRef = adminDb.collection("discounts").doc(session.couponId);
       const dSnap = await transaction.get(dRef);
       if (dSnap.exists) {
         const dData = dSnap.data() || {};
         const currentReservedUsage = Number(dData.reservedUsageCount || 0);
+
+        if (currentReservedUsage < 1) {
+          console.error(
+            `CRITICAL RESERVATION INCONSISTENCY: Coupon ${session.couponCode} reservedUsageCount (${currentReservedUsage}) is less than 1. Clamping safely.`
+          );
+        }
+
         const nextReservedUsage = Math.max(0, currentReservedUsage - 1);
         transaction.update(dRef, {
           reservedUsageCount: nextReservedUsage,
@@ -376,10 +527,45 @@ export async function releaseCheckoutReservation(
 }
 
 /**
- * Scans and releases expired active checkout sessions.
- * Suitable for periodic or lazy invocation.
+ * Public release path: strictly requires non-empty releaseToken and validates hash (Requirement 3).
  */
-export async function cleanupExpiredCheckoutReservations(maxBatch = 20): Promise<number> {
+export async function releaseCheckoutReservationPublic(
+  sessionId: string,
+  releaseToken: string,
+  reason = "client_cancelled"
+): Promise<{ success: boolean; alreadyReleased: boolean }> {
+  if (!sessionId || typeof sessionId !== "string") {
+    throw new CommerceValidationError("checkoutSessionId is required.", 400);
+  }
+  if (!releaseToken || typeof releaseToken !== "string" || !releaseToken.trim()) {
+    throw new CommerceValidationError(
+      "releaseToken is required for public checkout reservation cancellation.",
+      400
+    );
+  }
+  return executeReservationRelease(sessionId.trim(), reason, releaseToken.trim());
+}
+
+/**
+ * Internal server release path: used for initialization failure, system expiry, etc. (Requirement 3).
+ */
+export async function releaseCheckoutReservationInternal(
+  sessionId: string,
+  reason: string
+): Promise<{ success: boolean; alreadyReleased: boolean }> {
+  return executeReservationRelease(sessionId, reason);
+}
+
+/**
+ * Backward compatibility alias for internal release.
+ */
+export const releaseCheckoutReservation = releaseCheckoutReservationInternal;
+
+/**
+ * Scans and releases expired active checkout sessions.
+ * Suitable for lazy invocation or scheduled worker.
+ */
+export async function cleanupExpiredCheckoutReservations(maxBatch = 5): Promise<number> {
   try {
     const expiredSnaps = await adminDb
       .collection("checkout_sessions")
@@ -391,7 +577,7 @@ export async function cleanupExpiredCheckoutReservations(maxBatch = 20): Promise
     let cleaned = 0;
     for (const doc of expiredSnaps.docs) {
       try {
-        await releaseCheckoutReservation(doc.id, "expired");
+        await releaseCheckoutReservationInternal(doc.id, "expired");
         cleaned++;
       } catch (err) {
         console.warn(`Failed to release expired session ${doc.id}:`, err);

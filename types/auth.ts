@@ -198,10 +198,13 @@ export interface Order {
   trackingNumber?: string;
   notes?: string;
   statusHistory?: OrderHistoryEvent[];
-  refundStatus?: "pending" | "processing" | "processed" | "failed";
+  refundStatus?: "none" | "initiating" | "pending" | "processing" | "needs_attention" | "processed" | "failed";
   refundReason?: string;
   refundReference?: string;
+  providerRefundId?: string;
+  refundFailureReason?: string;
   refundRequestedAt?: string;
+  refundRequestedBy?: string;
   refundedAt?: string;
   createdAt: string;
   updatedAt: string;

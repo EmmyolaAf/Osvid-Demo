@@ -3,8 +3,8 @@ import { verifyWebhookSignature } from "@/lib/server/paystack";
 import {
   finalizeSuccessfulPayment,
   finalizeProcessedRefund,
+  updateRefundStatus,
 } from "@/lib/server/payment-finalizer";
-import { adminDb } from "@/lib/firebase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -32,19 +32,28 @@ export async function POST(req: Request): Promise<NextResponse> {
     const eventType = event?.event;
     const data = event?.data;
 
-    // 4. Handle events
+    // 4. Handle events with retry-safe error propagation (Requirement 17 & 19)
     switch (eventType) {
       case "charge.success": {
         const reference = data?.reference;
-        if (reference) {
-          try {
-            await finalizeSuccessfulPayment(reference);
-          } catch (finErr) {
-            console.error(
-              `Error finalizing payment for reference "${reference}" via webhook:`,
-              finErr
-            );
-          }
+        if (!reference) {
+          return NextResponse.json(
+            { error: "Missing reference in charge.success event" },
+            { status: 400 }
+          );
+        }
+        try {
+          await finalizeSuccessfulPayment(reference);
+        } catch (finErr: any) {
+          console.error(
+            `Error finalizing payment for reference "${reference}" via webhook:`,
+            finErr
+          );
+          // Return non-2xx so Paystack will retry delivery
+          return NextResponse.json(
+            { error: finErr?.message || "Payment finalization failed" },
+            { status: 500 }
+          );
         }
         break;
       }
@@ -52,29 +61,64 @@ export async function POST(req: Request): Promise<NextResponse> {
       case "refund.processed": {
         try {
           await finalizeProcessedRefund(data);
-        } catch (refErr) {
+        } catch (refErr: any) {
           console.error("Error finalizing processed refund via webhook:", refErr);
+          return NextResponse.json(
+            { error: refErr?.message || "Refund finalization failed" },
+            { status: 500 }
+          );
+        }
+        break;
+      }
+
+      case "refund.pending": {
+        try {
+          await updateRefundStatus("pending", data);
+        } catch (err: any) {
+          console.error("Error updating refund.pending via webhook:", err);
+          return NextResponse.json(
+            { error: err?.message || "Failed to update refund status" },
+            { status: 500 }
+          );
+        }
+        break;
+      }
+
+      case "refund.processing": {
+        try {
+          await updateRefundStatus("processing", data);
+        } catch (err: any) {
+          console.error("Error updating refund.processing via webhook:", err);
+          return NextResponse.json(
+            { error: err?.message || "Failed to update refund status" },
+            { status: 500 }
+          );
+        }
+        break;
+      }
+
+      case "refund.needs-attention": {
+        try {
+          await updateRefundStatus("needs_attention", data);
+        } catch (err: any) {
+          console.error("Error updating refund.needs-attention via webhook:", err);
+          return NextResponse.json(
+            { error: err?.message || "Failed to update refund status" },
+            { status: 500 }
+          );
         }
         break;
       }
 
       case "refund.failed": {
-        const transactionRef =
-          data?.transaction_reference || data?.transaction?.reference;
-        if (transactionRef) {
-          const ordersSnap = await adminDb
-            .collection("orders")
-            .where("paystackReference", "==", transactionRef)
-            .limit(1)
-            .get();
-
-          if (!ordersSnap.empty) {
-            await ordersSnap.docs[0].ref.update({
-              refundStatus: "failed",
-              refundFailureReason: data?.status || "Paystack refund failed.",
-              updatedAt: new Date().toISOString(),
-            });
-          }
+        try {
+          await updateRefundStatus("failed", data);
+        } catch (err: any) {
+          console.error("Error updating refund.failed via webhook:", err);
+          return NextResponse.json(
+            { error: err?.message || "Failed to update refund status" },
+            { status: 500 }
+          );
         }
         break;
       }
@@ -84,10 +128,11 @@ export async function POST(req: Request): Promise<NextResponse> {
         break;
     }
 
-    // Always respond 200 to acknowledge webhook receipt
+    // Acknowledge successfully processed or replayed webhook
     return NextResponse.json({ received: true }, { status: 200 });
   } catch (err: any) {
     console.error("Unhandled error in Paystack webhook handler:", err);
     return NextResponse.json({ error: "Webhook processing error" }, { status: 500 });
   }
 }
+
