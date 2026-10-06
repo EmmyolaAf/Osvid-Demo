@@ -133,12 +133,33 @@ service cloud.firestore {
     match /products/{productId} {
       allow read: if true; // Public catalog
 
-      // Product creation: requires catalogue permission.
+      // Helper validating product creation schema and core field types (Packet 3C)
+      function isValidProductCreateData() {
+        let data = request.resource.data;
+        return data.keys().hasOnly([
+          'id', 'name', 'slug', 'description', 'price', 'discountPrice',
+          'stockQuantity', 'category', 'categorySlug', 'categoryName',
+          'imageUrl', 'images', 'galleryImages', 'unit', 'sku',
+          'isFeatured', 'isActive', 'features', 'specifications',
+          'suggestedProductIds', 'crossSells', 'tags',
+          'createdAt', 'updatedAt'
+        ]) &&
+        ('name' in data && data.name is string && data.name.size() > 0) &&
+        ('price' in data && data.price is number && data.price >= 0) &&
+        (!('stockQuantity' in data) || (data.stockQuantity is number && data.stockQuantity == 0)) &&
+        (!('isActive' in data) || data.isActive is bool) &&
+        (!('slug' in data) || data.slug is string) &&
+        (!('sku' in data) || data.sku is string) &&
+        (!('unit' in data) || data.unit is string) &&
+        (!('category' in data) || data.category is string);
+      }
+
+      // Product creation: requires catalogue permission and strict create schema validation.
       // Super Admin may bypass subscription gating for administrative recovery,
-      // but stockQuantity MUST still be 0 or omitted for ALL client callers!
+      // but stockQuantity MUST still be 0 or omitted and only allowed catalogue fields may be written!
       allow create: if hasManagerPermission('canManageProducts') &&
         (isSuperAdmin() || isSubscriptionOperational()) &&
-        (!('stockQuantity' in request.resource.data) || request.resource.data.stockQuantity == 0);
+        isValidProductCreateData();
 
       // Product updates: catalogue management allowed, but stockQuantity MUST NOT be
       // directly changed by ANY browser caller (including Super Admin).

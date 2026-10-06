@@ -86,16 +86,17 @@ test("Inventory: direct browser stock write is denied by firestore.rules", () =>
   const nextSection = productSection.indexOf("match /categories");
   const productRules = productSection.slice(0, nextSection);
 
-  // Products collection enforces explicit catalogue field allowlist that excludes stockQuantity
-  assert.match(productRules, /affectedKeys\(\)\.hasOnly\(\[/);
-  assert.match(productRules, /'name'/);
-  assert.match(productRules, /'price'/);
-  assert.doesNotMatch(productRules, /hasOnly\(\[[^\]]*'stockQuantity'/);
+  // Products collection enforces explicit catalogue field allowlist that excludes stockQuantity on UPDATE
+  const updateSection = productRules.slice(productRules.indexOf("allow update:"));
+  assert.match(updateSection, /affectedKeys\(\)\.hasOnly\(\[/);
+  assert.match(updateSection, /'name'/);
+  assert.match(updateSection, /'price'/);
+  assert.doesNotMatch(updateSection, /hasOnly\(\[[^\]]*'stockQuantity'/);
 
   // Products creation strictly enforces stockQuantity == 0 (or omitted) for all callers including Super Admin
   assert.match(
     productRules,
-    /\(!\('stockQuantity' in request\.resource\.data\) \|\| request\.resource\.data\.stockQuantity == 0\)/
+    /\(!\('stockQuantity' in data\) \|\| \(data\.stockQuantity is number && data\.stockQuantity == 0\)\)/
   );
 });
 
@@ -736,12 +737,13 @@ test("Stock Rules: Super Admin browser cannot directly alter stockQuantity or cr
   // Creation: stockQuantity must be 0 or omitted for all callers including Super Admin
   assert.match(
     snippet,
-    /\(!\('stockQuantity' in request\.resource\.data\) \|\| request\.resource\.data\.stockQuantity == 0\)/
+    /\(!\('stockQuantity' in data\) \|\| \(data\.stockQuantity is number && data\.stockQuantity == 0\)\)/
   );
 
   // Update: uses affectedKeys().hasOnly() allowlist that excludes stockQuantity
-  assert.match(snippet, /request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\.hasOnly\(\[/);
-  assert.doesNotMatch(snippet, /hasOnly\(\[[^\]]*'stockQuantity'/);
+  const updateSnippet = snippet.slice(snippet.indexOf("allow update:"));
+  assert.match(updateSnippet, /request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\.hasOnly\(\[/);
+  assert.doesNotMatch(updateSnippet, /hasOnly\(\[[^\]]*'stockQuantity'/);
 });
 
 test("Stock Rules: product catalogue updates use explicit field allowlist", () => {
@@ -910,4 +912,213 @@ test("Inventory Request ID: normal generated requestId remains valid", () => {
   assert.equal(REQUEST_ID_REGEX.test(normalId2), true);
   assert.equal(REQUEST_ID_REGEX.test(normalId3), true);
   assert.equal(normalId1.length <= 128, true);
+});
+
+// ===============================================================
+// 6. PACKET 3C PRODUCT CREATION SCHEMA TESTS
+// ===============================================================
+
+const ALLOWED_PRODUCT_CREATE_KEYS = new Set([
+  "id", "name", "slug", "description", "price", "discountPrice",
+  "stockQuantity", "category", "categorySlug", "categoryName",
+  "imageUrl", "images", "galleryImages", "unit", "sku",
+  "isFeatured", "isActive", "features", "specifications",
+  "suggestedProductIds", "crossSells", "tags",
+  "createdAt", "updatedAt"
+]);
+
+function simulateProductCreateRule(docData: any): { allowed: boolean; reason?: string } {
+  if (!docData || typeof docData !== "object") {
+    return { allowed: false, reason: "docData must be an object" };
+  }
+
+  // 1. Explicit allowlist check: all keys must be in ALLOWED_PRODUCT_CREATE_KEYS
+  const keys = Object.keys(docData);
+  const unallowed = keys.filter((k) => !ALLOWED_PRODUCT_CREATE_KEYS.has(k));
+  if (unallowed.length > 0) {
+    return { allowed: false, reason: `Unallowed fields present: ${unallowed.join(", ")}` };
+  }
+
+  // 2. Name is string and non-empty
+  if (!("name" in docData) || typeof docData.name !== "string" || docData.name.trim().length === 0) {
+    return { allowed: false, reason: "name must be a non-empty string" };
+  }
+
+  // 3. Price is number and >= 0
+  if (!("price" in docData) || typeof docData.price !== "number" || isNaN(docData.price) || docData.price < 0) {
+    return { allowed: false, reason: "price must be a non-negative number" };
+  }
+
+  // 4. stockQuantity, if present, is numeric and exactly 0
+  if ("stockQuantity" in docData) {
+    if (typeof docData.stockQuantity !== "number" || docData.stockQuantity !== 0) {
+      return { allowed: false, reason: "stockQuantity on creation must be 0" };
+    }
+  }
+
+  // 5. isActive, if present, is boolean
+  if ("isActive" in docData && typeof docData.isActive !== "boolean") {
+    return { allowed: false, reason: "isActive must be a boolean" };
+  }
+
+  // 6. slug, if present, is string
+  if ("slug" in docData && typeof docData.slug !== "string") {
+    return { allowed: false, reason: "slug must be a string" };
+  }
+
+  // 7. sku, if present, is string
+  if ("sku" in docData && typeof docData.sku !== "string") {
+    return { allowed: false, reason: "sku must be a string" };
+  }
+
+  // 8. unit, if present, is string
+  if ("unit" in docData && typeof docData.unit !== "string") {
+    return { allowed: false, reason: "unit must be a string" };
+  }
+
+  // 9. category, if present, is string
+  if ("category" in docData && typeof docData.category !== "string") {
+    return { allowed: false, reason: "category must be a string" };
+  }
+
+  return { allowed: true };
+}
+
+test("Product Create Schema: legitimate current product creation fields are permitted", () => {
+  const legitimateDoc = {
+    id: "prod-992",
+    name: "Industrial Hydrochloric Acid 33%",
+    slug: "industrial-hydrochloric-acid-33",
+    description: "Premium grade chemical formulation for industrial use.",
+    price: 45000,
+    discountPrice: 42000,
+    stockQuantity: 0,
+    category: "Industrial Chemicals",
+    categorySlug: "industrial-chemicals",
+    categoryName: "Industrial Chemicals",
+    imageUrl: "/images/placeholder.webp",
+    images: ["/images/placeholder.webp"],
+    galleryImages: ["/images/placeholder.webp"],
+    unit: "drum",
+    sku: "SKU-HCL-33",
+    isFeatured: true,
+    isActive: true,
+    features: ["Corrosion resistant container"],
+    specifications: { concentration: "33%" },
+    suggestedProductIds: ["prod-881"],
+    crossSells: [],
+    tags: ["acid", "industrial"],
+    createdAt: "2026-10-06T12:00:00.000Z",
+    updatedAt: "2026-10-06T12:00:00.000Z",
+  };
+
+  const result = simulateProductCreateRule(legitimateDoc);
+  assert.equal(result.allowed, true);
+});
+
+test("Product Create Schema: positive stockQuantity at creation remains forbidden", () => {
+  const docWithPositiveStock = {
+    name: "Sodium Hydroxide Pellets",
+    price: 30000,
+    stockQuantity: 50, // Positive stock forbidden!
+  };
+
+  const result = simulateProductCreateRule(docWithPositiveStock);
+  assert.equal(result.allowed, false);
+  assert.match(result.reason || "", /stockQuantity on creation must be 0/);
+});
+
+test("Product Create Schema: arbitrary fields such as internalCostBasis, serverOnlyMetadata, paymentOverride are rejected", () => {
+  const baseDoc = { name: "Chemical X", price: 10000, stockQuantity: 0 };
+
+  // 1. internalCostBasis rejected
+  assert.equal(
+    simulateProductCreateRule({ ...baseDoc, internalCostBasis: 5000 }).allowed,
+    false
+  );
+
+  // 2. serverOnlyMetadata rejected
+  assert.equal(
+    simulateProductCreateRule({ ...baseDoc, serverOnlyMetadata: { secret: 123 } }).allowed,
+    false
+  );
+
+  // 3. paymentOverride rejected
+  assert.equal(
+    simulateProductCreateRule({ ...baseDoc, paymentOverride: true }).allowed,
+    false
+  );
+});
+
+test("Product Create Schema: Product Manager cannot smuggle future server-owned fields during creation", () => {
+  const baseDoc = { name: "Chemical Y", price: 20000, stockQuantity: 0 };
+
+  assert.equal(simulateProductCreateRule({ ...baseDoc, auditLogs: [] }).allowed, false);
+  assert.equal(simulateProductCreateRule({ ...baseDoc, createdByServer: true }).allowed, false);
+  assert.equal(simulateProductCreateRule({ ...baseDoc, billingStatus: "paid" }).allowed, false);
+  assert.equal(simulateProductCreateRule({ ...baseDoc, providerFee: 1500 }).allowed, false);
+});
+
+test("Product Create Schema: Super Admin browser creation is subject to the same product schema and stock-zero restriction", () => {
+  const rulesPath = path.resolve(process.cwd(), "firestore.rules");
+  const rules = fs.readFileSync(rulesPath, "utf-8");
+
+  const productBlock = rules.slice(rules.indexOf("match /products/{productId}"));
+  const snippet = productBlock.slice(0, productBlock.indexOf("match /categories"));
+
+  // Both Super Admin and Staff are subject to isValidProductCreateData()
+  assert.match(snippet, /allow create:\s*if hasManagerPermission\('canManageProducts'\)/);
+  assert.match(snippet, /\(isSuperAdmin\(\) \|\| isSubscriptionOperational\(\)\)/);
+  assert.match(snippet, /isValidProductCreateData\(\);/);
+
+  // Super Admin cannot bypass isValidProductCreateData() because it is AND'ed
+  assert.doesNotMatch(snippet, /allow create:\s*if isSuperAdmin\(\)\s*\|\|/);
+});
+
+test("Product Create Schema: core field type validation rejects invalid name, price, isActive, etc.", () => {
+  // Empty name
+  assert.equal(simulateProductCreateRule({ name: "", price: 1000 }).allowed, false);
+  assert.equal(simulateProductCreateRule({ name: "   ", price: 1000 }).allowed, false);
+
+  // Negative price
+  assert.equal(simulateProductCreateRule({ name: "Acid", price: -500 }).allowed, false);
+
+  // Non-number price
+  assert.equal(simulateProductCreateRule({ name: "Acid", price: "free" as any }).allowed, false);
+
+  // Non-boolean isActive
+  assert.equal(simulateProductCreateRule({ name: "Acid", price: 1000, isActive: "yes" as any }).allowed, false);
+
+  // Non-string SKU
+  assert.equal(simulateProductCreateRule({ name: "Acid", price: 1000, sku: 12345 as any }).allowed, false);
+
+  // Non-string category
+  assert.equal(simulateProductCreateRule({ name: "Acid", price: 1000, category: ["invalid"] as any }).allowed, false);
+});
+
+test("Product Create Schema: firestore.rules explicitly validates keys().hasOnly allowlist", () => {
+  const rulesPath = path.resolve(process.cwd(), "firestore.rules");
+  const rules = fs.readFileSync(rulesPath, "utf-8");
+
+  const productBlock = rules.slice(rules.indexOf("match /products/{productId}"));
+  const snippet = productBlock.slice(0, productBlock.indexOf("match /categories"));
+
+  // Check function definition and keys().hasOnly() allowlist
+  assert.match(snippet, /function isValidProductCreateData\(\)/);
+  assert.match(snippet, /data\.keys\(\)\.hasOnly\(\[/);
+
+  // Check core field type rules in firestore.rules
+  assert.match(snippet, /data\.name is string && data\.name\.size\(\) > 0/);
+  assert.match(snippet, /data\.price is number && data\.price >= 0/);
+  assert.match(snippet, /data\.stockQuantity is number && data\.stockQuantity == 0/);
+  assert.match(snippet, /data\.isActive is bool/);
+  assert.match(snippet, /data\.slug is string/);
+  assert.match(snippet, /data\.sku is string/);
+  assert.match(snippet, /data\.unit is string/);
+  assert.match(snippet, /data\.category is string/);
+
+  // Check that arbitrary fields are NOT in the allowlist
+  assert.doesNotMatch(snippet, /'internalCostBasis'/);
+  assert.doesNotMatch(snippet, /'serverOnlyMetadata'/);
+  assert.doesNotMatch(snippet, /'paymentOverride'/);
 });
