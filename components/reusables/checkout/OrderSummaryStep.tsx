@@ -1,9 +1,7 @@
 // components/checkout/OrderSummaryStep.tsx
 "use client";
 
-/* eslint-disable  @typescript-eslint/no-explicit-any */
-
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useCheckout } from "@/providers/CheckoutProvider";
 import { useCart } from "@/providers/CartProvider";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,13 +15,11 @@ import {
   ShieldCheck,
   Tag,
   X,
-  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
-import { initPaystack, handlePayment } from "@/lib/payment";
+import { initPaystack, resumePayment } from "@/lib/payment";
 import { OrderItemsList } from "./OrderItemsList";
 import formatCurrency from "@/helpers/formatCurrency";
-import { validateDiscountCode, incrementDiscountUsage } from "@/lib/firebase/firestore";
 
 type PaymentStatus = "idle" | "processing" | "success" | "failed";
 
@@ -44,25 +40,70 @@ export function OrderSummaryStep() {
     discountValue: number;
   } | null>(null);
 
-  const { subtotal, shippingFee, discountAmount, total } = useMemo(() => {
-    const rawSubtotal = cart.reduce(
+  // Server Authoritative Quote State
+  const [quoteTotals, setQuoteTotals] = useState<{
+    subtotal: number;
+    shippingFee: number;
+    discountAmount: number;
+    total: number;
+  }>(() => {
+    // Initial fallback preview while server quote loads
+    const fallbackSubtotal = cart.reduce(
       (sum, item) =>
         sum +
-        (item.priceData.discountedPrice || item.priceData.price) *
-          item.quantity,
+        (item.priceData.discountedPrice || item.priceData.price) * item.quantity,
       0
     );
-    const shipping = checkoutData.deliveryMethod === "shipping" ? 0 : 0;
-    const discount = appliedDiscount ? appliedDiscount.discountAmount : 0;
-    const finalTotal = Math.max(0, rawSubtotal - discount + shipping);
-
     return {
-      subtotal: rawSubtotal,
-      shippingFee: shipping,
-      discountAmount: discount,
-      total: finalTotal,
+      subtotal: fallbackSubtotal,
+      shippingFee: 0,
+      discountAmount: 0,
+      total: fallbackSubtotal,
     };
-  }, [cart, checkoutData.deliveryMethod, appliedDiscount]);
+  });
+
+  // Fetch Authoritative Server Quote
+  const fetchAuthoritativeQuote = async (couponToUse?: string) => {
+    if (cart.length === 0) return;
+
+    try {
+      const res = await fetch("/api/checkout/quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: cart.map((it) => ({
+            productId: it.id,
+            quantity: it.quantity,
+          })),
+          deliveryMethod: checkoutData.deliveryMethod,
+          shippingAddress: checkoutData.shippingAddress,
+          pickupLocationId: checkoutData.pickupLocationId,
+          couponCode: couponToUse !== undefined ? couponToUse : appliedDiscount?.code,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setQuoteTotals({
+          subtotal: data.subtotal,
+          shippingFee: data.shippingFee,
+          discountAmount: data.discountAmount,
+          total: data.totalAmount,
+        });
+
+        if (data.coupon) {
+          setAppliedDiscount({
+            code: data.coupon.code,
+            discountAmount: data.discountAmount,
+            discountType: data.coupon.discountType,
+            discountValue: data.coupon.discountValue,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn("Could not retrieve server quote:", err);
+    }
+  };
 
   useEffect(() => {
     const initializePayment = async () => {
@@ -78,31 +119,60 @@ export function OrderSummaryStep() {
     initializePayment();
   }, []);
 
+  // Update server quote when cart or delivery method changes
+  useEffect(() => {
+    fetchAuthoritativeQuote();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart, checkoutData.deliveryMethod]);
+
   const handleApplyCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!couponInput.trim()) {
+    const code = couponInput.trim().toUpperCase();
+    if (!code) {
       toast.error("Please enter a coupon code.");
       return;
     }
 
     try {
       setValidatingCoupon(true);
-      const res = await validateDiscountCode(couponInput, subtotal);
+      const res = await fetch("/api/checkout/quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: cart.map((it) => ({
+            productId: it.id,
+            quantity: it.quantity,
+          })),
+          deliveryMethod: checkoutData.deliveryMethod,
+          shippingAddress: checkoutData.shippingAddress,
+          pickupLocationId: checkoutData.pickupLocationId,
+          couponCode: code,
+        }),
+      });
 
-      if (!res.success || !res.valid || !res.discount) {
-        toast.error(res.error || "Invalid coupon code.");
+      const data = await res.json();
+
+      if (!data.success || !data.coupon) {
+        toast.error(data.error || "Invalid coupon code.");
         return;
       }
 
       setAppliedDiscount({
-        code: res.discount.code,
-        discountAmount: res.discountAmount,
-        discountType: res.discount.discountType,
-        discountValue: res.discount.discountValue,
+        code: data.coupon.code,
+        discountAmount: data.discountAmount,
+        discountType: data.coupon.discountType,
+        discountValue: data.coupon.discountValue,
+      });
+
+      setQuoteTotals({
+        subtotal: data.subtotal,
+        shippingFee: data.shippingFee,
+        discountAmount: data.discountAmount,
+        total: data.totalAmount,
       });
 
       toast.success(
-        `Coupon "${res.discount.code}" applied! Saved ₦${res.discountAmount.toLocaleString()}`
+        `Coupon "${data.coupon.code}" applied! Saved ₦${data.discountAmount.toLocaleString()}`
       );
       setCouponInput("");
     } catch (err: any) {
@@ -114,6 +184,7 @@ export function OrderSummaryStep() {
 
   const handleRemoveCoupon = () => {
     setAppliedDiscount(null);
+    fetchAuthoritativeQuote("");
     toast.info("Coupon removed.");
   };
 
@@ -121,7 +192,10 @@ export function OrderSummaryStep() {
     if (!isPaystackReady || paymentStatus === "processing") return;
 
     setPaymentStatus("processing");
-    const toastId = toast.loading("Connecting to Paystack...");
+    const toastId = toast.loading("Preparing secure checkout session...");
+
+    let activeSessionId: string | null = null;
+    let activeReleaseToken: string | null = null;
 
     try {
       // Validate contact info
@@ -133,86 +207,111 @@ export function OrderSummaryStep() {
         throw new Error("Your cart is empty. Please add items before checking out.");
       }
 
-      // Generate unique order ID
-      const orderId = `ORD-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-      const amountInKobo = Math.round(total * 100);
+      const checkoutRequestId = `crq_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
-      // 1. Process payment with Paystack popup
-      const paymentData = await handlePayment({
-        email: checkoutData.contactInfo.email,
-        amount: amountInKobo,
-        metadata: {
-          orderId,
-          customerName: checkoutData.contactInfo.name,
-          userId: user?.uid || undefined,
-          couponCode: appliedDiscount?.code || undefined,
-          discountAmount: appliedDiscount?.discountAmount || 0,
-          items: JSON.stringify(
-            cart.map((item) => ({
-              productId: item.id,
-              name: item.name,
-              quantity: item.quantity,
-              price: item.priceData.discountedPrice || item.priceData.price,
-            }))
-          ),
+      // Attach genuine authenticated ID token if customer is logged in
+      let authHeaders: Record<string, string> = {};
+      if (user) {
+        try {
+          const idToken = await user.getIdToken();
+          if (idToken) {
+            authHeaders = { Authorization: `Bearer ${idToken}` };
+          }
+        } catch (tokErr) {
+          console.warn("Could not read auth token:", tokErr);
+        }
+      }
+
+      // 1. Initialize payment server-side (reserves stock and coupon, creates checkout session)
+      const initRes = await fetch("/api/payment/initialize", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders,
         },
+        body: JSON.stringify({
+          checkoutRequestId,
+          items: cart.map((it) => ({
+            productId: it.id,
+            quantity: it.quantity,
+          })),
+          customerInfo: checkoutData.contactInfo,
+          deliveryMethod: checkoutData.deliveryMethod,
+          shippingAddress: checkoutData.shippingAddress,
+          pickupLocationId: checkoutData.pickupLocationId,
+          couponCode: appliedDiscount?.code,
+        }),
       });
 
-      toast.loading("Verifying payment and writing order to database...", { id: toastId });
+      const initData = await initRes.json();
 
-      // 2. Verify payment server-side and write directly into Firestore
+      if (!initData.success || !initData.accessCode) {
+        throw new Error(initData.error || "Failed to initialize payment session with server.");
+      }
+
+      activeSessionId = initData.checkoutSessionId;
+      activeReleaseToken = initData.releaseToken || null;
+
+      toast.loading("Awaiting Paystack payment...", { id: toastId });
+
+      // 2. Open Paystack Popup V2 with server-generated access code
+      let paymentSuccessRef: string | null = null;
+
+      try {
+        const popupResult = await resumePayment({
+          accessCode: initData.accessCode,
+          onCancel: () => {
+            // Promptly release reservation on cancellation
+            if (activeSessionId) {
+              fetch("/api/checkout/release", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  checkoutSessionId: activeSessionId,
+                  releaseToken: activeReleaseToken,
+                }),
+              }).catch((e) => console.warn("Release reservation notice:", e));
+            }
+          },
+        });
+
+        paymentSuccessRef = popupResult.reference;
+      } catch (popupErr: any) {
+        // User closed modal or popup error
+        setPaymentStatus("idle");
+        toast.dismiss(toastId);
+        return;
+      }
+
+      toast.loading("Verifying payment and finalizing order...", { id: toastId });
+
+      // 3. Post-payment reconciliation endpoint (converges with webhook)
       const verificationResponse = await fetch("/api/payment/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          reference: paymentData.reference,
-          email: checkoutData.contactInfo.email,
-          orderData: {
-            orderId,
-            userId: user?.uid || undefined,
-            items: cart.map((item) => ({
-              productId: item.id,
-              name: item.name,
-              quantity: item.quantity,
-              price: item.priceData.discountedPrice || item.priceData.price,
-              imageUrl: item.imageUrl,
-              unit: item.variant,
-            })),
-            total,
-            subtotal,
-            shippingFee,
-            discountAmount,
-            couponCode: appliedDiscount?.code,
-            currency: "NGN",
-            deliveryMethod: checkoutData.deliveryMethod,
-            shippingAddress: checkoutData.shippingAddress,
-            pickupLocationId: checkoutData.pickupLocationId,
-            customerInfo: checkoutData.contactInfo,
-          },
+          reference: paymentSuccessRef || initData.reference,
+          checkoutSessionId: activeSessionId,
         }),
       });
-
-      const contentType = verificationResponse.headers.get("content-type");
-      if (!contentType?.includes("application/json")) {
-        throw new Error("Payment server returned an invalid response format.");
-      }
 
       const verificationResult = await verificationResponse.json();
 
       if (!verificationResult.success) {
-        throw new Error(
-          verificationResult.error || "Payment verification could not be completed."
-        );
+        if (verificationResult.anomaly) {
+          toast.error("Item stock was unavailable. A safe refund has been initiated.", {
+            id: toastId,
+          });
+        } else {
+          throw new Error(
+            verificationResult.error || "Payment verification could not be completed."
+          );
+        }
+        setPaymentStatus("failed");
+        return;
       }
 
-      // If a coupon was applied, increment its usage in Firestore
-      if (appliedDiscount?.code) {
-        incrementDiscountUsage(appliedDiscount.code).catch((err) =>
-          console.warn("Usage increment notice:", err)
-        );
-      }
-
-      // 3. ONLY clear cart and proceed upon verified success
+      // 4. ONLY clear cart and proceed upon verified server finalization
       setPaymentStatus("success");
       clearCart();
       goToNextStep();
@@ -224,11 +323,11 @@ export function OrderSummaryStep() {
       } else {
         toast.success("Payment verified! Your order has been placed.", {
           id: toastId,
-          description: `Order #${orderId} is being prepared for dispatch.`,
+          description: `Order #${verificationResult.data?.orderId || ""} is being prepared.`,
         });
       }
     } catch (error: any) {
-      console.error("Payment or database write error:", error);
+      console.error("Payment error:", error);
       setPaymentStatus("failed");
 
       let errorMessage = "Payment could not be processed.";
@@ -260,7 +359,7 @@ export function OrderSummaryStep() {
       variant: "destructive" as const,
     },
     idle: {
-      text: `Pay ${formatCurrency("NGN", total)} with Paystack`,
+      text: `Pay ${formatCurrency("NGN", quoteTotals.total)} with Paystack`,
       icon: null,
       disabled: !isPaystackReady || cart.length === 0,
       variant: "default" as const,
@@ -343,9 +442,11 @@ export function OrderSummaryStep() {
 
             <div className="space-y-2.5 text-sm pt-1">
               <div className="flex items-center justify-between">
-                <span className="text-slate-500 font-medium text-xs">Subtotal ({cart.length} items):</span>
+                <span className="text-slate-500 font-medium text-xs">
+                  Subtotal ({cart.length} items):
+                </span>
                 <span className="font-bold text-slate-800 text-xs">
-                  {formatCurrency("NGN", subtotal)}
+                  {formatCurrency("NGN", quoteTotals.subtotal)}
                 </span>
               </div>
 
@@ -353,7 +454,7 @@ export function OrderSummaryStep() {
                 <div className="flex items-center justify-between text-emerald-600">
                   <span className="font-medium text-xs">Discount Savings:</span>
                   <span className="font-bold text-xs">
-                    -{formatCurrency("NGN", discountAmount)}
+                    -{formatCurrency("NGN", quoteTotals.discountAmount)}
                   </span>
                 </div>
               )}
@@ -370,7 +471,7 @@ export function OrderSummaryStep() {
               <div className="border-t border-slate-200 pt-3 flex items-center justify-between">
                 <span className="font-black text-slate-900">Total Amount:</span>
                 <span className="font-black text-xl text-orange-600">
-                  {formatCurrency("NGN", total)}
+                  {formatCurrency("NGN", quoteTotals.total)}
                 </span>
               </div>
             </div>

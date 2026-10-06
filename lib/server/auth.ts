@@ -81,6 +81,13 @@ export function extractBearerToken(req: NextRequest | Request): string | null {
 }
 
 /**
+ * Verifies a Firebase ID token using the Firebase Admin SDK.
+ */
+export async function verifyAuthToken(token: string): Promise<DecodedIdToken> {
+  return adminAuth.verifyIdToken(token);
+}
+
+/**
  * Resolves a verified caller into a ServerAuthUser with trusted roles & permissions.
  */
 export async function resolveServerUser(

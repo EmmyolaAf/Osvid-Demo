@@ -100,3 +100,25 @@ export async function assertOperationalSubscription(
     );
   }
 }
+
+/**
+ * Public storefront operational check (e.g. checkout / order placement).
+ * Non-Super-Admin storefront operations fail closed if the store subscription is suspended.
+ */
+export async function assertStoreOperationalSubscription(
+  fetchSubscriptionSnap?: () => Promise<{ exists: boolean; data: () => any }>
+): Promise<void> {
+  const storefrontCaller: ServerAuthUser = {
+    uid: "storefront",
+    email: "storefront@osvid.internal",
+    role: "user",
+    isSuperAdmin: false,
+    isAdmin: false,
+    isManager: false,
+    isStaff: false,
+    isCustomer: true,
+    isActive: true,
+    tokenClaims: {},
+  };
+  return assertOperationalSubscription(storefrontCaller, fetchSubscriptionSnap);
+}

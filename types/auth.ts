@@ -135,6 +135,7 @@ export interface DiscountCode {
   minOrderAmount?: number;
   maxUsageLimit?: number;
   usageCount: number;
+  reservedUsageCount?: number;
   isActive: boolean;
   expiryDate?: string;
   createdAt: string;
@@ -188,6 +189,8 @@ export interface Order {
   items: OrderItem[];
   subtotal: number;
   shippingFee: number;
+  discountAmount?: number;
+  couponCode?: string;
   totalAmount: number;
   paymentStatus: PaymentStatus;
   orderStatus: OrderStatus;
@@ -195,6 +198,11 @@ export interface Order {
   trackingNumber?: string;
   notes?: string;
   statusHistory?: OrderHistoryEvent[];
+  refundStatus?: "pending" | "processing" | "processed" | "failed";
+  refundReason?: string;
+  refundReference?: string;
+  refundRequestedAt?: string;
+  refundedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -219,6 +227,7 @@ export interface Product {
   price: number;
   discountPrice?: number;
   stockQuantity: number;
+  reservedQuantity?: number;
   category: string;
   categorySlug?: string;
   imageUrl: string;

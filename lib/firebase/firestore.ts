@@ -1144,24 +1144,12 @@ export async function validateDiscountCode(
   }
 }
 
-export async function incrementDiscountUsage(code: string): Promise<void> {
-  try {
-    const q = query(
-      collection(db, "discounts"),
-      where("code", "==", code.trim().toUpperCase()),
-      limit(1)
-    );
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      const docRef = snap.docs[0].ref;
-      const current = (snap.docs[0].data().usageCount || 0) as number;
-      await updateDoc(docRef, {
-        usageCount: current + 1,
-      });
-    }
-  } catch (err) {
-    console.warn("Could not increment discount usage count:", err);
-  }
+/**
+ * @deprecated Removed as source of truth in Packet 4.
+ * Discount usage is now incremented atomically server-side during payment finalization.
+ */
+export async function incrementDiscountUsage(_code: string): Promise<void> {
+  // No-op on client: Server payment finalizer atomically increments usageCount in Firestore Admin SDK.
 }
 
 // ==========================================

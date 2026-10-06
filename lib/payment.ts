@@ -1,91 +1,107 @@
 // lib/payment.ts
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
-type PaystackOptions = {
-  key: string;
-  email: string;
-  amount: number; // in Naira
-  metadata?: Record<string, any>;
-  onClose?: () => void;
-  onSuccess?: (response: PaystackResponse) => void;
-};
-
-type PaystackResponse = {
+export interface PaystackTransactionSuccess {
   reference: string;
-  status: "success" | "failed";
-  message: string;
-  metadata: Record<string, any>;
-};
+  status: "success";
+  id?: string | number;
+}
 
 declare global {
   interface Window {
-    PaystackPop?: {
-      setup: (options: any) => {
-        openIframe: () => void;
-      };
-    };
+    PaystackPop?: any;
   }
 }
 
+/**
+ * Loads Paystack Inline Popup V2 script into document head/body.
+ */
 export const initPaystack = (): Promise<void> => {
   return new Promise((resolve, reject) => {
+    if (typeof window === "undefined") {
+      return resolve();
+    }
+
     if (window.PaystackPop) {
       return resolve(); // Already loaded
     }
 
+    // Check if script tag is already in DOM
+    const existingScript = document.querySelector(
+      'script[src="https://js.paystack.co/v2/inline.js"]'
+    );
+    if (existingScript) {
+      existingScript.addEventListener("load", () => resolve());
+      existingScript.addEventListener("error", () =>
+        reject(new Error("Failed to load Paystack V2 script"))
+      );
+      return;
+    }
+
     const script = document.createElement("script");
-    script.src = "https://js.paystack.co/v1/inline.js";
+    script.src = "https://js.paystack.co/v2/inline.js";
     script.async = true;
 
     script.onload = () => {
       if (window.PaystackPop) {
         resolve();
       } else {
-        reject(new Error("Paystack failed to initialize"));
+        reject(new Error("Paystack V2 failed to initialize in window."));
       }
     };
 
-    script.onerror = () => reject(new Error("Failed to load Paystack script"));
+    script.onerror = () => reject(new Error("Failed to load Paystack V2 script"));
 
     document.body.appendChild(script);
   });
 };
 
-export const handlePayment = ({
-  email,
-  amount,
-  metadata,
-  onClose,
+export interface ResumePaymentOptions {
+  accessCode: string;
+  onCancel?: () => void;
+  onSuccess?: (response: PaystackTransactionSuccess) => void;
+}
+
+/**
+ * Resumes a server-initialized Paystack transaction using the official Popup V2 flow.
+ * The browser never chooses the amount, reference, or authoritative metadata.
+ */
+export const resumePayment = ({
+  accessCode,
+  onCancel,
   onSuccess,
-}: Omit<PaystackOptions, "key">): Promise<PaystackResponse> => {
+}: ResumePaymentOptions): Promise<PaystackTransactionSuccess> => {
   return new Promise((resolve, reject) => {
-    if (!window.PaystackPop) {
-      return reject(new Error("Paystack is not initialized"));
+    if (typeof window === "undefined" || !window.PaystackPop) {
+      return reject(new Error("Paystack V2 popup is not initialized."));
     }
 
-    const paystack = window.PaystackPop.setup({
-      key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-      email,
-      amount: amount, // Convert to kobo
-      currency: "NGN",
-      metadata,
-      callback: (response: any) => {
-        const fullResponse: PaystackResponse = {
-          reference: response.reference,
-          status: "success",
-          message: "Payment complete",
-          metadata: metadata || {},
-        };
-        if (onSuccess) onSuccess(fullResponse);
-        resolve(fullResponse);
-      },
-      onClose: () => {
-        if (onClose) onClose();
-        reject(new Error("Payment closed by user"));
-      },
-    });
+    if (!accessCode) {
+      return reject(new Error("Missing access_code for Paystack transaction."));
+    }
 
-    paystack.openIframe();
+    try {
+      const popup = new window.PaystackPop();
+
+      popup.resumeTransaction(accessCode, {
+        onSuccess: (transaction: any) => {
+          const res: PaystackTransactionSuccess = {
+            reference: transaction.reference,
+            status: "success",
+            id: transaction.id,
+          };
+          if (onSuccess) onSuccess(res);
+          resolve(res);
+        },
+        onCancel: () => {
+          if (onCancel) onCancel();
+          reject(new Error("Payment window was closed by the user."));
+        },
+        onError: (err: any) => {
+          reject(new Error(err?.message || "An error occurred in Paystack popup."));
+        },
+      });
+    } catch (err: any) {
+      reject(new Error(`Failed to launch Paystack popup: ${err?.message || String(err)}`));
+    }
   });
 };

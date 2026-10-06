@@ -218,8 +218,24 @@ service cloud.firestore {
     // 4. DISCOUNTS & PROMOTIONS
     // ===============================================================
     match /discounts/{discountId} {
-      allow read: if true; // Public checkout code validation
-      allow write: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageDiscounts'));
+      // Direct coupon evaluation is now server-authoritative via /api/checkout/quote.
+      // Customer read access is no longer needed; read access is restricted to staff with discount authority.
+      allow read: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageDiscounts'));
+
+      // Creation: staff with discount authority; usageCount and reservedUsageCount must be 0 or omitted
+      allow create: if (isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageDiscounts'))) &&
+        (!('reservedUsageCount' in request.resource.data) || request.resource.data.reservedUsageCount == 0) &&
+        (!('usageCount' in request.resource.data) || request.resource.data.usageCount == 0);
+
+      // Update: staff with discount authority; usageCount and reservedUsageCount are server-controlled
+      allow update: if (isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageDiscounts'))) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['reservedUsageCount']) ||
+         request.resource.data.reservedUsageCount == resource.data.reservedUsageCount) &&
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['usageCount']) ||
+         request.resource.data.usageCount == resource.data.usageCount);
+
+      // Deletion: staff with discount authority
+      allow delete: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageDiscounts'));
     }
 
     // ===============================================================
@@ -312,6 +328,19 @@ service cloud.firestore {
       allow create: if false;
       allow update: if false;
       allow delete: if false;
+    }
+
+    // ===============================================================
+    // 10. SERVER-ONLY COMMERCE & PAYMENT COLLECTIONS (PACKET 4)
+    // ===============================================================
+    match /checkout_sessions/{sessionId} {
+      allow read: if false;
+      allow write: if false;
+    }
+
+    match /payment_transactions/{txId} {
+      allow read: if false;
+      allow write: if false;
     }
   }
 }
