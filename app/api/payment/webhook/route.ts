@@ -60,7 +60,17 @@ export async function POST(req: Request): Promise<NextResponse> {
 
       case "refund.processed": {
         try {
-          await finalizeProcessedRefund(data);
+          const outcome = await finalizeProcessedRefund(data);
+          if (!outcome.success) {
+            console.error(
+              "Refund processed reconciliation failed or transaction not found:",
+              data
+            );
+            return NextResponse.json(
+              { error: "Refund reconciliation failed or transaction not found" },
+              { status: 500 }
+            );
+          }
         } catch (refErr: any) {
           console.error("Error finalizing processed refund via webhook:", refErr);
           return NextResponse.json(
@@ -73,7 +83,17 @@ export async function POST(req: Request): Promise<NextResponse> {
 
       case "refund.pending": {
         try {
-          await updateRefundStatus("pending", data);
+          const outcome = await updateRefundStatus("pending", data);
+          if (!outcome.success || !outcome.updated) {
+            console.error(
+              "Refund status update (pending) failed or transaction not found:",
+              data
+            );
+            return NextResponse.json(
+              { error: "Refund status update failed or matching transaction not found" },
+              { status: 500 }
+            );
+          }
         } catch (err: any) {
           console.error("Error updating refund.pending via webhook:", err);
           return NextResponse.json(
@@ -86,7 +106,17 @@ export async function POST(req: Request): Promise<NextResponse> {
 
       case "refund.processing": {
         try {
-          await updateRefundStatus("processing", data);
+          const outcome = await updateRefundStatus("processing", data);
+          if (!outcome.success || !outcome.updated) {
+            console.error(
+              "Refund status update (processing) failed or transaction not found:",
+              data
+            );
+            return NextResponse.json(
+              { error: "Refund status update failed or matching transaction not found" },
+              { status: 500 }
+            );
+          }
         } catch (err: any) {
           console.error("Error updating refund.processing via webhook:", err);
           return NextResponse.json(
@@ -99,7 +129,17 @@ export async function POST(req: Request): Promise<NextResponse> {
 
       case "refund.needs-attention": {
         try {
-          await updateRefundStatus("needs_attention", data);
+          const outcome = await updateRefundStatus("needs_attention", data);
+          if (!outcome.success || !outcome.updated) {
+            console.error(
+              "Refund status update (needs-attention) failed or transaction not found:",
+              data
+            );
+            return NextResponse.json(
+              { error: "Refund status update failed or matching transaction not found" },
+              { status: 500 }
+            );
+          }
         } catch (err: any) {
           console.error("Error updating refund.needs-attention via webhook:", err);
           return NextResponse.json(
@@ -112,7 +152,17 @@ export async function POST(req: Request): Promise<NextResponse> {
 
       case "refund.failed": {
         try {
-          await updateRefundStatus("failed", data);
+          const outcome = await updateRefundStatus("failed", data);
+          if (!outcome.success || !outcome.updated) {
+            console.error(
+              "Refund status update (failed) failed or transaction not found:",
+              data
+            );
+            return NextResponse.json(
+              { error: "Refund status update failed or matching transaction not found" },
+              { status: 500 }
+            );
+          }
         } catch (err: any) {
           console.error("Error updating refund.failed via webhook:", err);
           return NextResponse.json(

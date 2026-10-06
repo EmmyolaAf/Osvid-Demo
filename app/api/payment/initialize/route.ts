@@ -4,6 +4,7 @@ import { assertStoreOperationalSubscription } from "@/lib/server/subscription-gu
 import { extractBearerToken, verifyAuthToken } from "@/lib/server/auth";
 import {
   createCheckoutSession,
+  claimPaymentInitialization,
   releaseCheckoutReservationInternal,
   cleanupExpiredCheckoutReservations,
 } from "@/lib/server/checkout-session";
@@ -94,12 +95,23 @@ export async function POST(
       }
     }
 
-    // 4. Create checkout session and reserve stock & coupon in a Firestore transaction
-    const { session, releaseToken, replayed } = await createCheckoutSession({
+    // 4. Reject invalid delivery methods strictly (Requirement 16)
+    if (deliveryMethod !== "shipping" && deliveryMethod !== "pickup") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Invalid deliveryMethod. Must be either "shipping" or "pickup".',
+        },
+        { status: 400 }
+      );
+    }
+
+    // 5. Create checkout session and reserve stock & coupon in a Firestore transaction
+    const { session, releaseToken } = await createCheckoutSession({
       checkoutRequestId,
       items,
       customerInfo,
-      deliveryMethod: deliveryMethod === "pickup" ? "pickup" : "shipping",
+      deliveryMethod,
       shippingAddress,
       pickupLocationId,
       couponCode,
@@ -108,19 +120,17 @@ export async function POST(
 
     const sessionDocRef = adminDb.collection("checkout_sessions").doc(session.id);
 
-    // 5. If this was an idempotent replay with initialized Paystack state, reuse it (Requirement 4 & 5)
-    if (
-      replayed &&
-      session.paymentInitializationStatus === "initialized" &&
-      session.paystackAccessCode &&
-      session.paystackReference
-    ) {
+    // 6. Transactionally claim payment initialization lock (Requirement 1 & 2)
+    const claim = await claimPaymentInitialization(session.id);
+
+    // If already initialized, return authoritative cached provider state
+    if (claim.outcome === "already_initialized" && claim.accessCode && claim.reference) {
       return NextResponse.json(
         {
           success: true,
           checkoutSessionId: session.id,
-          accessCode: session.paystackAccessCode,
-          reference: session.paystackReference,
+          accessCode: claim.accessCode,
+          reference: claim.reference,
           totals: {
             subtotal: session.subtotal,
             shippingFee: session.shippingFee,
@@ -136,16 +146,32 @@ export async function POST(
       );
     }
 
-    // 6. Transition session to "initializing" state before external call (Requirement 5)
-    await sessionDocRef.update({
-      paymentInitializationStatus: "initializing",
-      paymentInitializationAttempt: FieldValue.increment(1),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
+    // If currently in flight with another concurrent request, return 409 In-Progress
+    if (claim.outcome === "in_progress") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: claim.message || "Payment initialization currently in progress.",
+        },
+        { status: 409 }
+      );
+    }
 
-    // 7. Initialize Paystack transaction server-side
-    const paystackReference =
-      session.paystackReference || `osvid_${Date.now()}_${crypto.randomBytes(5).toString("hex")}`;
+    // If ambiguous earlier attempt requires recovery, block duplicate provider call
+    if (claim.outcome === "recovery_required" || !claim.canProceed) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            claim.message ||
+            "Payment initialization requires recovery. Duplicate provider call blocked.",
+        },
+        { status: 409 }
+      );
+    }
+
+    // 7. Invoke Paystack using the STABLE server-generated reference locked in the claim
+    const paystackReference = claim.reference!;
     const amountKobo = session.totalAmountKobo;
 
     let accessCode = "";
@@ -185,12 +211,25 @@ export async function POST(
     }
 
     // 8. Mark session as initialized in Firestore
-    await sessionDocRef.update({
-      paymentInitializationStatus: "initialized",
-      paystackReference,
-      paystackAccessCode: accessCode,
-      updatedAt: FieldValue.serverTimestamp(),
-    });
+    try {
+      await sessionDocRef.update({
+        paymentInitializationStatus: "initialized",
+        paystackReference,
+        paystackAccessCode: accessCode,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    } catch (persistErr) {
+      // Requirement 2: Do NOT release stock merely because local write failed!
+      console.error("Critical: Failed to persist initialized state after Paystack success:", persistErr);
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Payment initialized with provider, but confirmation could not be saved. Recovery required.",
+        },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json(
       {

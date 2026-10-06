@@ -10,6 +10,7 @@ import {
 import {
   validatePaymentReference,
   CommerceValidationError,
+  ReservationInvariantError,
 } from "@/lib/server/pricing";
 import {
   CheckoutSession,
@@ -26,6 +27,9 @@ const resend = process.env.RESEND_API_KEY
 export interface FinalizePaymentResult {
   success: boolean;
   orderId?: string;
+  amount?: number;
+  amountKobo?: number;
+  currency?: "NGN";
   replayed: boolean;
   emailSent: boolean;
   anomaly?: boolean;
@@ -38,6 +42,106 @@ interface TransactionFinalizationOutcome {
   authoritativeOrderId: string;
   anomaly: boolean;
   anomalyReason?: string;
+  authoritativeSession?: CheckoutSession;
+}
+
+/**
+ * Ensures receipt email delivery for finalized payments.
+ * Works for both newly finalized payments and idempotent replays (Requirement 7).
+ * Atomically claims sending state to prevent duplicate concurrent deliveries and reclaims after 5 minutes.
+ */
+export async function ensureReceiptEmailForFinalizedPayment(
+  cleanRef: string,
+  paymentTxRef: FirebaseFirestore.DocumentReference,
+  customerEmail: string,
+  orderData: {
+    orderId: string;
+    items: Array<{
+      name: string;
+      quantity: number;
+      price: number;
+      variant?: string;
+      imageUrl?: string;
+    }>;
+    total: number;
+    subtotal: number;
+    shippingFee: number;
+    currency: "NGN";
+    deliveryMethod: "pickup" | "shipping";
+    shippingAddress?: any;
+    customerInfo: {
+      name: string;
+      email: string;
+      phone: string;
+    };
+  },
+  paystackRawData?: any
+): Promise<boolean> {
+  if (!resend || !process.env.FROM_EMAIL) {
+    return false;
+  }
+
+  const shouldSendEmail = await adminDb.runTransaction(async (transaction) => {
+    const txSnap = await transaction.get(paymentTxRef);
+    if (!txSnap.exists) return false;
+    const tx = txSnap.data() as PaymentTransactionRecord;
+
+    if (tx.receiptEmailStatus === "sent") return false;
+
+    // Allow reclaiming if previous attempt was abandoned > 5 minutes ago or failed
+    if (tx.receiptEmailStatus === "sending" && tx.receiptEmailClaimedAt) {
+      const claimedMs = new Date(tx.receiptEmailClaimedAt).getTime();
+      if (Date.now() - claimedMs < 5 * 60 * 1000) return false;
+    }
+
+    transaction.update(paymentTxRef, {
+      receiptEmailStatus: "sending" as ReceiptEmailStatus,
+      receiptEmailClaimedAt: new Date().toISOString(),
+    });
+    return true;
+  });
+
+  if (!shouldSendEmail) return false;
+
+  try {
+    const emailHtml = generateOrderConfirmationEmail({
+      reference: cleanRef,
+      email: customerEmail,
+      orderData,
+      paymentData: paystackRawData,
+    });
+
+    const emailResponse = await resend.emails.send({
+      from: `OSVID CHEMICALS LTD. <${process.env.FROM_EMAIL}>`,
+      to: customerEmail,
+      bcc: process.env.BCC_EMAIL ? [process.env.BCC_EMAIL] : "osvidbusinesses@gmail.com",
+      subject: `Order Confirmation - #${orderData.orderId}`,
+      html: emailHtml,
+    });
+
+    const emailSent = Boolean(emailResponse?.data);
+    if (emailSent) {
+      await paymentTxRef.update({
+        receiptEmailStatus: "sent" as ReceiptEmailStatus,
+        receiptEmailSent: true,
+        receiptEmailSentAt: new Date().toISOString(),
+      });
+      return true;
+    } else {
+      await paymentTxRef.update({
+        receiptEmailStatus: "failed" as ReceiptEmailStatus,
+        receiptEmailFailureReason: "Email provider did not return message data.",
+      });
+      return false;
+    }
+  } catch (emailErr: any) {
+    console.error("Receipt email dispatch failed (order remains finalized):", emailErr);
+    await paymentTxRef.update({
+      receiptEmailStatus: "failed" as ReceiptEmailStatus,
+      receiptEmailFailureReason: emailErr?.message || "Email dispatch failed.",
+    });
+    return false;
+  }
 }
 
 /**
@@ -57,11 +161,50 @@ export async function finalizeSuccessfulPayment(
   if (existingTxSnap.exists) {
     const existingTx = existingTxSnap.data() as PaymentTransactionRecord;
     if (existingTx.status === "finalized" && existingTx.orderId) {
+      let emailSent = existingTx.receiptEmailStatus === "sent";
+      if (!emailSent) {
+        // Attempt receipt retry for finalized payment (Requirement 7)
+        const orderSnap = await adminDb.collection("orders").doc(existingTx.orderId).get();
+        if (orderSnap.exists) {
+          const ord = orderSnap.data() as Order;
+          emailSent = await ensureReceiptEmailForFinalizedPayment(
+            cleanRef,
+            paymentTxRef,
+            existingTx.customerEmail || ord.customerEmail,
+            {
+              orderId: existingTx.orderId,
+              items: (ord.items || []).map((it) => ({
+                name: it.productName,
+                quantity: it.quantity,
+                price: it.price,
+                variant: it.unit,
+                imageUrl: it.imageUrl,
+              })),
+              total: ord.totalAmount,
+              subtotal: ord.subtotal,
+              shippingFee: ord.shippingFee,
+              currency: "NGN",
+              deliveryMethod: ord.deliveryMethod === "pickup" ? "pickup" : "shipping",
+              shippingAddress: ord.shippingAddress,
+              customerInfo: {
+                name: ord.customerName,
+                email: ord.customerEmail,
+                phone: ord.customerPhone,
+              },
+            },
+            existingTx.paystackData
+          );
+        }
+      }
+
       return {
         success: true,
         orderId: existingTx.orderId,
+        amount: existingTx.amount,
+        amountKobo: existingTx.amountKobo,
+        currency: (existingTx.currency as "NGN") || "NGN",
         replayed: true,
-        emailSent: existingTx.receiptEmailStatus === "sent",
+        emailSent,
       };
     }
     if (existingTx.status === "anomaly_unfulfillable") {
@@ -104,15 +247,7 @@ export async function finalizeSuccessfulPayment(
     );
   }
 
-  // Invariant: Metadata clientId must be "osvid" if present
-  if (paystackData.metadata?.clientId && paystackData.metadata.clientId !== "osvid") {
-    throw new CommerceValidationError(
-      "Paystack metadata client identity mismatch.",
-      403
-    );
-  }
-
-  // 3. Locate authoritative checkout session with strict binding invariants (Requirement 1 & 20)
+  // 3. Locate authoritative checkout session with strict binding invariants (Requirement 5)
   let sessionDoc: FirebaseFirestore.DocumentSnapshot | null = null;
 
   if (options?.expectedCheckoutSessionId) {
@@ -158,7 +293,7 @@ export async function finalizeSuccessfulPayment(
     if (!qSnap.empty) {
       sessionDoc = qSnap.docs[0];
     } else {
-      // Special recovery case (Requirement 1): Provider init succeeded but updating session failed
+      // Special recovery case: Provider init succeeded but updating session failed
       const metaSessionId = paystackData.metadata?.checkoutSessionId;
       if (metaSessionId) {
         const candidateSnap = await adminDb
@@ -190,6 +325,28 @@ export async function finalizeSuccessfulPayment(
   }
 
   const session = { id: sessionDoc.id, ...sessionDoc.data() } as CheckoutSession;
+
+  // Requirement 5: Strictly enforce session metadata for all new payments
+  if (paystackData.metadata?.clientId !== "osvid") {
+    throw new CommerceValidationError(
+      "Paystack metadata client identity mismatch: expected clientId 'osvid'.",
+      403
+    );
+  }
+
+  if (paystackData.metadata?.checkoutSessionId !== session.id) {
+    throw new CommerceValidationError(
+      `Paystack metadata checkoutSessionId mismatch: gateway has "${paystackData.metadata?.checkoutSessionId}", expected "${session.id}".`,
+      409
+    );
+  }
+
+  if (session.paystackReference && session.paystackReference !== cleanRef) {
+    throw new CommerceValidationError(
+      `Checkout session binding error: session belongs to reference "${session.paystackReference}", not "${cleanRef}".`,
+      409
+    );
+  }
 
   // Invariant: Exact integer kobo match
   const expectedKobo = session.totalAmountKobo || Math.round(session.totalAmount * 100);
@@ -250,16 +407,66 @@ export async function finalizeSuccessfulPayment(
       if (!currentSessionSnap.exists) {
         throw new Error("Checkout session disappeared during finalization.");
       }
-      const currentSession = currentSessionSnap.data() as CheckoutSession;
+      const currentSession = {
+        id: currentSessionSnap.id,
+        ...currentSessionSnap.data(),
+      } as CheckoutSession;
 
-      // Read all products transactionally
+      // Requirement 6: Recheck immutable session state inside transaction against verified snapshot
+      if (currentSession.id !== session.id) {
+        throw new Error(
+          `Checkout session ID mismatch during transaction: "${currentSession.id}" vs "${session.id}".`
+        );
+      }
+      const currentExpectedKobo =
+        currentSession.totalAmountKobo || Math.round(currentSession.totalAmount * 100);
+      if (currentExpectedKobo !== expectedKobo || paystackData.amount !== currentExpectedKobo) {
+        throw new Error(
+          `Authoritative amount changed during finalization: session=${currentExpectedKobo}, paystack=${paystackData.amount}.`
+        );
+      }
+      if (currentSession.currency !== "NGN") {
+        throw new Error(
+          `Checkout session currency changed during finalization: "${currentSession.currency}".`
+        );
+      }
+      if (
+        currentSession.customerEmail.toLowerCase().trim() !==
+        session.customerEmail.toLowerCase().trim()
+      ) {
+        throw new Error("Customer email modified during checkout finalization.");
+      }
+      if (currentSession.paystackReference && currentSession.paystackReference !== cleanRef) {
+        throw new Error(
+          `Checkout session reference changed during transaction: "${currentSession.paystackReference}" vs "${cleanRef}".`
+        );
+      }
+      if (
+        !Array.isArray(currentSession.items) ||
+        currentSession.items.length !== session.items.length
+      ) {
+        throw new Error("Checkout session items modified during finalization.");
+      }
+      for (let i = 0; i < currentSession.items.length; i++) {
+        const ci = currentSession.items[i];
+        const si = session.items[i];
+        if (
+          ci.productId !== si.productId ||
+          ci.quantity !== si.quantity ||
+          ci.unitPrice !== si.unitPrice
+        ) {
+          throw new Error(`Checkout session item at index ${i} modified during finalization.`);
+        }
+      }
+
+      // Requirement 4: Read ALL products transactionally before any writes
       const productDocs: Array<{
         ref: FirebaseFirestore.DocumentReference;
         data: FirebaseFirestore.DocumentData;
-        item: (typeof session.items)[0];
+        item: (typeof currentSession.items)[0];
       }> = [];
 
-      for (const item of session.items) {
+      for (const item of currentSession.items) {
         const pRef = adminDb.collection("products").doc(item.productId);
         const pSnap = await transaction.get(pRef);
         if (!pSnap.exists) {
@@ -275,8 +482,8 @@ export async function finalizeSuccessfulPayment(
       // Read coupon doc if applicable
       let discountDocRef: FirebaseFirestore.DocumentReference | null = null;
       let discountData: DiscountCode | null = null;
-      if (session.couponId) {
-        discountDocRef = adminDb.collection("discounts").doc(session.couponId);
+      if (currentSession.couponId) {
+        discountDocRef = adminDb.collection("discounts").doc(currentSession.couponId);
         const dSnap = await transaction.get(discountDocRef);
         if (dSnap.exists) {
           discountData = dSnap.data() as DiscountCode;
@@ -285,30 +492,31 @@ export async function finalizeSuccessfulPayment(
 
       // Read customer profile if authenticated
       let userDocRef: FirebaseFirestore.DocumentReference | null = null;
-      if (session.authenticatedUserId) {
-        userDocRef = adminDb.collection("users").doc(session.authenticatedUserId);
+      if (currentSession.authenticatedUserId) {
+        userDocRef = adminDb.collection("users").doc(currentSession.authenticatedUserId);
         const uSnap = await transaction.get(userDocRef);
-        if (!uSnap.exists) {
+        if (uSnap.exists) {
           userDocRef = null;
         }
       }
 
+      // ALL READS ARE NOW COMPLETE. VALIDATE INVARIANTS BEFORE ANY WRITES.
+
       const isReservationActive = Boolean(currentSession.reservationActive);
 
       if (isReservationActive) {
-        // Active reservation path: convert reservations to physical stock deductions
+        // Requirement 3: Fail closed on reservation accounting inconsistency
         for (const p of productDocs) {
           const currentStock = Number(p.data.stockQuantity || 0);
           const currentReserved = Number(p.data.reservedQuantity || 0);
 
-          // Invariant check: reservedQuantity must be >= item.quantity (Requirement 10)
           if (currentReserved < p.item.quantity) {
-            console.error(
-              `INVARIANT VIOLATION: Product ${p.item.productId} current reservedQuantity (${currentReserved}) is less than required (${p.item.quantity}).`
+            throw new ReservationInvariantError(
+              `Reservation invariant violated: product ${p.item.productId} reservedQuantity (${currentReserved}) is less than required (${p.item.quantity}).`
             );
           }
 
-          const newReserved = Math.max(0, currentReserved - p.item.quantity);
+          const newReserved = currentReserved - p.item.quantity;
           const newStock = currentStock - p.item.quantity;
 
           if (newStock < 0) {
@@ -330,14 +538,16 @@ export async function finalizeSuccessfulPayment(
           const curReservedUsage = Number(discountData.reservedUsageCount || 0);
 
           if (curReservedUsage < 1) {
-            console.error(
-              `INVARIANT VIOLATION: Coupon ${session.couponCode} reservedUsageCount (${curReservedUsage}) is less than 1.`
+            throw new ReservationInvariantError(
+              `Reservation invariant violated: coupon ${
+                currentSession.couponCode || currentSession.couponId
+              } reservedUsageCount (${curReservedUsage}) is less than 1.`
             );
           }
 
           transaction.update(discountDocRef, {
             usageCount: curUsage + 1,
-            reservedUsageCount: Math.max(0, curReservedUsage - 1),
+            reservedUsageCount: curReservedUsage - 1,
           });
         }
       } else {
@@ -354,7 +564,7 @@ export async function finalizeSuccessfulPayment(
           }
         }
 
-        // 2. Check coupon capacity on late payment (Requirement 13)
+        // 2. Check coupon capacity on late payment
         let hasCouponCapacity = true;
         if (discountDocRef && discountData) {
           if (discountData.maxUsageLimit !== undefined && discountData.maxUsageLimit !== null) {
@@ -381,12 +591,12 @@ export async function finalizeSuccessfulPayment(
           transaction.set(paymentTxRef, {
             id: cleanRef,
             reference: cleanRef,
-            checkoutSessionId: session.id,
+            checkoutSessionId: currentSession.id,
             status: "anomaly_unfulfillable",
-            amount: session.totalAmount,
+            amount: currentSession.totalAmount,
             amountKobo: paystackData.amount,
             currency: "NGN",
-            customerEmail: session.customerEmail,
+            customerEmail: currentSession.customerEmail,
             paystackData: paystackData.raw,
             anomalyReason,
             needsRefund: true,
@@ -449,8 +659,8 @@ export async function finalizeSuccessfulPayment(
         });
       }
 
-      // Create authoritative Order document
-      const orderItems = session.items.map((it, idx) => ({
+      // Create authoritative Order document using currentSession (Requirement 6)
+      const orderItems = currentSession.items.map((it, idx) => ({
         id: `item_${idx}_${Date.now()}`,
         productId: it.productId,
         productName: it.name,
@@ -460,23 +670,23 @@ export async function finalizeSuccessfulPayment(
         unit: it.unit,
       }));
 
-      const formattedShippingAddress = session.shippingAddress
+      const formattedShippingAddress = currentSession.shippingAddress
         ? {
-            fullName: session.shippingAddress.fullName || session.customerName,
-            phone: session.shippingAddress.phone || session.customerPhone,
-            email: session.shippingAddress.email || session.customerEmail,
+            fullName: currentSession.shippingAddress.fullName || currentSession.customerName,
+            phone: currentSession.shippingAddress.phone || currentSession.customerPhone,
+            email: currentSession.shippingAddress.email || currentSession.customerEmail,
             address:
-              session.shippingAddress.address ||
-              session.shippingAddress.streetAddress ||
+              currentSession.shippingAddress.address ||
+              currentSession.shippingAddress.streetAddress ||
               "Customer Address",
-            city: session.shippingAddress.city || "Lagos",
-            state: session.shippingAddress.state || "Lagos",
-            postalCode: session.shippingAddress.postalCode || "",
+            city: currentSession.shippingAddress.city || "Lagos",
+            state: currentSession.shippingAddress.state || "Lagos",
+            postalCode: currentSession.shippingAddress.postalCode || "",
           }
         : {
-            fullName: session.customerName,
-            phone: session.customerPhone,
-            email: session.customerEmail,
+            fullName: currentSession.customerName,
+            phone: currentSession.customerPhone,
+            email: currentSession.customerEmail,
             address: "Customer Address",
             city: "Lagos",
             state: "Lagos",
@@ -485,18 +695,18 @@ export async function finalizeSuccessfulPayment(
       const newOrder: Order = {
         id: resolvedOrderId,
         orderNumber: resolvedOrderId,
-        userId: session.authenticatedUserId || undefined,
-        customerName: session.customerName,
-        customerEmail: session.customerEmail.toLowerCase(),
-        customerPhone: session.customerPhone,
-        deliveryMethod: session.deliveryMethod === "pickup" ? "pickup" : "delivery",
+        userId: currentSession.authenticatedUserId || undefined,
+        customerName: currentSession.customerName,
+        customerEmail: currentSession.customerEmail.toLowerCase(),
+        customerPhone: currentSession.customerPhone,
+        deliveryMethod: currentSession.deliveryMethod === "pickup" ? "pickup" : "delivery",
         shippingAddress: formattedShippingAddress,
         items: orderItems,
-        subtotal: session.subtotal,
-        shippingFee: session.shippingFee,
-        discountAmount: session.discountAmount,
-        couponCode: session.couponCode,
-        totalAmount: session.totalAmount,
+        subtotal: currentSession.subtotal,
+        shippingFee: currentSession.shippingFee,
+        discountAmount: currentSession.discountAmount,
+        couponCode: currentSession.couponCode,
+        totalAmount: currentSession.totalAmount,
         paymentStatus: "paid",
         orderStatus: "pending" as OrderStatus,
         paystackReference: cleanRef,
@@ -520,7 +730,7 @@ export async function finalizeSuccessfulPayment(
       if (userDocRef) {
         transaction.update(userDocRef, {
           totalOrders: FieldValue.increment(1),
-          totalSpent: FieldValue.increment(session.totalAmount),
+          totalSpent: FieldValue.increment(currentSession.totalAmount),
           lastOrderDate: nowIso,
         });
       }
@@ -541,13 +751,13 @@ export async function finalizeSuccessfulPayment(
       transaction.set(paymentTxRef, {
         id: cleanRef,
         reference: cleanRef,
-        checkoutSessionId: session.id,
+        checkoutSessionId: currentSession.id,
         status: "finalized",
-        amount: session.totalAmount,
+        amount: currentSession.totalAmount,
         amountKobo: paystackData.amount,
         currency: "NGN",
         orderId: resolvedOrderId,
-        customerEmail: session.customerEmail,
+        customerEmail: currentSession.customerEmail,
         paystackData: paystackData.raw,
         receiptEmailSent: false,
         receiptEmailStatus: "pending",
@@ -562,6 +772,7 @@ export async function finalizeSuccessfulPayment(
         replayed: false,
         authoritativeOrderId: resolvedOrderId,
         anomaly: false,
+        authoritativeSession: currentSession,
       };
     }
   );
@@ -583,7 +794,11 @@ export async function finalizeSuccessfulPayment(
       if (refundRes.status) {
         refundAccepted = true;
         providerRefundId = refundRes.data?.id ? String(refundRes.data.id) : undefined;
-        refundReference = refundRes.data?.refund_reference || refundRes.data?.reference || undefined;
+        refundReference =
+          refundRes.data?.refund_reference ||
+          (refundRes.data?.reference && refundRes.data?.reference !== cleanRef
+            ? refundRes.data?.reference
+            : undefined);
       } else {
         failureReason = refundRes.message || "Provider declined refund request.";
       }
@@ -619,93 +834,47 @@ export async function finalizeSuccessfulPayment(
     };
   }
 
-  // 6. Idempotent Atomic Receipt Email Claim (Requirement 12)
+  // 6. Idempotent Atomic Receipt Email Claim (Requirement 7)
+  const effectiveSession = outcome.authoritativeSession || session;
   let emailSent = false;
 
-  if (outcome.finalizedNow && resend && process.env.FROM_EMAIL) {
-    const shouldSendEmail = await adminDb.runTransaction(async (transaction) => {
-      const txSnap = await transaction.get(paymentTxRef);
-      if (!txSnap.exists) return false;
-      const tx = txSnap.data() as PaymentTransactionRecord;
-
-      if (tx.receiptEmailStatus === "sent") return false;
-
-      // Allow reclaiming if previous attempt was abandoned > 5 minutes ago
-      if (tx.receiptEmailStatus === "sending" && tx.receiptEmailClaimedAt) {
-        const claimedMs = new Date(tx.receiptEmailClaimedAt).getTime();
-        if (Date.now() - claimedMs < 5 * 60 * 1000) return false;
-      }
-
-      transaction.update(paymentTxRef, {
-        receiptEmailStatus: "sending" as ReceiptEmailStatus,
-        receiptEmailClaimedAt: new Date().toISOString(),
-      });
-      return true;
-    });
-
-    if (shouldSendEmail) {
-      try {
-        const emailHtml = generateOrderConfirmationEmail({
-          reference: cleanRef,
-          email: session.customerEmail,
-          orderData: {
-            orderId: outcome.authoritativeOrderId,
-            items: session.items.map((it) => ({
-              name: it.name,
-              quantity: it.quantity,
-              price: it.unitPrice,
-              variant: it.unit,
-              imageUrl: it.imageUrl,
-            })),
-            total: session.totalAmount,
-            subtotal: session.subtotal,
-            shippingFee: session.shippingFee,
-            currency: "NGN",
-            deliveryMethod: session.deliveryMethod === "pickup" ? "pickup" : "shipping",
-            shippingAddress: session.shippingAddress,
-            customerInfo: {
-              name: session.customerName,
-              email: session.customerEmail,
-              phone: session.customerPhone,
-            },
-          },
-          paymentData: paystackData.raw,
-        });
-
-        const emailResponse = await resend.emails.send({
-          from: `OSVID CHEMICALS LTD. <${process.env.FROM_EMAIL}>`,
-          to: session.customerEmail,
-          bcc: process.env.BCC_EMAIL ? [process.env.BCC_EMAIL] : "osvidbusinesses@gmail.com",
-          subject: `Order Confirmation - #${outcome.authoritativeOrderId}`,
-          html: emailHtml,
-        });
-
-        emailSent = Boolean(emailResponse?.data);
-        if (emailSent) {
-          await paymentTxRef.update({
-            receiptEmailStatus: "sent" as ReceiptEmailStatus,
-            receiptEmailSent: true,
-            receiptEmailSentAt: new Date().toISOString(),
-          });
-        } else {
-          await paymentTxRef.update({
-            receiptEmailStatus: "failed" as ReceiptEmailStatus,
-            receiptEmailFailureReason: "Email provider did not return message data.",
-          });
-        }
-      } catch (emailErr: any) {
-        console.error("Receipt email dispatch failed (order remains finalized):", emailErr);
-        await paymentTxRef.update({
-          receiptEmailStatus: "failed" as ReceiptEmailStatus,
-          receiptEmailFailureReason: emailErr?.message || "Email dispatch failed.",
-        });
-      }
-    }
+  if (outcome.finalizedNow) {
+    emailSent = await ensureReceiptEmailForFinalizedPayment(
+      cleanRef,
+      paymentTxRef,
+      effectiveSession.customerEmail,
+      {
+        orderId: outcome.authoritativeOrderId,
+        items: effectiveSession.items.map((it) => ({
+          name: it.name,
+          quantity: it.quantity,
+          price: it.unitPrice,
+          variant: it.unit,
+          imageUrl: it.imageUrl,
+        })),
+        total: effectiveSession.totalAmount,
+        subtotal: effectiveSession.subtotal,
+        shippingFee: effectiveSession.shippingFee,
+        currency: "NGN",
+        deliveryMethod: effectiveSession.deliveryMethod === "pickup" ? "pickup" : "shipping",
+        shippingAddress: effectiveSession.shippingAddress,
+        customerInfo: {
+          name: effectiveSession.customerName,
+          email: effectiveSession.customerEmail,
+          phone: effectiveSession.customerPhone,
+        },
+      },
+      paystackData.raw
+    );
   }
 
   return {
     success: true,
     orderId: outcome.authoritativeOrderId,
+    amount: effectiveSession.totalAmount,
+    amountKobo:
+      effectiveSession.totalAmountKobo || Math.round(effectiveSession.totalAmount * 100),
+    currency: "NGN",
     replayed: outcome.replayed,
     emailSent,
   };
@@ -720,17 +889,64 @@ export async function finalizeProcessedRefund(refundData: any): Promise<{
   orderId?: string;
   alreadyProcessed: boolean;
 }> {
-  const transactionRef =
-    refundData?.transaction_reference ||
-    refundData?.transaction?.reference ||
-    refundData?.reference;
+  const rawTxRef =
+    (typeof refundData?.transaction_reference === "string" &&
+      refundData.transaction_reference.trim()) ||
+    (typeof refundData?.transaction?.reference === "string" &&
+      refundData.transaction.reference.trim()) ||
+    null;
 
-  if (!transactionRef || typeof transactionRef !== "string") {
-    console.warn("refund.processed webhook missing transaction reference:", refundData);
-    return { success: false, alreadyProcessed: false };
+  let cleanTxRef: string | null = rawTxRef ? validatePaymentReference(rawTxRef) : null;
+  const providerRefundId = refundData?.id ? String(refundData.id) : undefined;
+  const rawRefundRef = refundData?.refund_reference || refundData?.reference;
+  const refundReference =
+    typeof rawRefundRef === "string" &&
+    rawRefundRef.trim() &&
+    rawRefundRef.trim() !== cleanTxRef
+      ? rawRefundRef.trim()
+      : undefined;
+
+  // Requirement 13: If cleanTxRef is not explicitly in transaction_reference, try finding matching order/tx by providerRefundId or refundReference
+  if (!cleanTxRef) {
+    if (providerRefundId) {
+      const qByProvId = await adminDb
+        .collection("orders")
+        .where("providerRefundId", "==", providerRefundId)
+        .limit(1)
+        .get();
+      if (!qByProvId.empty) {
+        cleanTxRef = qByProvId.docs[0].data().paystackReference || null;
+      }
+    }
+    if (!cleanTxRef && refundReference) {
+      const qByRef = await adminDb
+        .collection("orders")
+        .where("refundReference", "==", refundReference)
+        .limit(1)
+        .get();
+      if (!qByRef.empty) {
+        cleanTxRef = qByRef.docs[0].data().paystackReference || null;
+      }
+    }
+    if (!cleanTxRef && providerRefundId) {
+      const qTx = await adminDb
+        .collection("payment_transactions")
+        .where("providerRefundId", "==", providerRefundId)
+        .limit(1)
+        .get();
+      if (!qTx.empty) {
+        cleanTxRef = qTx.docs[0].id;
+      }
+    }
   }
 
-  const cleanTxRef = transactionRef.trim();
+  if (!cleanTxRef) {
+    console.warn(
+      "refund.processed webhook missing transaction reference and no matching record found:",
+      refundData
+    );
+    return { success: false, alreadyProcessed: false };
+  }
 
   // 1. Look for matching order
   const ordersSnap = await adminDb
@@ -750,10 +966,9 @@ export async function finalizeProcessedRefund(refundData: any): Promise<{
     }
 
     const nowIso = new Date().toISOString();
-    const providerRefundRef = refundData.refund_reference || refundData.reference || cleanTxRef;
-    const providerRefundId = refundData.id ? String(refundData.id) : undefined;
 
     await adminDb.runTransaction(async (transaction) => {
+      // 1. Read order
       const currentOrderSnap = await transaction.get(orderRef);
       if (!currentOrderSnap.exists) return;
       const currentOrder = currentOrderSnap.data() as Order;
@@ -762,56 +977,80 @@ export async function finalizeProcessedRefund(refundData: any): Promise<{
         return;
       }
 
-      // Restock each product and create deterministic return ledger movement
+      // 2. Read ALL product docs before any writes (Requirement 4)
+      const productDocs: Array<{
+        ref: FirebaseFirestore.DocumentReference;
+        data: FirebaseFirestore.DocumentData;
+        item: NonNullable<typeof currentOrder.items>[0];
+      }> = [];
+
       for (const item of currentOrder.items || []) {
         if (item.productId) {
           const pRef = adminDb.collection("products").doc(item.productId);
           const pSnap = await transaction.get(pRef);
           if (pSnap.exists) {
-            const pData = pSnap.data() || {};
-            const currentStock = Number(pData.stockQuantity || 0);
-            const newStock = currentStock + item.quantity;
-
-            transaction.update(pRef, {
-              stockQuantity: newStock,
-              updatedAt: nowIso,
-            });
-
-            const movementId = `return_${cleanTxRef}_${item.productId}`;
-            const movementRef = adminDb.collection("inventory_movements").doc(movementId);
-
-            transaction.set(movementRef, {
-              id: movementId,
-              productId: item.productId,
-              productName: item.productName,
-              sku: pData.sku || "",
-              delta: item.quantity,
-              previousStock: currentStock,
-              newStock: newStock,
-              type: "return",
-              reason: `Refund restock for order ${currentOrder.id}`,
-              actorUid: "system:commerce",
-              actorEmail: "system@osvid.internal",
-              actorRole: "system",
-              orderId: currentOrder.id,
-              reference: cleanTxRef,
-              requestId: movementId,
-              createdAt: FieldValue.serverTimestamp(),
-              createdAtIso: nowIso,
+            productDocs.push({
+              ref: pRef,
+              data: pSnap.data() || {},
+              item,
             });
           }
         }
       }
 
-      // Reverse customer metrics if order was from a registered account
+      // 3. Read user doc if applicable
+      let userRef: FirebaseFirestore.DocumentReference | null = null;
+      let userSnap: FirebaseFirestore.DocumentSnapshot | null = null;
       if (currentOrder.userId) {
-        const userRef = adminDb.collection("users").doc(currentOrder.userId);
-        const userSnap = await transaction.get(userRef);
-        if (userSnap.exists) {
-          transaction.update(userRef, {
-            totalSpent: FieldValue.increment(-currentOrder.totalAmount),
-          });
-        }
+        userRef = adminDb.collection("users").doc(currentOrder.userId);
+        userSnap = await transaction.get(userRef);
+      }
+
+      // 4. Read payment_transaction doc
+      const payTxRef = adminDb.collection("payment_transactions").doc(cleanTxRef!);
+      const payTxSnap = await transaction.get(payTxRef);
+
+      // ALL READS ARE COMPLETE. ONLY NOW PERFORM WRITES (Requirement 4)
+
+      // Restock each product and create deterministic return ledger movement
+      for (const p of productDocs) {
+        const currentStock = Number(p.data.stockQuantity || 0);
+        const newStock = currentStock + p.item.quantity;
+
+        transaction.update(p.ref, {
+          stockQuantity: newStock,
+          updatedAt: nowIso,
+        });
+
+        const movementId = `return_${cleanTxRef}_${p.item.productId}`;
+        const movementRef = adminDb.collection("inventory_movements").doc(movementId);
+
+        transaction.set(movementRef, {
+          id: movementId,
+          productId: p.item.productId,
+          productName: p.item.productName,
+          sku: p.data.sku || "",
+          delta: p.item.quantity,
+          previousStock: currentStock,
+          newStock: newStock,
+          type: "return",
+          reason: `Refund restock for order ${currentOrder.id}`,
+          actorUid: "system:commerce",
+          actorEmail: "system@osvid.internal",
+          actorRole: "system",
+          orderId: currentOrder.id,
+          reference: cleanTxRef,
+          requestId: movementId,
+          createdAt: FieldValue.serverTimestamp(),
+          createdAtIso: nowIso,
+        });
+      }
+
+      // Reverse customer metrics if order was from a registered account
+      if (userRef && userSnap && userSnap.exists) {
+        transaction.update(userRef, {
+          totalSpent: FieldValue.increment(-currentOrder.totalAmount),
+        });
       }
 
       const updatedHistory = [
@@ -819,33 +1058,37 @@ export async function finalizeProcessedRefund(refundData: any): Promise<{
         {
           status: currentOrder.orderStatus,
           updatedAt: nowIso,
-          note: `Payment refunded via Paystack (Provider Ref: ${providerRefundRef})`,
+          note: `Payment refunded via Paystack${
+            refundReference ? ` (Refund Ref: ${refundReference})` : ""
+          }${providerRefundId ? ` (Provider ID: ${providerRefundId})` : ""}`,
           updatedBy: "System (Paystack Webhook)",
           eventType: "status" as const,
         },
       ];
 
-      transaction.update(orderRef, {
+      const orderUpdate: Record<string, any> = {
         paymentStatus: "refunded",
         refundStatus: "processed",
-        refundReference: providerRefundRef,
-        providerRefundId: providerRefundId || null,
         refundedAt: nowIso,
         statusHistory: updatedHistory,
         updatedAt: nowIso,
-      });
+      };
+      if (refundReference) orderUpdate.refundReference = refundReference;
+      if (providerRefundId) orderUpdate.providerRefundId = providerRefundId;
 
-      const payTxRef = adminDb.collection("payment_transactions").doc(cleanTxRef);
-      const payTxSnap = await transaction.get(payTxRef);
+      transaction.update(orderRef, orderUpdate);
+
       if (payTxSnap.exists) {
-        transaction.update(payTxRef, {
+        const payTxUpdate: Record<string, any> = {
           status: "refunded",
           refundStatus: "processed",
-          refundReference: providerRefundRef,
-          providerRefundId: providerRefundId || null,
           needsRefund: false,
           refundedAtIso: nowIso,
-        });
+        };
+        if (refundReference) payTxUpdate.refundReference = refundReference;
+        if (providerRefundId) payTxUpdate.providerRefundId = providerRefundId;
+
+        transaction.update(payTxRef, payTxUpdate);
       }
     });
 
@@ -868,15 +1111,18 @@ export async function finalizeProcessedRefund(refundData: any): Promise<{
       status: "refunded",
       refundStatus: "processed",
       needsRefund: false,
-      refundReference: refundData.refund_reference || refundData.reference || null,
-      providerRefundId: refundData.id ? String(refundData.id) : null,
+      refundReference: refundReference || null,
+      providerRefundId: providerRefundId || null,
       refundedAtIso: nowIso,
     });
 
     return { success: true, alreadyProcessed: false };
   }
 
-  console.warn("No order or payment_transaction found for refund transaction reference:", cleanTxRef);
+  console.warn(
+    "No order or payment_transaction found for refund transaction reference:",
+    cleanTxRef
+  );
   return { success: false, alreadyProcessed: false };
 }
 
@@ -889,39 +1135,70 @@ export async function updateRefundStatus(
   refundData: any
 ): Promise<{ success: boolean; updated: boolean }> {
   const rawTxRef =
-    refundData?.transaction_reference ||
-    refundData?.transaction?.reference ||
-    refundData?.reference;
+    (typeof refundData?.transaction_reference === "string" &&
+      refundData.transaction_reference.trim()) ||
+    (typeof refundData?.transaction?.reference === "string" &&
+      refundData.transaction.reference.trim()) ||
+    null;
 
-  if (!rawTxRef || typeof rawTxRef !== "string") {
-    console.warn("updateRefundStatus: No transaction reference found in payload");
+  let cleanTxRef: string | null = rawTxRef ? validatePaymentReference(rawTxRef) : null;
+  const providerRefundId = refundData?.id ? String(refundData.id) : undefined;
+  const rawRefundRef = refundData?.refund_reference || refundData?.reference;
+  const refundReference =
+    typeof rawRefundRef === "string" &&
+    rawRefundRef.trim() &&
+    rawRefundRef.trim() !== cleanTxRef
+      ? rawRefundRef.trim()
+      : undefined;
+
+  if (!cleanTxRef && providerRefundId) {
+    const qSnap = await adminDb
+      .collection("orders")
+      .where("providerRefundId", "==", providerRefundId)
+      .limit(1)
+      .get();
+    if (!qSnap.empty) {
+      cleanTxRef = qSnap.docs[0].data().paystackReference || null;
+    }
+  }
+
+  if (!cleanTxRef) {
+    console.warn("updateRefundStatus: No transaction reference found in payload:", refundData);
     return { success: false, updated: false };
   }
 
-  const cleanTxRef = validatePaymentReference(rawTxRef);
   const nowIso = new Date().toISOString();
-  const providerRefundId = refundData.id ? String(refundData.id) : undefined;
-  const refundReference =
-    refundData.refund_reference || refundData.reference || undefined;
   const failureReason =
-    refundData.status_message ||
-    refundData.message ||
-    (status === "failed" ? refundData.status || "Paystack refund failed" : undefined);
+    refundData?.status_message ||
+    refundData?.message ||
+    (status === "failed" ? refundData?.status || "Paystack refund failed" : undefined);
 
-  let updated = false;
-
-  // 1. Update matching order if found
+  // Requirement 14: Update order and payment_transactions together using an Admin SDK batch/transaction.
+  // Also make repeated identical webhook events idempotent (no duplicate statusHistory).
   const ordersSnap = await adminDb
     .collection("orders")
     .where("paystackReference", "==", cleanTxRef)
     .limit(1)
     .get();
 
+  const payTxRef = adminDb.collection("payment_transactions").doc(cleanTxRef);
+  const payTxSnap = await payTxRef.get();
+
+  if (ordersSnap.empty && !payTxSnap.exists) {
+    console.warn("updateRefundStatus: No order or payment transaction found for:", cleanTxRef);
+    return { success: true, updated: false };
+  }
+
+  const batch = adminDb.batch();
+  let hasMutation = false;
+
   if (!ordersSnap.empty) {
     const orderDoc = ordersSnap.docs[0];
     const order = orderDoc.data() as Order;
     const orderRef = orderDoc.ref;
 
+    // Idempotency: only append statusHistory if status actually changed
+    const isSameStatus = order.refundStatus === status;
     const orderUpdate: Record<string, any> = {
       refundStatus: status,
       updatedAt: nowIso,
@@ -930,28 +1207,26 @@ export async function updateRefundStatus(
     if (refundReference) orderUpdate.refundReference = refundReference;
     if (failureReason) orderUpdate.refundFailureReason = failureReason;
 
-    const note = `Refund status updated to "${status}" via Paystack webhook${
-      refundReference ? ` (Ref: ${refundReference})` : ""
-    }${failureReason ? `: ${failureReason}` : ""}`;
+    if (!isSameStatus) {
+      const note = `Refund status updated to "${status}" via Paystack webhook${
+        refundReference ? ` (Ref: ${refundReference})` : ""
+      }${failureReason ? `: ${failureReason}` : ""}`;
 
-    orderUpdate.statusHistory = [
-      ...(order.statusHistory || []),
-      {
-        status: order.orderStatus,
-        updatedAt: nowIso,
-        note,
-        updatedBy: "System (Paystack Webhook)",
-        eventType: "status",
-      },
-    ];
+      orderUpdate.statusHistory = [
+        ...(order.statusHistory || []),
+        {
+          status: order.orderStatus,
+          updatedAt: nowIso,
+          note,
+          updatedBy: "System (Paystack Webhook)",
+          eventType: "status",
+        },
+      ];
+    }
 
-    await orderRef.update(orderUpdate);
-    updated = true;
+    batch.update(orderRef, orderUpdate);
+    hasMutation = true;
   }
-
-  // 2. Update matching payment_transaction if found
-  const payTxRef = adminDb.collection("payment_transactions").doc(cleanTxRef);
-  const payTxSnap = await payTxRef.get();
 
   if (payTxSnap.exists) {
     const txUpdate: Record<string, any> = {
@@ -963,10 +1238,14 @@ export async function updateRefundStatus(
     if (failureReason) txUpdate.refundFailureReason = failureReason;
     if (status === "failed") txUpdate.needsRefund = true;
 
-    await payTxRef.update(txUpdate);
-    updated = true;
+    batch.update(payTxRef, txUpdate);
+    hasMutation = true;
   }
 
-  return { success: true, updated };
+  if (hasMutation) {
+    await batch.commit();
+  }
+
+  return { success: true, updated: hasMutation };
 }
 

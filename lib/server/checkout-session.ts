@@ -4,6 +4,7 @@ import { Timestamp, FieldValue } from "firebase-admin/firestore";
 import {
   canonicalizeCartItems,
   CommerceValidationError,
+  ReservationInvariantError,
   validateCustomerEmail,
   validateCustomerName,
   validateCustomerPhone,
@@ -424,8 +425,159 @@ export async function createCheckoutSession(
   });
 }
 
+export interface PaymentInitializationClaimResult {
+  canProceed: boolean;
+  outcome: "claim_acquired" | "already_initialized" | "in_progress" | "recovery_required";
+  session: CheckoutSession;
+  reference?: string;
+  accessCode?: string;
+  message?: string;
+}
+
 /**
- * Internal core release logic enforcing strict reservation invariants (Requirement 10).
+ * Transactionally claims provider initialization for a checkout session.
+ * Prevents concurrent provider initialization calls, locks a stable paystackReference,
+ * and enters explicit recovery_required on ambiguous stale attempts (Requirement 1 & 2).
+ */
+export async function claimPaymentInitialization(
+  sessionId: string
+): Promise<PaymentInitializationClaimResult> {
+  if (!sessionId || typeof sessionId !== "string") {
+    throw new CommerceValidationError("sessionId is required.", 400);
+  }
+
+  const sessionRef = adminDb.collection("checkout_sessions").doc(sessionId);
+
+  return adminDb.runTransaction(async (transaction) => {
+    const snap = await transaction.get(sessionRef);
+    if (!snap.exists) {
+      throw new CommerceValidationError("Checkout session not found.", 404);
+    }
+
+    const session = { id: snap.id, ...snap.data() } as CheckoutSession;
+
+    if (session.status !== "active") {
+      throw new CommerceValidationError(
+        `Cannot initialize payment for checkout session in "${session.status}" status.`,
+        400
+      );
+    }
+
+    if (!session.reservationActive) {
+      throw new CommerceValidationError(
+        "Checkout reservation is no longer active.",
+        400
+      );
+    }
+
+    // 1. If already initialized with accessCode and reference: return cached provider state
+    if (
+      session.paymentInitializationStatus === "initialized" &&
+      session.paystackAccessCode &&
+      session.paystackReference
+    ) {
+      return {
+        canProceed: false,
+        outcome: "already_initialized",
+        session,
+        reference: session.paystackReference,
+        accessCode: session.paystackAccessCode,
+      };
+    }
+
+    // 2. If session is flagged as recovery_required: do NOT issue duplicate provider call
+    if (session.paymentInitializationStatus === "recovery_required") {
+      return {
+        canProceed: false,
+        outcome: "recovery_required",
+        session,
+        message:
+          "Payment initialization requires recovery due to an ambiguous earlier attempt. Please retry later or contact support.",
+      };
+    }
+
+    // 3. If session is initializing: check claim age
+    if (session.paymentInitializationStatus === "initializing") {
+      const claimedAt = session.paymentInitializationClaimedAt;
+      let claimedAtMs = 0;
+      if (claimedAt) {
+        claimedAtMs =
+          typeof claimedAt.toMillis === "function"
+            ? claimedAt.toMillis()
+            : new Date(claimedAt).getTime();
+      }
+
+      const ageMs = Date.now() - claimedAtMs;
+
+      // If claim is still fresh (< 60s), block concurrent duplicate caller
+      if (claimedAtMs > 0 && ageMs < 60_000) {
+        return {
+          canProceed: false,
+          outcome: "in_progress",
+          session,
+          message:
+            "Payment initialization is currently in progress. Please wait for completion.",
+        };
+      }
+
+      // If claim is stale (>= 60s), enter explicit recovery_required rather than calling Paystack again blindly
+      transaction.update(sessionRef, {
+        paymentInitializationStatus: "recovery_required",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      return {
+        canProceed: false,
+        outcome: "recovery_required",
+        session: {
+          ...session,
+          paymentInitializationStatus: "recovery_required",
+        },
+        message:
+          "Payment initialization attempt expired ambiguously. Recovery required; duplicate provider call blocked.",
+      };
+    }
+
+    // 4. Initialization allowed (uninitialized, or failed with attempt < 5)
+    const currentAttempts = Number(session.paymentInitializationAttempt || 0);
+    if (currentAttempts >= 5) {
+      throw new CommerceValidationError(
+        "Maximum payment initialization attempts (5) exceeded for this session.",
+        400
+      );
+    }
+
+    const nextAttempt = currentAttempts + 1;
+    // Persist a STABLE server-generated paystackReference before calling Paystack
+    const stableRef =
+      session.paystackReference ||
+      `osvid_${Date.now()}_${crypto.randomBytes(5).toString("hex")}`;
+
+    transaction.update(sessionRef, {
+      paymentInitializationStatus: "initializing",
+      paymentInitializationAttempt: nextAttempt,
+      paymentInitializationClaimedAt: FieldValue.serverTimestamp(),
+      paystackReference: stableRef,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    return {
+      canProceed: true,
+      outcome: "claim_acquired",
+      session: {
+        ...session,
+        paymentInitializationStatus: "initializing",
+        paymentInitializationAttempt: nextAttempt,
+        paystackReference: stableRef,
+      },
+      reference: stableRef,
+    };
+  });
+}
+
+/**
+ * Internal core release logic enforcing strict reservation invariants (Requirement 3 & 4).
+ * Enforces all reads before all writes and fails closed with ReservationInvariantError on underflow.
  */
 async function executeReservationRelease(
   sessionId: string,
@@ -439,6 +591,7 @@ async function executeReservationRelease(
   const sessionRef = adminDb.collection("checkout_sessions").doc(sessionId);
 
   return adminDb.runTransaction(async (transaction) => {
+    // 1. Read session doc
     const snap = await transaction.get(sessionRef);
     if (!snap.exists) {
       return { success: false, alreadyReleased: true };
@@ -466,52 +619,74 @@ async function executeReservationRelease(
       }
     }
 
-    const nowIso = new Date().toISOString();
+    // 2. Collect all document references and READ ALL DOCUMENTS BEFORE WRITES (Requirement 4)
+    const productRefs = (session.items || []).map((it) => ({
+      item: it,
+      ref: adminDb.collection("products").doc(it.productId),
+    }));
 
-    // 1. Strict reservation invariant check on each product (Requirement 10)
-    for (const item of session.items || []) {
-      const pRef = adminDb.collection("products").doc(item.productId);
-      const pSnap = await transaction.get(pRef);
-      if (pSnap.exists) {
-        const pData = pSnap.data() || {};
+    const productSnaps = await Promise.all(
+      productRefs.map(async (p) => ({
+        item: p.item,
+        ref: p.ref,
+        snap: await transaction.get(p.ref),
+      }))
+    );
+
+    let discountSnap: FirebaseFirestore.DocumentSnapshot | null = null;
+    let discountRef: FirebaseFirestore.DocumentReference | null = null;
+    if (session.couponId) {
+      discountRef = adminDb.collection("discounts").doc(session.couponId);
+      discountSnap = await transaction.get(discountRef);
+    }
+
+    // 3. Strict reservation invariant validation (Requirement 3: Fail closed, no clamping!)
+    for (const p of productSnaps) {
+      if (p.snap.exists) {
+        const pData = p.snap.data() || {};
         const currentReserved = Number(pData.reservedQuantity || 0);
 
-        if (currentReserved < item.quantity) {
-          console.error(
-            `CRITICAL RESERVATION INCONSISTENCY: Product ${item.productId} current reservedQuantity (${currentReserved}) is less than session requested quantity (${item.quantity}). Clamping safely to prevent negative counters.`
+        if (currentReserved < p.item.quantity) {
+          throw new ReservationInvariantError(
+            `Product ${p.item.productId} reservedQuantity (${currentReserved}) is less than session reservation (${p.item.quantity}). Release failed closed.`
           );
         }
+      }
+    }
 
-        const nextReserved = Math.max(0, currentReserved - item.quantity);
-        transaction.update(pRef, {
-          reservedQuantity: nextReserved,
+    if (discountSnap && discountSnap.exists) {
+      const dData = discountSnap.data() || {};
+      const currentReservedUsage = Number(dData.reservedUsageCount || 0);
+
+      if (currentReservedUsage < 1) {
+        throw new ReservationInvariantError(
+          `Coupon ${session.couponCode} reservedUsageCount (${currentReservedUsage}) is less than 1. Release failed closed.`
+        );
+      }
+    }
+
+    // 4. ALL READS & VALIDATIONS COMPLETE - PERFORM WRITES
+    const nowIso = new Date().toISOString();
+
+    for (const p of productSnaps) {
+      if (p.snap.exists) {
+        const pData = p.snap.data() || {};
+        const currentReserved = Number(pData.reservedQuantity || 0);
+        transaction.update(p.ref, {
+          reservedQuantity: currentReserved - p.item.quantity,
           updatedAt: nowIso,
         });
       }
     }
 
-    // 2. Strict coupon reservation invariant check (Requirement 10)
-    if (session.couponId) {
-      const dRef = adminDb.collection("discounts").doc(session.couponId);
-      const dSnap = await transaction.get(dRef);
-      if (dSnap.exists) {
-        const dData = dSnap.data() || {};
-        const currentReservedUsage = Number(dData.reservedUsageCount || 0);
-
-        if (currentReservedUsage < 1) {
-          console.error(
-            `CRITICAL RESERVATION INCONSISTENCY: Coupon ${session.couponCode} reservedUsageCount (${currentReservedUsage}) is less than 1. Clamping safely.`
-          );
-        }
-
-        const nextReservedUsage = Math.max(0, currentReservedUsage - 1);
-        transaction.update(dRef, {
-          reservedUsageCount: nextReservedUsage,
-        });
-      }
+    if (discountRef && discountSnap && discountSnap.exists) {
+      const dData = discountSnap.data() || {};
+      const currentReservedUsage = Number(dData.reservedUsageCount || 0);
+      transaction.update(discountRef, {
+        reservedUsageCount: currentReservedUsage - 1,
+      });
     }
 
-    // 3. Mark session released
     transaction.update(sessionRef, {
       status: "released",
       reservationActive: false,

@@ -177,6 +177,18 @@ export async function verifyPaystackTransaction(
   };
 }
 
+export class PaystackRefundError extends Error {
+  public isDefinitive: boolean;
+  public statusCode?: number;
+
+  constructor(message: string, isDefinitive: boolean = false, statusCode?: number) {
+    super(message);
+    this.name = "PaystackRefundError";
+    this.isDefinitive = isDefinitive;
+    this.statusCode = statusCode;
+  }
+}
+
 /**
  * Initiates a full or partial refund with Paystack.
  */
@@ -186,7 +198,7 @@ export async function initiatePaystackRefund(
   const secretKey = getSecretKey();
 
   if (!params.transactionReference) {
-    throw new Error("Missing transaction reference for Paystack refund.");
+    throw new PaystackRefundError("Missing transaction reference for Paystack refund.", true, 400);
   }
 
   const payload: Record<string, any> = {
@@ -198,21 +210,32 @@ export async function initiatePaystackRefund(
     payload.amount = params.amountKobo;
   }
 
-  const response = await doFetch("https://api.paystack.co/refund", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${secretKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+  let response: Response;
+  try {
+    response = await doFetch("https://api.paystack.co/refund", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${secretKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (transportErr: any) {
+    // Transport failure, timeout, or interrupted network connection (Ambiguous outcome)
+    throw new PaystackRefundError(
+      `Paystack refund transport error: ${transportErr?.message || String(transportErr)}`,
+      false
+    );
+  }
 
   const json = await response.json().catch(() => ({}));
 
   if (!response.ok) {
     const errorMsg =
       json.message || `Paystack refund returned HTTP ${response.status}`;
-    throw new Error(`Paystack refund failed: ${errorMsg}`);
+    // HTTP 4xx (e.g. 400, 404, 422) is definitive rejection by provider. HTTP 5xx is server-side ambiguous.
+    const isDefinitive = response.status >= 400 && response.status < 500;
+    throw new PaystackRefundError(errorMsg, isDefinitive, response.status);
   }
 
   return {

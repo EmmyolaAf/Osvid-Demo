@@ -68,7 +68,8 @@ export type PaymentInitializationStatus =
   | "uninitialized"
   | "initializing"
   | "initialized"
-  | "failed";
+  | "failed"
+  | "recovery_required";
 
 export interface CheckoutSession {
   id: string;
@@ -95,6 +96,7 @@ export interface CheckoutSession {
   paystackAccessCode?: string;
   paymentInitializationStatus?: PaymentInitializationStatus;
   paymentInitializationAttempt?: number;
+  paymentInitializationClaimedAt?: any;
   reservationExpiresAt: any; // Firestore Timestamp
   reservationExpiresAtIso: string;
   reservationActive: boolean;

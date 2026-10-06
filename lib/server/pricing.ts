@@ -15,6 +15,13 @@ export class CommerceValidationError extends Error {
   }
 }
 
+export class ReservationInvariantError extends CommerceValidationError {
+  constructor(message: string) {
+    super(message, 409);
+    this.name = "ReservationInvariantError";
+  }
+}
+
 /**
  * Validates cart items and canonicalizes duplicate product entries by summing quantities.
  */

@@ -68,8 +68,8 @@ export async function POST(
         emailSent: result.emailSent,
         data: {
           reference,
-          amount: 0, // Noted for contract compatibility
-          currency: "NGN",
+          amount: result.amount ?? 0,
+          currency: result.currency || "NGN",
           orderId: result.orderId,
         },
       },

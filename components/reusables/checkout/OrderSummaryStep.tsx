@@ -157,11 +157,18 @@ export function OrderSummaryStep() {
     initializePayment();
   }, []);
 
-  // Update server quote when cart or delivery method changes
+  // Update server quote when cart, delivery method, shipping address, or pickup location changes (Requirement 17)
   useEffect(() => {
     fetchAuthoritativeQuote();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart, checkoutData.deliveryMethod]);
+  }, [
+    cart,
+    checkoutData.deliveryMethod,
+    checkoutData.shippingAddress?.state,
+    checkoutData.shippingAddress?.city,
+    checkoutData.shippingAddress?.streetAddress,
+    checkoutData.pickupLocationId,
+  ]);
 
   const handleApplyCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -251,15 +258,24 @@ export function OrderSummaryStep() {
       }
 
       // Attach genuine authenticated ID token if customer is logged in
+      // Requirement 15: If logged in but obtaining ID token fails, abort checkout with error.
+      // Do NOT silently downgrade to guest checkout.
       let authHeaders: Record<string, string> = {};
       if (user) {
         try {
           const idToken = await user.getIdToken();
-          if (idToken) {
-            authHeaders = { Authorization: `Bearer ${idToken}` };
+          if (!idToken) {
+            throw new Error("Empty authentication credentials.");
           }
+          authHeaders = { Authorization: `Bearer ${idToken}` };
         } catch (tokErr) {
-          console.warn("Could not read auth token:", tokErr);
+          console.error("Authenticated customer token retrieval failed:", tokErr);
+          toast.dismiss(toastId);
+          setPaymentStatus("idle");
+          toast.error(
+            "Your login session could not be verified. Please refresh the page or sign in again to proceed."
+          );
+          return;
         }
       }
 
