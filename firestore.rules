@@ -234,8 +234,9 @@ service cloud.firestore {
         (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['usageCount']) ||
          request.resource.data.usageCount == resource.data.usageCount);
 
-      // Deletion: staff with discount authority
-      allow delete: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageDiscounts'));
+      // Deletion: staff with discount authority; cannot delete coupon while reservations are active (Packet 4D Requirement 7)
+      allow delete: if (isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageDiscounts'))) &&
+        (!('reservedUsageCount' in resource.data) || resource.data.reservedUsageCount == 0);
     }
 
     // ===============================================================

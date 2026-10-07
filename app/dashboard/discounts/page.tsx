@@ -173,6 +173,13 @@ export default function DiscountsPage() {
   };
 
   const handleDelete = async (id: string, code: string) => {
+    const existingCoupon = discounts.find((d) => d.id === id);
+    if (existingCoupon && Number(existingCoupon.reservedUsageCount || 0) > 0) {
+      toast.error(
+        `Cannot delete coupon "${code}" because it has ${existingCoupon.reservedUsageCount} active checkout reservation(s).`
+      );
+      return;
+    }
     if (!confirm(`Delete coupon code "${code}" from Firestore? This cannot be undone.`)) return;
     try {
       const result = await deleteDiscountFromDb(id);

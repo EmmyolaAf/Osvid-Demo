@@ -73,6 +73,38 @@ export function getDeterministicSessionId(cleanRequestId: string): string {
 }
 
 /**
+ * Deterministically normalizes delivery fulfillment destination for the request fingerprint (Packet 4D Requirement 5).
+ */
+export function normalizeDeliveryFingerprint(
+  deliveryMethod: "shipping" | "pickup",
+  shippingAddress?: ShippingAddress | null,
+  pickupLocationId?: string | null
+): string {
+  if (deliveryMethod === "pickup") {
+    return `pickup:${(pickupLocationId || "").trim().toLowerCase()}`;
+  }
+  const addr: Partial<ShippingAddress> = shippingAddress || {};
+  const street = (addr.streetAddress || addr.address || "").trim().toLowerCase();
+  const city = (addr.city || "").trim().toLowerCase();
+  const state = (addr.state || "").trim().toLowerCase();
+  const postalCode = (addr.postalCode || "").trim().toLowerCase();
+  const fullName = (addr.fullName || "").trim().toLowerCase();
+  const phone = (addr.phone || "").trim().toLowerCase();
+  const email = (addr.email || "").trim().toLowerCase();
+
+  return [
+    `method:shipping`,
+    `street:${street}`,
+    `city:${city}`,
+    `state:${state}`,
+    `postal:${postalCode}`,
+    `name:${fullName}`,
+    `phone:${phone}`,
+    `email:${email}`,
+  ].join(";");
+}
+
+/**
  * Computes a stable hash fingerprint of the normalized checkout intent.
  */
 export function computeCheckoutRequestFingerprint(params: {
@@ -81,7 +113,9 @@ export function computeCheckoutRequestFingerprint(params: {
   customerName: string;
   customerPhone: string;
   deliveryMethod: "shipping" | "pickup";
-  shippingDetails: string;
+  shippingDetails?: string;
+  shippingAddress?: ShippingAddress;
+  pickupLocationId?: string;
   couponCode?: string;
   authenticatedUserId?: string;
 }): string {
@@ -90,6 +124,19 @@ export function computeCheckoutRequestFingerprint(params: {
     .map((i) => `${i.productId}:${i.quantity}`)
     .join(",");
 
+  let deliveryStr = "";
+  if (params.shippingAddress || params.pickupLocationId) {
+    deliveryStr = normalizeDeliveryFingerprint(
+      params.deliveryMethod,
+      params.shippingAddress,
+      params.pickupLocationId
+    );
+  } else if (params.shippingDetails !== undefined) {
+    deliveryStr = params.shippingDetails.trim();
+  } else {
+    deliveryStr = normalizeDeliveryFingerprint(params.deliveryMethod, null, null);
+  }
+
   const parts = [
     sortedItemsStr,
     (params.couponCode || "").trim().toUpperCase(),
@@ -97,7 +144,7 @@ export function computeCheckoutRequestFingerprint(params: {
     params.customerName.trim(),
     params.customerPhone.trim(),
     params.deliveryMethod,
-    params.shippingDetails.trim(),
+    deliveryStr,
     params.authenticatedUserId || "guest",
   ];
 
@@ -137,6 +184,8 @@ export async function createCheckoutSession(
     customerName: cleanCustomerName,
     customerPhone: cleanCustomerPhone,
     deliveryMethod: deliveryResult.deliveryMethod,
+    shippingAddress: deliveryResult.shippingAddress,
+    pickupLocationId: deliveryResult.pickupLocationId,
     shippingDetails: shippingDetailsStr,
     couponCode: normalizedCoupon,
     authenticatedUserId: params.authenticatedUserId,
@@ -172,26 +221,15 @@ export async function createCheckoutSession(
         );
       }
 
-      // If active, rotate release token safely (Requirement 4)
+      // If active, do NOT rotate release token prematurely (Packet 4D Requirement 4).
+      // Token rotation happens only when delivering a usable session/token to the caller.
       if (existing.status === "active" && existing.reservationActive) {
-        const freshRawReleaseToken = crypto.randomBytes(32).toString("hex");
-        const freshReleaseTokenHash = crypto
-          .createHash("sha256")
-          .update(freshRawReleaseToken)
-          .digest("hex");
-
-        transaction.update(sessionRef, {
-          releaseTokenHash: freshReleaseTokenHash,
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-
         return {
           session: {
             ...existing,
             id: sessionId,
-            releaseTokenHash: freshReleaseTokenHash,
           },
-          releaseToken: freshRawReleaseToken,
+          releaseToken: "",
           replayed: true,
         };
       }
@@ -311,6 +349,15 @@ export async function createCheckoutSession(
       }
 
       couponDocData = dSnap.data() as DiscountCode;
+
+      // Revalidate coupon code strictly after transactional read (Packet 4D Requirement 6)
+      const authoritativeCode = (couponDocData.code || "").trim().toUpperCase();
+      if (authoritativeCode !== normalizedCoupon) {
+        throw new CommerceValidationError(
+          `Coupon code "${normalizedCoupon}" is invalid or does not match authoritative record.`,
+          400
+        );
+      }
 
       if (!couponDocData.isActive) {
         throw new CommerceValidationError(
@@ -763,4 +810,40 @@ export async function cleanupExpiredCheckoutReservations(maxBatch = 5): Promise<
     console.error("Error cleaning up expired checkout sessions:", err);
     return 0;
   }
+}
+
+/**
+ * Transactionally rotates the cancellation release token for an active checkout session.
+ * Used exclusively when a usable session/token is confirmed to be delivered to a successful replay caller (Packet 4D Requirement 4).
+ */
+export async function rotateSessionReleaseToken(sessionId: string): Promise<string> {
+  const sessionRef = adminDb.collection("checkout_sessions").doc(sessionId);
+  const freshRawReleaseToken = crypto.randomBytes(32).toString("hex");
+  const freshReleaseTokenHash = crypto
+    .createHash("sha256")
+    .update(freshRawReleaseToken)
+    .digest("hex");
+
+  await adminDb.runTransaction(async (transaction) => {
+    const snap = await transaction.get(sessionRef);
+    if (!snap.exists) {
+      throw new CommerceValidationError(
+        `Checkout session "${sessionId}" not found for token rotation.`,
+        404
+      );
+    }
+    const session = snap.data() as CheckoutSession;
+    if (session.status !== "active" || !session.reservationActive) {
+      throw new CommerceValidationError(
+        `Checkout session "${sessionId}" is not active with active reservation.`,
+        400
+      );
+    }
+    transaction.update(sessionRef, {
+      releaseTokenHash: freshReleaseTokenHash,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+
+  return freshRawReleaseToken;
 }

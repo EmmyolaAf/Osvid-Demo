@@ -86,9 +86,12 @@ export async function POST(
         );
       }
 
-      if (order.refundStatus === "initiating") {
+      if (
+        order.refundStatus === "initiating" ||
+        order.refundStatus === "needs_attention"
+      ) {
         throw new Error(
-          `CONFLICT:Refund is currently in initiating state for order "${cleanOrderId}". Refund reconciliation required.`
+          `CONFLICT:Refund is currently in ${order.refundStatus} state for order "${cleanOrderId}". Refund reconciliation required.`
         );
       }
 

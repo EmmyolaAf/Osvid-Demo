@@ -6,6 +6,7 @@ import {
   verifyPaystackTransaction,
   initiatePaystackRefund,
   PaystackVerifyResult,
+  PaystackRefundError,
 } from "@/lib/server/paystack";
 import {
   validatePaymentReference,
@@ -161,6 +162,16 @@ export async function finalizeSuccessfulPayment(
   if (existingTxSnap.exists) {
     const existingTx = existingTxSnap.data() as PaymentTransactionRecord;
     if (existingTx.status === "finalized" && existingTx.orderId) {
+      if (options?.expectedCheckoutSessionId) {
+        const expectedId = options.expectedCheckoutSessionId.trim();
+        if (existingTx.checkoutSessionId !== expectedId) {
+          throw new CommerceValidationError(
+            `Checkout session binding error: finalized payment "${cleanRef}" belongs to session "${existingTx.checkoutSessionId || ""}", not "${expectedId}".`,
+            409
+          );
+        }
+      }
+
       let emailSent = existingTx.receiptEmailStatus === "sent";
       if (!emailSent) {
         // Attempt receipt retry for finalized payment (Requirement 7)
@@ -208,6 +219,15 @@ export async function finalizeSuccessfulPayment(
       };
     }
     if (existingTx.status === "anomaly_unfulfillable") {
+      if (options?.expectedCheckoutSessionId) {
+        const expectedId = options.expectedCheckoutSessionId.trim();
+        if (existingTx.checkoutSessionId && existingTx.checkoutSessionId !== expectedId) {
+          throw new CommerceValidationError(
+            `Checkout session binding error: anomaly payment "${cleanRef}" belongs to session "${existingTx.checkoutSessionId}", not "${expectedId}".`,
+            409
+          );
+        }
+      }
       return {
         success: false,
         anomaly: true,
@@ -487,15 +507,52 @@ export async function finalizeSuccessfulPayment(
         const dSnap = await transaction.get(discountDocRef);
         if (dSnap.exists) {
           discountData = dSnap.data() as DiscountCode;
+        } else {
+          // Packet 4D Requirement 7: coupon document disappeared during payment finalization
+          const anomalyReason = `Coupon "${currentSession.couponCode || currentSession.couponId}" disappeared before payment finalization. Cannot complete redemption bookkeeping.`;
+
+          transaction.update(sessionDocRef, {
+            status: "anomaly_unfulfillable",
+            anomalyReason,
+            updatedAt: FieldValue.serverTimestamp(),
+            updatedAtIso: nowIso,
+          });
+
+          transaction.set(paymentTxRef, {
+            id: cleanRef,
+            reference: cleanRef,
+            checkoutSessionId: currentSession.id,
+            status: "anomaly_unfulfillable",
+            amount: currentSession.totalAmount,
+            amountKobo: paystackData.amount,
+            currency: "NGN",
+            customerEmail: currentSession.customerEmail,
+            paystackData: paystackData.raw,
+            anomalyReason,
+            needsRefund: true,
+            refundStatus: "none",
+            createdAt: FieldValue.serverTimestamp(),
+            createdAtIso: nowIso,
+          });
+
+          return {
+            finalizedNow: false,
+            replayed: false,
+            authoritativeOrderId: "",
+            anomaly: true,
+            anomalyReason,
+          };
         }
       }
 
-      // Read customer profile if authenticated
+      // Read customer profile if authenticated (Packet 4D Requirement 1: fix inverted check)
       let userDocRef: FirebaseFirestore.DocumentReference | null = null;
       if (currentSession.authenticatedUserId) {
-        userDocRef = adminDb.collection("users").doc(currentSession.authenticatedUserId);
-        const uSnap = await transaction.get(userDocRef);
+        const candidateUserRef = adminDb.collection("users").doc(currentSession.authenticatedUserId);
+        const uSnap = await transaction.get(candidateUserRef);
         if (uSnap.exists) {
+          userDocRef = candidateUserRef;
+        } else {
           userDocRef = null;
         }
       }
@@ -777,60 +834,125 @@ export async function finalizeSuccessfulPayment(
     }
   );
 
-  // 5. Handle Anomaly Outcome (Requirement 14)
+  // 5. Handle Anomaly Outcome (Requirement 14 & Packet 4D Section 3)
   if (outcome.anomaly) {
     let refundAccepted = false;
     let providerRefundId: string | undefined = undefined;
     let refundReference: string | undefined = undefined;
     let failureReason: string | undefined = undefined;
+    let isDefinitiveFailure = false;
 
+    // Transactionally claim anomaly refund initiation lock on payment_transactions/{cleanRef}
+    // Only "none" or definitively retryable "failed" can transition to "initiating"
+    let claimAcquired = false;
     try {
-      const refundRes = await initiatePaystackRefund({
-        transactionReference: cleanRef,
-        amountKobo: paystackData.amount,
-        merchantNote: outcome.anomalyReason || "Safe refund: order item unfulfillable.",
-      });
+      claimAcquired = await adminDb.runTransaction(async (transaction) => {
+        const txSnap = await transaction.get(paymentTxRef);
+        if (!txSnap.exists) {
+          return false;
+        }
+        const txData = txSnap.data() as PaymentTransactionRecord;
+        const currentRefundStatus = txData.refundStatus || "none";
 
-      if (refundRes.status) {
-        refundAccepted = true;
-        providerRefundId = refundRes.data?.id ? String(refundRes.data.id) : undefined;
-        refundReference =
-          refundRes.data?.refund_reference ||
-          (refundRes.data?.reference && refundRes.data?.reference !== cleanRef
-            ? refundRes.data?.reference
-            : undefined);
-      } else {
-        failureReason = refundRes.message || "Provider declined refund request.";
-      }
-    } catch (err: any) {
-      console.error("Anomaly refund initiation failed:", err);
-      failureReason = err?.message || String(err);
+        if (currentRefundStatus === "none" || currentRefundStatus === "failed") {
+          transaction.update(paymentTxRef, {
+            refundStatus: "initiating",
+            refundInitiatingAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+            updatedAtIso: nowIso,
+          });
+          return true;
+        }
+        return false;
+      });
+    } catch (claimErr) {
+      console.error("Anomaly refund initiation claim failed:", claimErr);
+      claimAcquired = false;
     }
 
-    // Persist durable anomaly refund state on payment transaction
-    if (refundAccepted) {
-      await paymentTxRef.update({
-        refundStatus: "pending",
-        providerRefundId: providerRefundId || null,
-        refundReference: refundReference || null,
-        refundRequestedAt: nowIso,
-      });
-    } else {
-      await paymentTxRef.update({
-        needsRefund: true,
-        refundStatus: "failed",
-        refundFailureReason: failureReason || "Refund initiation failed.",
-      });
+    if (claimAcquired) {
+      try {
+        const refundRes = await initiatePaystackRefund({
+          transactionReference: cleanRef,
+          amountKobo: paystackData.amount,
+          merchantNote: outcome.anomalyReason || "Safe refund: order item unfulfillable.",
+        });
+
+        if (refundRes.status) {
+          refundAccepted = true;
+          providerRefundId = refundRes.data?.id ? String(refundRes.data.id) : undefined;
+          refundReference =
+            refundRes.data?.refund_reference ||
+            (refundRes.data?.reference && refundRes.data?.reference !== cleanRef
+              ? refundRes.data?.reference
+              : undefined);
+        } else {
+          failureReason = refundRes.message || "Provider declined refund request.";
+          isDefinitiveFailure = true;
+        }
+      } catch (err: any) {
+        console.error("Anomaly refund initiation failed:", err);
+        failureReason = err?.message || String(err);
+        if (err instanceof PaystackRefundError || err?.name === "PaystackRefundError") {
+          isDefinitiveFailure = Boolean(err.isDefinitive);
+        } else if (err?.isDefinitive !== undefined) {
+          isDefinitiveFailure = Boolean(err.isDefinitive);
+        } else {
+          isDefinitiveFailure = false;
+        }
+      }
+
+      // Persist durable anomaly refund state on payment transaction
+      if (refundAccepted) {
+        try {
+          await paymentTxRef.update({
+            refundStatus: "pending",
+            providerRefundId: providerRefundId || null,
+            refundReference: refundReference || null,
+            refundRequestedAt: nowIso,
+            updatedAt: FieldValue.serverTimestamp(),
+            updatedAtIso: nowIso,
+          });
+        } catch (persistErr) {
+          console.error(
+            "Critical: Provider accepted anomaly refund, but local pending update failed:",
+            persistErr
+          );
+          // Leave the durable initiating state intact for future reconciliation
+        }
+      } else if (isDefinitiveFailure) {
+        await paymentTxRef.update({
+          needsRefund: true,
+          refundStatus: "failed",
+          refundFailureReason: failureReason || "Refund initiation failed definitively.",
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedAtIso: nowIso,
+        });
+      } else {
+        // Ambiguous transport failure or 5xx outcome -> needs_attention (DO NOT mark as ordinary failed)
+        await paymentTxRef.update({
+          needsRefund: true,
+          refundStatus: "needs_attention",
+          refundFailureReason: failureReason || "Ambiguous gateway response. Reconciliation required.",
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedAtIso: nowIso,
+        });
+      }
     }
 
     return {
       success: false,
       anomaly: true,
-      replayed: false,
+      replayed: outcome.replayed,
       emailSent: false,
-      message: refundAccepted
-        ? "Stock or promotion unavailable after expired reservation. A safe refund has been initiated."
-        : "Stock or promotion unavailable after expired reservation. Payment requires manual reconciliation; please contact support.",
+      message: claimAcquired
+        ? refundAccepted
+          ? "Stock or promotion unavailable after expired reservation. A safe refund has been initiated."
+          : isDefinitiveFailure
+            ? "Stock or promotion unavailable after expired reservation. Refund rejected by provider; please contact support."
+            : "Stock or promotion unavailable after expired reservation. Payment requires manual reconciliation; please contact support."
+        : outcome.anomalyReason ||
+          "Payment anomaly: inventory or promotion was unfulfillable. Refund reconciliation in progress.",
     };
   }
 

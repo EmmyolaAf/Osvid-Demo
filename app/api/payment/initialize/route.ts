@@ -4,6 +4,7 @@ import { assertStoreOperationalSubscription } from "@/lib/server/subscription-gu
 import { extractBearerToken, verifyAuthToken } from "@/lib/server/auth";
 import {
   createCheckoutSession,
+  rotateSessionReleaseToken,
   claimPaymentInitialization,
   releaseCheckoutReservationInternal,
   cleanupExpiredCheckoutReservations,
@@ -107,7 +108,7 @@ export async function POST(
     }
 
     // 5. Create checkout session and reserve stock & coupon in a Firestore transaction
-    const { session, releaseToken } = await createCheckoutSession({
+    const { session, releaseToken, replayed } = await createCheckoutSession({
       checkoutRequestId,
       items,
       customerInfo,
@@ -125,6 +126,10 @@ export async function POST(
 
     // If already initialized, return authoritative cached provider state
     if (claim.outcome === "already_initialized" && claim.accessCode && claim.reference) {
+      const activeReleaseToken = replayed
+        ? await rotateSessionReleaseToken(session.id)
+        : releaseToken;
+
       return NextResponse.json(
         {
           success: true,
@@ -140,7 +145,7 @@ export async function POST(
             currency: "NGN",
           },
           reservationExpiresAtIso: session.reservationExpiresAtIso,
-          releaseToken: releaseToken || undefined,
+          releaseToken: activeReleaseToken || undefined,
         },
         { status: 200 }
       );
@@ -231,6 +236,10 @@ export async function POST(
       );
     }
 
+    const deliveredReleaseToken = replayed
+      ? await rotateSessionReleaseToken(session.id)
+      : releaseToken;
+
     return NextResponse.json(
       {
         success: true,
@@ -246,7 +255,7 @@ export async function POST(
           currency: "NGN",
         },
         reservationExpiresAtIso: session.reservationExpiresAtIso,
-        releaseToken,
+        releaseToken: deliveredReleaseToken,
       },
       { status: 200 }
     );
