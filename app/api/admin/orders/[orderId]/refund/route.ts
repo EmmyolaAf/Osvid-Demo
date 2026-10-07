@@ -9,6 +9,10 @@ import {
 import { assertOperationalSubscription } from "@/lib/server/subscription-guard";
 import { buildAuditLogRecord } from "@/lib/server/audit";
 import { initiatePaystackRefund } from "@/lib/server/paystack";
+import {
+  canAdvanceRefundStatus,
+  getDominantRefundStatus,
+} from "@/lib/server/payment-finalizer";
 import { Order } from "@/types/auth";
 import { PaymentTransactionRecord } from "@/types/commerce";
 
@@ -228,7 +232,6 @@ export async function POST(
           throw new Error(`NOT_FOUND:Order disappeared during refund: "${cleanOrderId}"`);
         }
         const curOrder = curOrderSnap.data() as Order;
-        const curRefundStatus = curOrder.refundStatus || "none";
 
         // 2. Transactionally read payment_transactions document if present
         let curPayTxSnap: FirebaseFirestore.DocumentSnapshot | null = null;
@@ -241,8 +244,25 @@ export async function POST(
         }
 
         // ALL READS ARE COMPLETE.
-        // If current refund state is still "initiating", HTTP request owns transition
-        if (curRefundStatus === "initiating") {
+        // Packet 4F Requirement 7: Consider BOTH transactionally-read states
+        const effectiveOrderStatus =
+          curOrder.paymentStatus === "refunded" || curOrder.refundStatus === "processed"
+            ? "processed"
+            : (curOrder.refundStatus || "none");
+
+        const effectiveTxStatus = curPayTx
+          ? curPayTx.status === "refunded" || curPayTx.refundStatus === "processed"
+            ? "processed"
+            : (curPayTx.refundStatus || "none")
+          : null;
+
+        const dominantStatus = getDominantRefundStatus(
+          effectiveOrderStatus,
+          effectiveTxStatus
+        );
+
+        // If dominant refund state across both records is still "initiating", HTTP request owns transition
+        if (dominantStatus === "initiating") {
           if (outcomeType === "accepted") {
             const updatedHistory = [
               ...(curOrder.statusHistory || []),
@@ -363,10 +383,26 @@ export async function POST(
             };
           }
         } else {
-          // Webhook has already moved the state to pending, processing, processed, needs_attention, or failed!
-          // DO NOT overwrite it with an older result.
-          // Merge safe missing provider identifiers only if appropriate.
+          // At least one record already contains a more advanced provider-established state!
+          // DO NOT overwrite that state on the other record with pending, failed, or needs_attention.
+          // Reconcile safely toward the more advanced dominant valid state.
           const orderMergeUpdate: Record<string, any> = {};
+          if (
+            effectiveOrderStatus !== dominantStatus &&
+            canAdvanceRefundStatus(effectiveOrderStatus, dominantStatus)
+          ) {
+            orderMergeUpdate.refundStatus = dominantStatus;
+            orderMergeUpdate.statusHistory = [
+              ...(curOrder.statusHistory || []),
+              {
+                status: curOrder.orderStatus,
+                updatedAt: postIso,
+                note: `Refund state reconciled to "${dominantStatus}"`,
+                updatedBy: "System (Admin Refund Reconciler)",
+                eventType: "status",
+              },
+            ];
+          }
           if (providerRefundId && !curOrder.providerRefundId) {
             orderMergeUpdate.providerRefundId = providerRefundId;
           }
@@ -380,6 +416,12 @@ export async function POST(
 
           if (curPayTxSnap?.exists && curPayTx && payTxRef) {
             const txMergeUpdate: Record<string, any> = {};
+            if (
+              effectiveTxStatus !== dominantStatus &&
+              canAdvanceRefundStatus(effectiveTxStatus, dominantStatus)
+            ) {
+              txMergeUpdate.refundStatus = dominantStatus;
+            }
             if (providerRefundId && !curPayTx.providerRefundId) {
               txMergeUpdate.providerRefundId = providerRefundId;
             }
@@ -394,7 +436,7 @@ export async function POST(
           }
 
           return {
-            authoritativeStatus: curRefundStatus,
+            authoritativeStatus: dominantStatus,
             statePreserved: true,
           };
         }

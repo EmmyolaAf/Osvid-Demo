@@ -1152,7 +1152,7 @@ export async function finalizeProcessedRefund(refundData: any): Promise<{
       if (!currentOrderSnap.exists) return;
       const currentOrder = currentOrderSnap.data() as Order;
 
-      if (currentOrder.paymentStatus === "refunded") {
+      if (currentOrder.paymentStatus === "refunded" || currentOrder.refundStatus === "processed") {
         return;
       }
 
@@ -1258,35 +1258,40 @@ export async function finalizeProcessedRefund(refundData: any): Promise<{
       transaction.update(orderRef, orderUpdate);
 
       if (payTxSnap.exists) {
-        const payTxUpdate: Record<string, any> = {
-          status: "refunded",
-          refundStatus: "processed",
-          needsRefund: false,
-          refundedAtIso: nowIso,
-        };
-        if (refundReference) payTxUpdate.refundReference = refundReference;
-        if (providerRefundId) payTxUpdate.providerRefundId = providerRefundId;
+        const payTxData = payTxSnap.data() as PaymentTransactionRecord;
+        if (payTxData.status === "refunded" && payTxData.refundStatus === "processed") {
+          // already refunded
+        } else {
+          const payTxUpdate: Record<string, any> = {
+            status: "refunded",
+            refundStatus: "processed",
+            needsRefund: false,
+            refundedAtIso: nowIso,
+          };
+          if (refundReference) payTxUpdate.refundReference = refundReference;
+          if (providerRefundId) payTxUpdate.providerRefundId = providerRefundId;
 
-        transaction.update(payTxRef, payTxUpdate);
+          transaction.update(payTxRef, payTxUpdate);
+        }
       }
     });
 
     return { success: true, orderId: order.id, alreadyProcessed: false };
   }
 
-  // 2. Anomaly Refund Reconciliation Without An Order (Requirement 18)
+  // 2. Anomaly Refund Reconciliation Without An Order (Requirement 18, Packet 4F Transactional)
   const payTxRef = adminDb.collection("payment_transactions").doc(cleanTxRef);
-  const payTxSnap = await payTxRef.get();
-
-  if (payTxSnap.exists) {
-    const payTx = payTxSnap.data() as PaymentTransactionRecord;
-
-    if (payTx.status === "refunded" && payTx.refundStatus === "processed") {
-      return { success: true, alreadyProcessed: true };
+  const anomalyRes = await adminDb.runTransaction(async (transaction) => {
+    const payTxSnap = await transaction.get(payTxRef);
+    if (!payTxSnap.exists) {
+      return { found: false, alreadyProcessed: false };
     }
-
+    const payTx = payTxSnap.data() as PaymentTransactionRecord;
+    if (payTx.status === "refunded" && payTx.refundStatus === "processed") {
+      return { found: true, alreadyProcessed: true };
+    }
     const nowIso = new Date().toISOString();
-    await payTxRef.update({
+    transaction.update(payTxRef, {
       status: "refunded",
       refundStatus: "processed",
       needsRefund: false,
@@ -1294,8 +1299,11 @@ export async function finalizeProcessedRefund(refundData: any): Promise<{
       providerRefundId: providerRefundId || null,
       refundedAtIso: nowIso,
     });
+    return { found: true, alreadyProcessed: false };
+  });
 
-    return { success: true, alreadyProcessed: false };
+  if (anomalyRes.found) {
+    return { success: true, alreadyProcessed: anomalyRes.alreadyProcessed };
   }
 
   console.warn(
@@ -1372,13 +1380,66 @@ export function canAdvanceRefundStatus(
 }
 
 /**
- * Update refund status for intermediate/terminal refund lifecycle events:
- * refund.pending, refund.processing, refund.needs-attention, refund.failed
+ * Packet 4F: Determines the authoritative/dominant refund status between two records
+ * (e.g. orders/{orderId} and payment_transactions/{reference}).
+ *
+ * Ranking (highest to lowest authority):
+ * 6: processed (terminal dominant)
+ * 5: processing
+ * 4: pending
+ * 3: needs_attention
+ * 2: initiating
+ * 1: failed
+ * 0: none
+ */
+export function getDominantRefundStatus(
+  statusA: string | undefined | null,
+  statusB: string | undefined | null
+): string {
+  const rank: Record<string, number> = {
+    processed: 6,
+    processing: 5,
+    pending: 4,
+    needs_attention: 3,
+    initiating: 2,
+    failed: 1,
+    none: 0,
+  };
+
+  const a = statusA || "none";
+  const b = statusB || "none";
+  const rankA = rank[a] ?? 0;
+  const rankB = rank[b] ?? 0;
+
+  return rankA >= rankB ? a : b;
+}
+
+export interface UpdateRefundStatusResult {
+  success: boolean;
+  matched: boolean;
+  changed: boolean;
+  ignoredAsStale?: boolean;
+  duplicate?: boolean;
+  orderId?: string;
+  authoritativeStatus?: string;
+  updated?: boolean; // backwards-compatible alias for changed
+}
+
+/**
+ * Packet 4F Requirement 1, 2, 3:
+ * Fully transactional refund status update for intermediate/terminal refund events:
+ * refund.pending, refund.processing, refund.needs-attention, refund.failed.
+ *
+ * Guarantees:
+ * - All reads precede writes inside ONE Firestore transaction.
+ * - Monotonic progression: concurrent webhooks cannot downgrade states.
+ * - Consistency: orders and payment_transactions records remain aligned.
+ * - Explicit result contract: distinguishes no-match (error) from stale/duplicate (success).
  */
 export async function updateRefundStatus(
   status: "pending" | "processing" | "needs_attention" | "failed",
   refundData: any
-): Promise<{ success: boolean; updated: boolean }> {
+): Promise<UpdateRefundStatusResult> {
   const rawTxRef =
     (typeof refundData?.transaction_reference === "string" &&
       refundData.transaction_reference.trim()) ||
@@ -1409,7 +1470,7 @@ export async function updateRefundStatus(
 
   if (!cleanTxRef) {
     console.warn("updateRefundStatus: No transaction reference found in payload:", refundData);
-    return { success: false, updated: false };
+    return { success: false, matched: false, changed: false, updated: false };
   }
 
   const nowIso = new Date().toISOString();
@@ -1418,112 +1479,250 @@ export async function updateRefundStatus(
     refundData?.message ||
     (status === "failed" ? refundData?.status || "Paystack refund failed" : undefined);
 
-  // Requirement 14: Update order and payment_transactions together using an Admin SDK batch/transaction.
-  // Also make repeated identical webhook events idempotent (no duplicate statusHistory).
+  // Initial query outside transaction solely to locate the order document by paystackReference
   const ordersSnap = await adminDb
     .collection("orders")
     .where("paystackReference", "==", cleanTxRef)
     .limit(1)
     .get();
 
-  const payTxRef = adminDb.collection("payment_transactions").doc(cleanTxRef);
-  const payTxSnap = await payTxRef.get();
+  const orderDocRef = !ordersSnap.empty ? ordersSnap.docs[0].ref : null;
+  const initialOrderId = !ordersSnap.empty ? ordersSnap.docs[0].id : undefined;
+  const payTxDocRef = adminDb.collection("payment_transactions").doc(cleanTxRef);
 
-  if (ordersSnap.empty && !payTxSnap.exists) {
-    console.warn("updateRefundStatus: No order or payment transaction found for:", cleanTxRef);
-    return { success: true, updated: false };
-  }
+  const txResult = await adminDb.runTransaction(async (transaction) => {
+    // Step 1: Read orders/{orderId} if one exists
+    let orderSnap: FirebaseFirestore.DocumentSnapshot | null = null;
+    if (orderDocRef) {
+      orderSnap = await transaction.get(orderDocRef);
+    }
 
-  const batch = adminDb.batch();
-  let hasMutation = false;
+    // Step 2: Read payment_transactions/{cleanTxRef}
+    const payTxSnap = await transaction.get(payTxDocRef);
 
-  if (!ordersSnap.empty) {
-    const orderDoc = ordersSnap.docs[0];
-    const order = orderDoc.data() as Order;
-    const orderRef = orderDoc.ref;
+    const orderExists = Boolean(orderSnap && orderSnap.exists);
+    const payTxExists = payTxSnap.exists;
 
-    const currentRefundStatus = order.refundStatus || "none";
-    const isOrderTerminal = order.paymentStatus === "refunded" || currentRefundStatus === "processed";
+    if (!orderExists && !payTxExists) {
+      return {
+        matched: false,
+        changed: false,
+        ignoredAsStale: false,
+        duplicate: false,
+        authoritativeStatus: "none",
+      };
+    }
 
-    // Packet 4E Requirement 8 & 9: Monotonicity check
-    const canAdvanceOrder = !isOrderTerminal && canAdvanceRefundStatus(currentRefundStatus, status);
-    const orderUpdate: Record<string, any> = {};
+    // Step 3: Determine current authoritative refund states across both documents
+    let orderData: Order | null = null;
+    let effectiveOrderStatus: string | null = null;
+    if (orderExists && orderSnap) {
+      orderData = orderSnap.data() as Order;
+      const isOrderTerminal =
+        orderData.paymentStatus === "refunded" || orderData.refundStatus === "processed";
+      effectiveOrderStatus = isOrderTerminal ? "processed" : (orderData.refundStatus || "none");
+    }
 
-    if (canAdvanceOrder) {
-      orderUpdate.refundStatus = status;
-      orderUpdate.updatedAt = nowIso;
-      if (failureReason) orderUpdate.refundFailureReason = failureReason;
+    let payTxData: PaymentTransactionRecord | null = null;
+    let effectiveTxStatus: string | null = null;
+    if (payTxExists) {
+      payTxData = payTxSnap.data() as PaymentTransactionRecord;
+      const isTxTerminal =
+        payTxData.status === "refunded" || payTxData.refundStatus === "processed";
+      effectiveTxStatus = isTxTerminal ? "processed" : (payTxData.refundStatus || "none");
+    }
 
-      const isSameStatus = currentRefundStatus === status;
-      if (!isSameStatus) {
+    const authoritativeCurrentStatus = getDominantRefundStatus(
+      effectiveOrderStatus,
+      effectiveTxStatus
+    );
+
+    // Step 4: Apply canAdvanceRefundStatus using transactionally-read values
+    const canAdvance = canAdvanceRefundStatus(authoritativeCurrentStatus, status);
+    const isSameStatus = authoritativeCurrentStatus === status;
+
+    if (!canAdvance) {
+      // Monotonicity prevents downgrade: incoming event is stale/retrograde
+      let identifiersMerged = false;
+      const orderMerge: Record<string, any> = {};
+      const txMerge: Record<string, any> = {};
+
+      if (orderExists && orderDocRef && orderData) {
+        if (providerRefundId && !orderData.providerRefundId) {
+          orderMerge.providerRefundId = providerRefundId;
+        }
+        if (refundReference && !orderData.refundReference) {
+          orderMerge.refundReference = refundReference;
+        }
+        if (Object.keys(orderMerge).length > 0) {
+          orderMerge.updatedAt = nowIso;
+          transaction.update(orderDocRef, orderMerge);
+          identifiersMerged = true;
+        }
+      }
+
+      if (payTxExists && payTxData) {
+        if (providerRefundId && !payTxData.providerRefundId) {
+          txMerge.providerRefundId = providerRefundId;
+        }
+        if (refundReference && !payTxData.refundReference) {
+          txMerge.refundReference = refundReference;
+        }
+        if (Object.keys(txMerge).length > 0) {
+          txMerge.updatedAtIso = nowIso;
+          transaction.update(payTxDocRef, txMerge);
+          identifiersMerged = true;
+        }
+      }
+
+      return {
+        matched: true,
+        changed: identifiersMerged,
+        ignoredAsStale: true,
+        duplicate: false,
+        authoritativeStatus: authoritativeCurrentStatus,
+      };
+    }
+
+    if (isSameStatus) {
+      // Duplicate event: acknowledge idempotently, merge missing identifiers if any
+      let identifiersMerged = false;
+      const orderMerge: Record<string, any> = {};
+      const txMerge: Record<string, any> = {};
+
+      if (orderExists && orderDocRef && orderData) {
+        if (providerRefundId && !orderData.providerRefundId) {
+          orderMerge.providerRefundId = providerRefundId;
+        }
+        if (refundReference && !orderData.refundReference) {
+          orderMerge.refundReference = refundReference;
+        }
+        if (Object.keys(orderMerge).length > 0) {
+          orderMerge.updatedAt = nowIso;
+          transaction.update(orderDocRef, orderMerge);
+          identifiersMerged = true;
+        }
+      }
+
+      if (payTxExists && payTxData) {
+        if (providerRefundId && !payTxData.providerRefundId) {
+          txMerge.providerRefundId = providerRefundId;
+        }
+        if (refundReference && !payTxData.refundReference) {
+          txMerge.refundReference = refundReference;
+        }
+        if (Object.keys(txMerge).length > 0) {
+          txMerge.updatedAtIso = nowIso;
+          transaction.update(payTxDocRef, txMerge);
+          identifiersMerged = true;
+        }
+      }
+
+      return {
+        matched: true,
+        changed: identifiersMerged,
+        ignoredAsStale: false,
+        duplicate: true,
+        authoritativeStatus: authoritativeCurrentStatus,
+      };
+    }
+
+    // Step 5 & 6: Prepare status-history changes and perform all writes
+    let hasMutation = false;
+
+    if (orderExists && orderDocRef && orderData) {
+      const isOrderTerminal =
+        orderData.paymentStatus === "refunded" || orderData.refundStatus === "processed";
+
+      if (!isOrderTerminal && canAdvanceRefundStatus(effectiveOrderStatus, status)) {
+        const orderUpdate: Record<string, any> = {
+          refundStatus: status,
+          updatedAt: nowIso,
+        };
+        if (failureReason) orderUpdate.refundFailureReason = failureReason;
+        if (providerRefundId) orderUpdate.providerRefundId = providerRefundId;
+        if (refundReference) orderUpdate.refundReference = refundReference;
+
         const note = `Refund status updated to "${status}" via Paystack webhook${
           refundReference ? ` (Ref: ${refundReference})` : ""
         }${failureReason ? `: ${failureReason}` : ""}`;
 
         orderUpdate.statusHistory = [
-          ...(order.statusHistory || []),
+          ...(orderData.statusHistory || []),
           {
-            status: order.orderStatus,
+            status: orderData.orderStatus,
             updatedAt: nowIso,
             note,
             updatedBy: "System (Paystack Webhook)",
             eventType: "status",
           },
         ];
+
+        transaction.update(orderDocRef, orderUpdate);
+        hasMutation = true;
+      } else {
+        const orderMerge: Record<string, any> = {};
+        if (providerRefundId && !orderData.providerRefundId) orderMerge.providerRefundId = providerRefundId;
+        if (refundReference && !orderData.refundReference) orderMerge.refundReference = refundReference;
+        if (Object.keys(orderMerge).length > 0) {
+          orderMerge.updatedAt = nowIso;
+          transaction.update(orderDocRef, orderMerge);
+          hasMutation = true;
+        }
       }
     }
 
-    // Merge safe missing provider identifiers even if status is not modified
-    if (providerRefundId && !order.providerRefundId) {
-      orderUpdate.providerRefundId = providerRefundId;
-      orderUpdate.updatedAt = nowIso;
-    }
-    if (refundReference && !order.refundReference) {
-      orderUpdate.refundReference = refundReference;
-      orderUpdate.updatedAt = nowIso;
+    if (payTxExists && payTxData) {
+      const isTxTerminal =
+        payTxData.status === "refunded" || payTxData.refundStatus === "processed";
+
+      if (!isTxTerminal && canAdvanceRefundStatus(effectiveTxStatus, status)) {
+        const txUpdate: Record<string, any> = {
+          refundStatus: status,
+          updatedAtIso: nowIso,
+        };
+        if (failureReason) txUpdate.refundFailureReason = failureReason;
+        if (status === "failed") txUpdate.needsRefund = true;
+        if (providerRefundId) txUpdate.providerRefundId = providerRefundId;
+        if (refundReference) txUpdate.refundReference = refundReference;
+
+        transaction.update(payTxDocRef, txUpdate);
+        hasMutation = true;
+      } else {
+        const txMerge: Record<string, any> = {};
+        if (providerRefundId && !payTxData.providerRefundId) txMerge.providerRefundId = providerRefundId;
+        if (refundReference && !payTxData.refundReference) txMerge.refundReference = refundReference;
+        if (Object.keys(txMerge).length > 0) {
+          txMerge.updatedAtIso = nowIso;
+          transaction.update(payTxDocRef, txMerge);
+          hasMutation = true;
+        }
+      }
     }
 
-    if (Object.keys(orderUpdate).length > 0) {
-      batch.update(orderRef, orderUpdate);
-      hasMutation = true;
-    }
+    return {
+      matched: true,
+      changed: hasMutation,
+      ignoredAsStale: false,
+      duplicate: false,
+      authoritativeStatus: status,
+    };
+  });
+
+  if (!txResult.matched) {
+    console.warn("updateRefundStatus: No order or payment transaction found for:", cleanTxRef);
+    return { success: false, matched: false, changed: false, updated: false };
   }
 
-  if (payTxSnap.exists) {
-    const payTxData = payTxSnap.data() as PaymentTransactionRecord;
-    const currentTxRefundStatus = payTxData.refundStatus || "none";
-    const isTxTerminal = payTxData.status === "refunded" || currentTxRefundStatus === "processed";
-
-    // Packet 4E Requirement 8 & 9: Monotonicity check
-    const canAdvanceTx = !isTxTerminal && canAdvanceRefundStatus(currentTxRefundStatus, status);
-    const txUpdate: Record<string, any> = {};
-
-    if (canAdvanceTx) {
-      txUpdate.refundStatus = status;
-      txUpdate.updatedAtIso = nowIso;
-      if (failureReason) txUpdate.refundFailureReason = failureReason;
-      if (status === "failed") txUpdate.needsRefund = true;
-    }
-
-    if (providerRefundId && !payTxData.providerRefundId) {
-      txUpdate.providerRefundId = providerRefundId;
-      txUpdate.updatedAtIso = nowIso;
-    }
-    if (refundReference && !payTxData.refundReference) {
-      txUpdate.refundReference = refundReference;
-      txUpdate.updatedAtIso = nowIso;
-    }
-
-    if (Object.keys(txUpdate).length > 0) {
-      batch.update(payTxRef, txUpdate);
-      hasMutation = true;
-    }
-  }
-
-  if (hasMutation) {
-    await batch.commit();
-  }
-
-  return { success: true, updated: hasMutation };
+  return {
+    success: true,
+    matched: true,
+    changed: txResult.changed,
+    updated: txResult.changed,
+    ignoredAsStale: txResult.ignoredAsStale,
+    duplicate: txResult.duplicate,
+    orderId: initialOrderId,
+    authoritativeStatus: txResult.authoritativeStatus,
+  };
 }
 

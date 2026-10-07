@@ -84,7 +84,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       case "refund.pending": {
         try {
           const outcome = await updateRefundStatus("pending", data);
-          if (!outcome.success || !outcome.updated) {
+          if (!outcome.matched || !outcome.success) {
             console.error(
               "Refund status update (pending) failed or transaction not found:",
               data
@@ -107,7 +107,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       case "refund.processing": {
         try {
           const outcome = await updateRefundStatus("processing", data);
-          if (!outcome.success || !outcome.updated) {
+          if (!outcome.matched || !outcome.success) {
             console.error(
               "Refund status update (processing) failed or transaction not found:",
               data
@@ -130,7 +130,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       case "refund.needs-attention": {
         try {
           const outcome = await updateRefundStatus("needs_attention", data);
-          if (!outcome.success || !outcome.updated) {
+          if (!outcome.matched || !outcome.success) {
             console.error(
               "Refund status update (needs-attention) failed or transaction not found:",
               data
@@ -153,7 +153,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       case "refund.failed": {
         try {
           const outcome = await updateRefundStatus("failed", data);
-          if (!outcome.success || !outcome.updated) {
+          if (!outcome.matched || !outcome.success) {
             console.error(
               "Refund status update (failed) failed or transaction not found:",
               data
