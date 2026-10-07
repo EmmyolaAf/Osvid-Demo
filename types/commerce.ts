@@ -108,7 +108,9 @@ export interface CheckoutSession {
   updatedAt: any;
   updatedAtIso: string;
   finalizedAtIso?: string;
+  releasedAt?: any;
   releasedAtIso?: string;
+  releaseReason?: string;
 }
 
 export interface PaymentInitializeRequest {

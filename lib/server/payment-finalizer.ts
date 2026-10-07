@@ -502,46 +502,14 @@ export async function finalizeSuccessfulPayment(
       // Read coupon doc if applicable
       let discountDocRef: FirebaseFirestore.DocumentReference | null = null;
       let discountData: DiscountCode | null = null;
+      let couponDisappeared = false;
       if (currentSession.couponId) {
         discountDocRef = adminDb.collection("discounts").doc(currentSession.couponId);
         const dSnap = await transaction.get(discountDocRef);
         if (dSnap.exists) {
           discountData = dSnap.data() as DiscountCode;
         } else {
-          // Packet 4D Requirement 7: coupon document disappeared during payment finalization
-          const anomalyReason = `Coupon "${currentSession.couponCode || currentSession.couponId}" disappeared before payment finalization. Cannot complete redemption bookkeeping.`;
-
-          transaction.update(sessionDocRef, {
-            status: "anomaly_unfulfillable",
-            anomalyReason,
-            updatedAt: FieldValue.serverTimestamp(),
-            updatedAtIso: nowIso,
-          });
-
-          transaction.set(paymentTxRef, {
-            id: cleanRef,
-            reference: cleanRef,
-            checkoutSessionId: currentSession.id,
-            status: "anomaly_unfulfillable",
-            amount: currentSession.totalAmount,
-            amountKobo: paystackData.amount,
-            currency: "NGN",
-            customerEmail: currentSession.customerEmail,
-            paystackData: paystackData.raw,
-            anomalyReason,
-            needsRefund: true,
-            refundStatus: "none",
-            createdAt: FieldValue.serverTimestamp(),
-            createdAtIso: nowIso,
-          });
-
-          return {
-            finalizedNow: false,
-            replayed: false,
-            authoritativeOrderId: "",
-            anomaly: true,
-            anomalyReason,
-          };
+          couponDisappeared = true;
         }
       }
 
@@ -558,6 +526,72 @@ export async function finalizeSuccessfulPayment(
       }
 
       // ALL READS ARE NOW COMPLETE. VALIDATE INVARIANTS BEFORE ANY WRITES.
+
+      // Packet 4E Requirement 1: Release active product reservations when coupon disappears
+      if (couponDisappeared) {
+        const isReservationActive = Boolean(currentSession.reservationActive);
+        const anomalyReason = `Coupon "${currentSession.couponCode || currentSession.couponId}" disappeared before payment finalization. Cannot complete redemption bookkeeping.`;
+
+        if (isReservationActive) {
+          // 1. All product documents have already been transactionally read.
+          // 2. Validate for every item: product.reservedQuantity >= item.quantity
+          for (const p of productDocs) {
+            const currentReserved = Number(p.data.reservedQuantity || 0);
+            if (currentReserved < p.item.quantity) {
+              throw new ReservationInvariantError(
+                `Reservation invariant violated during coupon anomaly release: product ${p.item.productId} reservedQuantity (${currentReserved}) is less than required (${p.item.quantity}).`
+              );
+            }
+          }
+
+          // 3. Decrement reservedQuantity -= item.quantity for every reserved product (stockQuantity NOT decremented)
+          for (const p of productDocs) {
+            const currentReserved = Number(p.data.reservedQuantity || 0);
+            transaction.update(p.ref, {
+              reservedQuantity: currentReserved - p.item.quantity,
+              updatedAt: nowIso,
+            });
+          }
+        }
+
+        // 4. Update checkout session: status = "anomaly_unfulfillable", reservationActive = false, releaseReason
+        transaction.update(sessionDocRef, {
+          status: "anomaly_unfulfillable",
+          reservationActive: false,
+          releaseReason: "coupon_missing_at_payment_finalization",
+          anomalyReason,
+          releasedAt: FieldValue.serverTimestamp(),
+          releasedAtIso: nowIso,
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedAtIso: nowIso,
+        });
+
+        // 5. Create/update the payment_transactions anomaly record
+        transaction.set(paymentTxRef, {
+          id: cleanRef,
+          reference: cleanRef,
+          checkoutSessionId: currentSession.id,
+          status: "anomaly_unfulfillable",
+          amount: currentSession.totalAmount,
+          amountKobo: paystackData.amount,
+          currency: "NGN",
+          customerEmail: currentSession.customerEmail,
+          paystackData: paystackData.raw,
+          anomalyReason,
+          needsRefund: true,
+          refundStatus: "none",
+          createdAt: FieldValue.serverTimestamp(),
+          createdAtIso: nowIso,
+        });
+
+        return {
+          finalizedNow: false,
+          replayed: false,
+          authoritativeOrderId: "",
+          anomaly: true,
+          anomalyReason,
+        };
+      }
 
       const isReservationActive = Boolean(currentSession.reservationActive);
 
@@ -902,41 +936,64 @@ export async function finalizeSuccessfulPayment(
         }
       }
 
-      // Persist durable anomaly refund state on payment transaction
-      if (refundAccepted) {
-        try {
-          await paymentTxRef.update({
-            refundStatus: "pending",
-            providerRefundId: providerRefundId || null,
-            refundReference: refundReference || null,
-            refundRequestedAt: nowIso,
-            updatedAt: FieldValue.serverTimestamp(),
-            updatedAtIso: nowIso,
-          });
-        } catch (persistErr) {
-          console.error(
-            "Critical: Provider accepted anomaly refund, but local pending update failed:",
-            persistErr
-          );
-          // Leave the durable initiating state intact for future reconciliation
-        }
-      } else if (isDefinitiveFailure) {
-        await paymentTxRef.update({
-          needsRefund: true,
-          refundStatus: "failed",
-          refundFailureReason: failureReason || "Refund initiation failed definitively.",
-          updatedAt: FieldValue.serverTimestamp(),
-          updatedAtIso: nowIso,
+      // Persist durable anomaly refund state on payment transaction conditionally (Packet 4E Requirement 5, 6, 7)
+      try {
+        await adminDb.runTransaction(async (transaction) => {
+          const currentTxSnap = await transaction.get(paymentTxRef);
+          if (!currentTxSnap.exists) return;
+          const currentTx = currentTxSnap.data() as PaymentTransactionRecord;
+          const currentRefundStatus = currentTx.refundStatus || "none";
+
+          // If a refund webhook has already advanced it to pending, processing, processed, or needs_attention,
+          // do NOT overwrite the newer state!
+          if (currentRefundStatus !== "initiating") {
+            const safeMergeUpdate: Record<string, any> = {};
+            if (providerRefundId && !currentTx.providerRefundId) {
+              safeMergeUpdate.providerRefundId = providerRefundId;
+            }
+            if (refundReference && !currentTx.refundReference) {
+              safeMergeUpdate.refundReference = refundReference;
+            }
+            if (Object.keys(safeMergeUpdate).length > 0) {
+              transaction.update(paymentTxRef, safeMergeUpdate);
+            }
+            return;
+          }
+
+          if (refundAccepted) {
+            transaction.update(paymentTxRef, {
+              refundStatus: "pending",
+              providerRefundId: providerRefundId || null,
+              refundReference: refundReference || null,
+              refundRequestedAt: nowIso,
+              updatedAt: FieldValue.serverTimestamp(),
+              updatedAtIso: nowIso,
+            });
+          } else if (isDefinitiveFailure) {
+            transaction.update(paymentTxRef, {
+              needsRefund: true,
+              refundStatus: "failed",
+              refundFailureReason: failureReason || "Refund initiation failed definitively.",
+              updatedAt: FieldValue.serverTimestamp(),
+              updatedAtIso: nowIso,
+            });
+          } else {
+            // Ambiguous transport failure or 5xx outcome -> needs_attention (DO NOT mark as ordinary failed)
+            transaction.update(paymentTxRef, {
+              needsRefund: true,
+              refundStatus: "needs_attention",
+              refundFailureReason: failureReason || "Ambiguous gateway response. Reconciliation required.",
+              updatedAt: FieldValue.serverTimestamp(),
+              updatedAtIso: nowIso,
+            });
+          }
         });
-      } else {
-        // Ambiguous transport failure or 5xx outcome -> needs_attention (DO NOT mark as ordinary failed)
-        await paymentTxRef.update({
-          needsRefund: true,
-          refundStatus: "needs_attention",
-          refundFailureReason: failureReason || "Ambiguous gateway response. Reconciliation required.",
-          updatedAt: FieldValue.serverTimestamp(),
-          updatedAtIso: nowIso,
-        });
+      } catch (persistErr) {
+        console.error(
+          "Critical: Error during post-provider anomaly refund persistence transaction:",
+          persistErr
+        );
+        // Leave the durable initiating state intact for future reconciliation
       }
     }
 
@@ -1249,6 +1306,72 @@ export async function finalizeProcessedRefund(refundData: any): Promise<{
 }
 
 /**
+ * Packet 4E Requirement 2, 8, 9:
+ * Enforces refund state monotonicity across route handlers and asynchronous webhooks.
+ *
+ * Terminal states:
+ * - 'processed' is terminal: processed -> processed only.
+ *
+ * Non-terminal state progression:
+ * - processing -> processing | processed
+ * - pending -> pending | processing | processed
+ * - needs_attention -> pending | processing | processed | failed | needs_attention
+ * - initiating -> pending | processing | processed | needs_attention | failed | initiating
+ * - failed -> initiating (retry) | pending | processing | processed | failed
+ * - none -> any valid state
+ *
+ * Prevents downgrading newer states when webhooks race with route handlers.
+ */
+export function canAdvanceRefundStatus(
+  current: string | undefined | null,
+  incoming: string
+): boolean {
+  const cur = current || "none";
+  if (cur === incoming) return true; // idempotent
+
+  switch (cur) {
+    case "processed":
+      return false; // Terminal
+
+    case "processing":
+      return incoming === "processed";
+
+    case "pending":
+      return incoming === "processing" || incoming === "processed";
+
+    case "needs_attention":
+      // May move forward when authenticated provider evidence establishes pending, processing, processed, or failed
+      return (
+        incoming === "pending" ||
+        incoming === "processing" ||
+        incoming === "processed" ||
+        incoming === "failed"
+      );
+
+    case "initiating":
+      return (
+        incoming === "pending" ||
+        incoming === "processing" ||
+        incoming === "processed" ||
+        incoming === "needs_attention" ||
+        incoming === "failed"
+      );
+
+    case "failed":
+      return (
+        incoming === "initiating" ||
+        incoming === "pending" ||
+        incoming === "processing" ||
+        incoming === "processed"
+      );
+
+    case "none":
+    default:
+      return true;
+  }
+}
+
+/**
  * Update refund status for intermediate/terminal refund lifecycle events:
  * refund.pending, refund.processing, refund.needs-attention, refund.failed
  */
@@ -1319,49 +1442,82 @@ export async function updateRefundStatus(
     const order = orderDoc.data() as Order;
     const orderRef = orderDoc.ref;
 
-    // Idempotency: only append statusHistory if status actually changed
-    const isSameStatus = order.refundStatus === status;
-    const orderUpdate: Record<string, any> = {
-      refundStatus: status,
-      updatedAt: nowIso,
-    };
-    if (providerRefundId) orderUpdate.providerRefundId = providerRefundId;
-    if (refundReference) orderUpdate.refundReference = refundReference;
-    if (failureReason) orderUpdate.refundFailureReason = failureReason;
+    const currentRefundStatus = order.refundStatus || "none";
+    const isOrderTerminal = order.paymentStatus === "refunded" || currentRefundStatus === "processed";
 
-    if (!isSameStatus) {
-      const note = `Refund status updated to "${status}" via Paystack webhook${
-        refundReference ? ` (Ref: ${refundReference})` : ""
-      }${failureReason ? `: ${failureReason}` : ""}`;
+    // Packet 4E Requirement 8 & 9: Monotonicity check
+    const canAdvanceOrder = !isOrderTerminal && canAdvanceRefundStatus(currentRefundStatus, status);
+    const orderUpdate: Record<string, any> = {};
 
-      orderUpdate.statusHistory = [
-        ...(order.statusHistory || []),
-        {
-          status: order.orderStatus,
-          updatedAt: nowIso,
-          note,
-          updatedBy: "System (Paystack Webhook)",
-          eventType: "status",
-        },
-      ];
+    if (canAdvanceOrder) {
+      orderUpdate.refundStatus = status;
+      orderUpdate.updatedAt = nowIso;
+      if (failureReason) orderUpdate.refundFailureReason = failureReason;
+
+      const isSameStatus = currentRefundStatus === status;
+      if (!isSameStatus) {
+        const note = `Refund status updated to "${status}" via Paystack webhook${
+          refundReference ? ` (Ref: ${refundReference})` : ""
+        }${failureReason ? `: ${failureReason}` : ""}`;
+
+        orderUpdate.statusHistory = [
+          ...(order.statusHistory || []),
+          {
+            status: order.orderStatus,
+            updatedAt: nowIso,
+            note,
+            updatedBy: "System (Paystack Webhook)",
+            eventType: "status",
+          },
+        ];
+      }
     }
 
-    batch.update(orderRef, orderUpdate);
-    hasMutation = true;
+    // Merge safe missing provider identifiers even if status is not modified
+    if (providerRefundId && !order.providerRefundId) {
+      orderUpdate.providerRefundId = providerRefundId;
+      orderUpdate.updatedAt = nowIso;
+    }
+    if (refundReference && !order.refundReference) {
+      orderUpdate.refundReference = refundReference;
+      orderUpdate.updatedAt = nowIso;
+    }
+
+    if (Object.keys(orderUpdate).length > 0) {
+      batch.update(orderRef, orderUpdate);
+      hasMutation = true;
+    }
   }
 
   if (payTxSnap.exists) {
-    const txUpdate: Record<string, any> = {
-      refundStatus: status,
-      updatedAtIso: nowIso,
-    };
-    if (providerRefundId) txUpdate.providerRefundId = providerRefundId;
-    if (refundReference) txUpdate.refundReference = refundReference;
-    if (failureReason) txUpdate.refundFailureReason = failureReason;
-    if (status === "failed") txUpdate.needsRefund = true;
+    const payTxData = payTxSnap.data() as PaymentTransactionRecord;
+    const currentTxRefundStatus = payTxData.refundStatus || "none";
+    const isTxTerminal = payTxData.status === "refunded" || currentTxRefundStatus === "processed";
 
-    batch.update(payTxRef, txUpdate);
-    hasMutation = true;
+    // Packet 4E Requirement 8 & 9: Monotonicity check
+    const canAdvanceTx = !isTxTerminal && canAdvanceRefundStatus(currentTxRefundStatus, status);
+    const txUpdate: Record<string, any> = {};
+
+    if (canAdvanceTx) {
+      txUpdate.refundStatus = status;
+      txUpdate.updatedAtIso = nowIso;
+      if (failureReason) txUpdate.refundFailureReason = failureReason;
+      if (status === "failed") txUpdate.needsRefund = true;
+    }
+
+    if (providerRefundId && !payTxData.providerRefundId) {
+      txUpdate.providerRefundId = providerRefundId;
+      txUpdate.updatedAtIso = nowIso;
+    }
+    if (refundReference && !payTxData.refundReference) {
+      txUpdate.refundReference = refundReference;
+      txUpdate.updatedAtIso = nowIso;
+    }
+
+    if (Object.keys(txUpdate).length > 0) {
+      batch.update(payTxRef, txUpdate);
+      hasMutation = true;
+    }
   }
 
   if (hasMutation) {

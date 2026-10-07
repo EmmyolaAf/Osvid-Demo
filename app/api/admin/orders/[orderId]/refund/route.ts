@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 import {
   requireAuthenticatedUser,
@@ -9,6 +10,7 @@ import { assertOperationalSubscription } from "@/lib/server/subscription-guard";
 import { buildAuditLogRecord } from "@/lib/server/audit";
 import { initiatePaystackRefund } from "@/lib/server/paystack";
 import { Order } from "@/types/auth";
+import { PaymentTransactionRecord } from "@/types/commerce";
 
 export const dynamic = "force-dynamic";
 
@@ -51,11 +53,12 @@ export async function POST(
       );
     }
 
-    // 5. Atomic Claim in Firestore Transaction (Requirement 15)
+    // 5. Atomic Claim in Firestore Transaction (Packet 4E Requirement 4: Consistent across Order + Payment Record)
     const nowIso = new Date().toISOString();
     const orderRef = adminDb.collection("orders").doc(cleanOrderId);
 
     const orderData = await adminDb.runTransaction(async (transaction) => {
+      // 1. Read order document
       const orderSnap = await transaction.get(orderRef);
       if (!orderSnap.exists) {
         throw new Error(`NOT_FOUND:Order not found: "${cleanOrderId}"`);
@@ -75,7 +78,7 @@ export async function POST(
         );
       }
 
-      // Check current refund status for deduplication
+      // Check current refund status on order for deduplication
       if (
         order.refundStatus === "processed" ||
         order.refundStatus === "pending" ||
@@ -95,7 +98,36 @@ export async function POST(
         );
       }
 
-      // Set durable pre-call claim
+      // 2. Read payment_transactions document if present BEFORE any writes
+      const payTxRef = adminDb
+        .collection("payment_transactions")
+        .doc(order.paystackReference);
+      const payTxSnap = await transaction.get(payTxRef);
+
+      if (payTxSnap.exists) {
+        const payTx = payTxSnap.data() as PaymentTransactionRecord;
+        if (
+          payTx.refundStatus === "processed" ||
+          payTx.refundStatus === "pending" ||
+          payTx.refundStatus === "processing"
+        ) {
+          throw new Error(
+            `CONFLICT:Refund is already ${payTx.refundStatus} for transaction "${order.paystackReference}". Duplicate refund rejected.`
+          );
+        }
+
+        if (
+          payTx.refundStatus === "initiating" ||
+          payTx.refundStatus === "needs_attention"
+        ) {
+          throw new Error(
+            `CONFLICT:Refund is currently in ${payTx.refundStatus} state for transaction "${order.paystackReference}". Refund reconciliation required.`
+          );
+        }
+      }
+
+      // ALL READS MUST PRECEDE WRITES.
+      // Set durable pre-call claim on order
       transaction.update(orderRef, {
         refundStatus: "initiating",
         refundReason: reason,
@@ -104,121 +136,67 @@ export async function POST(
         updatedAt: nowIso,
       });
 
+      // Apply claim consistently to payment transaction if it exists
+      if (payTxSnap.exists) {
+        transaction.update(payTxRef, {
+          refundStatus: "initiating",
+          refundInitiatingAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedAtIso: nowIso,
+        });
+      }
+
       return order;
     });
 
     const amountKobo = Math.round(orderData.totalAmount * 100);
 
     // 6. Call Paystack Refund API server-side
-    let paystackRefundRes: any = null;
+    let outcomeType: "accepted" | "definitive_rejection" | "ambiguous_error" = "accepted";
+    let failureReason = "";
+    let providerRefundId: string | undefined = undefined;
+    let refundReference: string | undefined = undefined;
+
     try {
-      paystackRefundRes = await initiatePaystackRefund({
+      const paystackRefundRes = await initiatePaystackRefund({
         transactionReference: orderData.paystackReference!,
         amountKobo,
         merchantNote: reason,
       });
+
+      if (paystackRefundRes.status === true) {
+        outcomeType = "accepted";
+        providerRefundId = paystackRefundRes?.data?.id
+          ? String(paystackRefundRes.data.id)
+          : undefined;
+        refundReference =
+          paystackRefundRes?.data?.refund_reference ||
+          (paystackRefundRes?.data?.reference &&
+          paystackRefundRes?.data?.reference !== orderData.paystackReference
+            ? paystackRefundRes?.data?.reference
+            : undefined);
+      } else {
+        outcomeType = "definitive_rejection";
+        failureReason = paystackRefundRes.message || "Provider declined refund request.";
+      }
     } catch (paystackErr: any) {
       console.error("Paystack refund API error:", paystackErr);
-      const failIso = new Date().toISOString();
-      const failureReason =
+      failureReason =
         paystackErr?.message || "Failed to process refund with payment gateway.";
       const isDefinitive = Boolean(paystackErr?.isDefinitive);
-
       if (isDefinitive) {
-        // Requirement 10: Provider definitively rejected request -> failed, retry may later be permitted
-        await orderRef.update({
-          refundStatus: "failed",
-          refundFailureReason: failureReason,
-          updatedAt: failIso,
-          statusHistory: [
-            ...(orderData.statusHistory || []),
-            {
-              status: orderData.orderStatus,
-              updatedAt: failIso,
-              note: `Refund initiation rejected by provider: ${failureReason}`,
-              updatedBy: caller.email,
-              actorUid: caller.uid,
-              actorEmail: caller.email,
-              actorRole: caller.role,
-              eventType: "status",
-            },
-          ],
-        });
-
-        return NextResponse.json({ error: failureReason }, { status: 400 });
+        outcomeType = "definitive_rejection";
       } else {
-        // Requirement 10: Ambiguous transport failure / timeout -> needs_attention / reconciliation_required
-        // DO NOT call provider again automatically
-        await orderRef.update({
-          refundStatus: "needs_attention",
-          refundFailureReason: `Ambiguous provider outcome / transport error: ${failureReason}. Refund reconciliation required.`,
-          updatedAt: failIso,
-          statusHistory: [
-            ...(orderData.statusHistory || []),
-            {
-              status: orderData.orderStatus,
-              updatedAt: failIso,
-              note: `Refund initiation transport error: ${failureReason}. Marked needs_attention for reconciliation.`,
-              updatedBy: caller.email,
-              actorUid: caller.uid,
-              actorEmail: caller.email,
-              actorRole: caller.role,
-              eventType: "status",
-            },
-          ],
-        });
-
-        return NextResponse.json(
-          {
-            error: "Transport error communicating with payment provider. State preserved for reconciliation.",
-            reconciliationRequired: true,
-          },
-          { status: 504 }
-        );
+        outcomeType = "ambiguous_error";
       }
     }
 
-    // 7. Requirement 9: Treat Paystack status: false as refund failure
-    if (paystackRefundRes.status !== true) {
-      const failIso = new Date().toISOString();
-      const failureReason =
-        paystackRefundRes.message || "Provider declined refund request.";
+    // 7. Transactional post-provider persistence (Packet 4E Requirements 3, 6, 7)
+    const postIso = new Date().toISOString();
+    const payTxRef = orderData.paystackReference
+      ? adminDb.collection("payment_transactions").doc(orderData.paystackReference)
+      : null;
 
-      await orderRef.update({
-        refundStatus: "failed",
-        refundFailureReason: failureReason,
-        updatedAt: failIso,
-        statusHistory: [
-          ...(orderData.statusHistory || []),
-          {
-            status: orderData.orderStatus,
-            updatedAt: failIso,
-            note: `Refund request declined by provider: ${failureReason}`,
-            updatedBy: caller.email,
-            actorUid: caller.uid,
-            actorEmail: caller.email,
-            actorRole: caller.role,
-            eventType: "status",
-          },
-        ],
-      });
-
-      return NextResponse.json({ error: failureReason }, { status: 400 });
-    }
-
-    // 8. Extract real provider refund values (Requirement 13: Keep separate from payment transaction reference)
-    const providerRefundId = paystackRefundRes?.data?.id
-      ? String(paystackRefundRes.data.id)
-      : undefined;
-    const refundReference =
-      paystackRefundRes?.data?.refund_reference ||
-      (paystackRefundRes?.data?.reference &&
-      paystackRefundRes?.data?.reference !== orderData.paystackReference
-        ? paystackRefundRes?.data?.reference
-        : undefined);
-
-    // 9. Update order document and append audit event
-    // NOTE: Inventory is NOT restocked here. Inventory restock strictly awaits refund.processed webhook.
     const { docRef: auditRef, entry: auditEntry } = buildAuditLogRecord({
       actor: {
         uid: caller.uid,
@@ -237,66 +215,195 @@ export async function POST(
         refundReference: refundReference || null,
         providerRefundId: providerRefundId || null,
         reason,
+        outcomeType,
       },
     });
 
-    const updatedHistory = [
-      ...(orderData.statusHistory || []),
-      {
-        status: orderData.orderStatus,
-        updatedAt: nowIso,
-        note: `Refund requested by ${caller.email}: "${reason}"${
-          refundReference ? ` (Ref: ${refundReference})` : ""
-        }${providerRefundId ? ` (ID: ${providerRefundId})` : ""}`,
-        updatedBy: caller.email,
-        actorUid: caller.uid,
-        actorEmail: caller.email,
-        actorRole: caller.role,
-        eventType: "status" as const,
-      },
-    ];
-
-    const orderUpdate: Record<string, any> = {
-      refundStatus: "pending",
-      refundReason: reason,
-      refundRequestedAt: nowIso,
-      refundRequestedBy: caller.email,
-      statusHistory: updatedHistory,
-      updatedAt: nowIso,
-    };
-    if (refundReference) orderUpdate.refundReference = refundReference;
-    if (providerRefundId) orderUpdate.providerRefundId = providerRefundId;
-
-    // Requirement 11: Make post-provider write failure safe
+    let persistResult: { authoritativeStatus: string; statePreserved: boolean };
     try {
-      const batch = adminDb.batch();
-      batch.update(orderRef, orderUpdate);
-      batch.set(auditRef, auditEntry);
-
-      // Also update payment_transactions document if it exists
-      if (orderData.paystackReference) {
-        const payTxRef = adminDb
-          .collection("payment_transactions")
-          .doc(orderData.paystackReference);
-        const payTxSnap = await payTxRef.get();
-        if (payTxSnap.exists) {
-          const txUpdate: Record<string, any> = {
-            refundStatus: "pending",
-            updatedAtIso: nowIso,
-          };
-          if (refundReference) txUpdate.refundReference = refundReference;
-          if (providerRefundId) txUpdate.providerRefundId = providerRefundId;
-          batch.update(payTxRef, txUpdate);
+      persistResult = await adminDb.runTransaction(async (transaction) => {
+        // 1. Transactionally read order document
+        const curOrderSnap = await transaction.get(orderRef);
+        if (!curOrderSnap.exists) {
+          throw new Error(`NOT_FOUND:Order disappeared during refund: "${cleanOrderId}"`);
         }
-      }
+        const curOrder = curOrderSnap.data() as Order;
+        const curRefundStatus = curOrder.refundStatus || "none";
 
-      await batch.commit();
+        // 2. Transactionally read payment_transactions document if present
+        let curPayTxSnap: FirebaseFirestore.DocumentSnapshot | null = null;
+        let curPayTx: PaymentTransactionRecord | null = null;
+        if (payTxRef) {
+          curPayTxSnap = await transaction.get(payTxRef);
+          if (curPayTxSnap.exists) {
+            curPayTx = curPayTxSnap.data() as PaymentTransactionRecord;
+          }
+        }
+
+        // ALL READS ARE COMPLETE.
+        // If current refund state is still "initiating", HTTP request owns transition
+        if (curRefundStatus === "initiating") {
+          if (outcomeType === "accepted") {
+            const updatedHistory = [
+              ...(curOrder.statusHistory || []),
+              {
+                status: curOrder.orderStatus,
+                updatedAt: postIso,
+                note: `Refund requested by ${caller.email}: "${reason}"${
+                  refundReference ? ` (Ref: ${refundReference})` : ""
+                }${providerRefundId ? ` (ID: ${providerRefundId})` : ""}`,
+                updatedBy: caller.email,
+                actorUid: caller.uid,
+                actorEmail: caller.email,
+                actorRole: caller.role,
+                eventType: "status" as const,
+              },
+            ];
+
+            const orderUpdate: Record<string, any> = {
+              refundStatus: "pending",
+              refundReason: reason,
+              refundRequestedAt: postIso,
+              refundRequestedBy: caller.email,
+              statusHistory: updatedHistory,
+              updatedAt: postIso,
+            };
+            if (refundReference) orderUpdate.refundReference = refundReference;
+            if (providerRefundId) orderUpdate.providerRefundId = providerRefundId;
+
+            transaction.update(orderRef, orderUpdate);
+            transaction.set(auditRef, auditEntry);
+
+            if (curPayTxSnap?.exists && payTxRef) {
+              const txUpdate: Record<string, any> = {
+                refundStatus: "pending",
+                updatedAt: FieldValue.serverTimestamp(),
+                updatedAtIso: postIso,
+              };
+              if (refundReference) txUpdate.refundReference = refundReference;
+              if (providerRefundId) txUpdate.providerRefundId = providerRefundId;
+              transaction.update(payTxRef, txUpdate);
+            }
+
+            return {
+              authoritativeStatus: "pending",
+              statePreserved: false,
+            };
+          } else if (outcomeType === "definitive_rejection") {
+            const updatedHistory = [
+              ...(curOrder.statusHistory || []),
+              {
+                status: curOrder.orderStatus,
+                updatedAt: postIso,
+                note: `Refund initiation rejected by provider: ${failureReason}`,
+                updatedBy: caller.email,
+                actorUid: caller.uid,
+                actorEmail: caller.email,
+                actorRole: caller.role,
+                eventType: "status" as const,
+              },
+            ];
+
+            transaction.update(orderRef, {
+              refundStatus: "failed",
+              refundFailureReason: failureReason,
+              statusHistory: updatedHistory,
+              updatedAt: postIso,
+            });
+
+            if (curPayTxSnap?.exists && payTxRef) {
+              transaction.update(payTxRef, {
+                refundStatus: "failed",
+                refundFailureReason: failureReason,
+                needsRefund: true,
+                updatedAt: FieldValue.serverTimestamp(),
+                updatedAtIso: postIso,
+              });
+            }
+
+            return {
+              authoritativeStatus: "failed",
+              statePreserved: false,
+            };
+          } else {
+            // ambiguous_error
+            const updatedHistory = [
+              ...(curOrder.statusHistory || []),
+              {
+                status: curOrder.orderStatus,
+                updatedAt: postIso,
+                note: `Refund initiation transport error: ${failureReason}. Marked needs_attention for reconciliation.`,
+                updatedBy: caller.email,
+                actorUid: caller.uid,
+                actorEmail: caller.email,
+                actorRole: caller.role,
+                eventType: "status" as const,
+              },
+            ];
+
+            transaction.update(orderRef, {
+              refundStatus: "needs_attention",
+              refundFailureReason: `Ambiguous provider outcome / transport error: ${failureReason}. Refund reconciliation required.`,
+              statusHistory: updatedHistory,
+              updatedAt: postIso,
+            });
+
+            if (curPayTxSnap?.exists && payTxRef) {
+              transaction.update(payTxRef, {
+                refundStatus: "needs_attention",
+                refundFailureReason: `Ambiguous provider outcome / transport error: ${failureReason}. Refund reconciliation required.`,
+                updatedAt: FieldValue.serverTimestamp(),
+                updatedAtIso: postIso,
+              });
+            }
+
+            return {
+              authoritativeStatus: "needs_attention",
+              statePreserved: false,
+            };
+          }
+        } else {
+          // Webhook has already moved the state to pending, processing, processed, needs_attention, or failed!
+          // DO NOT overwrite it with an older result.
+          // Merge safe missing provider identifiers only if appropriate.
+          const orderMergeUpdate: Record<string, any> = {};
+          if (providerRefundId && !curOrder.providerRefundId) {
+            orderMergeUpdate.providerRefundId = providerRefundId;
+          }
+          if (refundReference && !curOrder.refundReference) {
+            orderMergeUpdate.refundReference = refundReference;
+          }
+          if (Object.keys(orderMergeUpdate).length > 0) {
+            orderMergeUpdate.updatedAt = postIso;
+            transaction.update(orderRef, orderMergeUpdate);
+          }
+
+          if (curPayTxSnap?.exists && curPayTx && payTxRef) {
+            const txMergeUpdate: Record<string, any> = {};
+            if (providerRefundId && !curPayTx.providerRefundId) {
+              txMergeUpdate.providerRefundId = providerRefundId;
+            }
+            if (refundReference && !curPayTx.refundReference) {
+              txMergeUpdate.refundReference = refundReference;
+            }
+            if (Object.keys(txMergeUpdate).length > 0) {
+              txMergeUpdate.updatedAt = FieldValue.serverTimestamp();
+              txMergeUpdate.updatedAtIso = postIso;
+              transaction.update(payTxRef, txMergeUpdate);
+            }
+          }
+
+          return {
+            authoritativeStatus: curRefundStatus,
+            statePreserved: true,
+          };
+        }
+      });
     } catch (persistErr: any) {
       console.error(
-        "CRITICAL: Paystack accepted refund but local Firestore update failed:",
+        "CRITICAL: Error during post-provider refund persistence:",
         persistErr
       );
-      // Leave durable initiating claim intact so no automatic duplicate refund can be issued
       return NextResponse.json(
         {
           error:
@@ -307,13 +414,51 @@ export async function POST(
       );
     }
 
+    if (
+      persistResult.authoritativeStatus === "processed" ||
+      persistResult.authoritativeStatus === "processing" ||
+      persistResult.authoritativeStatus === "pending"
+    ) {
+      return NextResponse.json(
+        {
+          success: true,
+          message: persistResult.statePreserved
+            ? `Refund has already advanced to "${persistResult.authoritativeStatus}".`
+            : "Refund initiated successfully with payment gateway.",
+          refundReference: refundReference || null,
+          providerRefundId: providerRefundId || null,
+          refundStatus: persistResult.authoritativeStatus,
+        },
+        { status: 200 }
+      );
+    }
+
+    if (persistResult.authoritativeStatus === "needs_attention") {
+      return NextResponse.json(
+        {
+          error:
+            "Transport error communicating with payment provider. State preserved for reconciliation.",
+          reconciliationRequired: true,
+          refundStatus: "needs_attention",
+        },
+        { status: 504 }
+      );
+    }
+
+    if (persistResult.authoritativeStatus === "failed") {
+      return NextResponse.json(
+        {
+          error: failureReason || "Refund initiation rejected by provider.",
+          refundStatus: "failed",
+        },
+        { status: 400 }
+      );
+    }
+
     return NextResponse.json(
       {
         success: true,
-        message: "Refund initiated successfully with payment gateway.",
-        refundReference: refundReference || null,
-        providerRefundId: providerRefundId || null,
-        refundStatus: "pending",
+        refundStatus: persistResult.authoritativeStatus,
       },
       { status: 200 }
     );
