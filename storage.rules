@@ -78,45 +78,51 @@ service firebase.storage {
         request.time < firestore.get(subDoc).data.hardSuspendAt;
     }
 
-    function isImageFile() {
-      return request.resource.contentType.matches('image/.*');
+    function isAllowedImageFile() {
+      return request.resource != null &&
+        request.resource.contentType in ['image/jpeg', 'image/png', 'image/webp'];
     }
 
     // Public storefront images (product catalog)
     match /products/{allPaths=**} {
       allow read: if true;
-      allow write: if (isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageProducts')))
-        && isImageFile()
-        && request.resource.size < 10 * 1024 * 1024;
+      allow create, update: if (isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageProducts')))
+        && isAllowedImageFile()
+        && request.resource.size <= 5 * 1024 * 1024;
+      allow delete: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageProducts'));
     }
 
     match /categories/{allPaths=**} {
       allow read: if true;
-      allow write: if (isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageProducts')))
-        && isImageFile()
-        && request.resource.size < 5 * 1024 * 1024;
+      allow create, update: if (isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageProducts')))
+        && isAllowedImageFile()
+        && request.resource.size <= 5 * 1024 * 1024;
+      allow delete: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageProducts'));
     }
 
     match /site/{allPaths=**} {
       allow read: if true;
-      allow write: if (isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageWebsite')))
-        && isImageFile()
-        && request.resource.size < 10 * 1024 * 1024;
+      allow create, update: if (isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageWebsite')))
+        && isAllowedImageFile()
+        && request.resource.size <= 5 * 1024 * 1024;
+      allow delete: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageWebsite'));
     }
 
     match /blog/{allPaths=**} {
       allow read: if true;
-      allow write: if (isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageWebsite')))
-        && isImageFile()
-        && request.resource.size < 10 * 1024 * 1024;
+      allow create, update: if (isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageWebsite')))
+        && isAllowedImageFile()
+        && request.resource.size <= 5 * 1024 * 1024;
+      allow delete: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageWebsite'));
     }
 
     // User profile avatars
     match /users/{userId}/{allPaths=**} {
       allow read: if true;
-      allow write: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin())
-        && isImageFile()
-        && request.resource.size < 5 * 1024 * 1024;
+      allow create, update: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin())
+        && isAllowedImageFile()
+        && request.resource.size <= 5 * 1024 * 1024;
+      allow delete: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
     }
 
     // Default DENY for all unmatched storage paths

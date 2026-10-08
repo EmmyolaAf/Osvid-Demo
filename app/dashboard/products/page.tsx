@@ -38,7 +38,15 @@ import {
   SlidersHorizontal,
   RefreshCw,
   FileText,
+  Upload,
+  Image as ImageIcon,
 } from "lucide-react";
+import {
+  uploadCatalogueImage,
+  deleteOwnedStorageImage,
+  validateMediaFile,
+  isOwnedStorageUrl,
+} from "@/lib/firebase/storage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -111,6 +119,76 @@ export default function ProductsManagementPage() {
     description: "",
     imageUrl: "",
   });
+
+  // Media Upload State
+  const [productImageUploading, setProductImageUploading] = useState(false);
+  const [productImageProgress, setProductImageProgress] = useState(0);
+  const [categoryImageUploading, setCategoryImageUploading] = useState(false);
+  const [categoryImageProgress, setCategoryImageProgress] = useState(0);
+
+  const handleProductImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const validation = validateMediaFile(file);
+    if (!validation.valid) {
+      toast.error(validation.error || "Invalid file format or size.");
+      return;
+    }
+
+    try {
+      setProductImageUploading(true);
+      setProductImageProgress(0);
+      const res = await uploadCatalogueImage(file, "products", (progress) => {
+        setProductImageProgress(progress);
+      });
+
+      if (!res.success || !res.downloadUrl) {
+        toast.error(res.error || "Failed to upload product image to Firebase Storage.");
+        return;
+      }
+
+      setProductForm((prev) => ({ ...prev, imageUrl: res.downloadUrl! }));
+      toast.success("Product image uploaded successfully to Firebase Storage!");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to upload image.");
+    } finally {
+      setProductImageUploading(false);
+      setProductImageProgress(0);
+    }
+  };
+
+  const handleCategoryImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const validation = validateMediaFile(file);
+    if (!validation.valid) {
+      toast.error(validation.error || "Invalid file format or size.");
+      return;
+    }
+
+    try {
+      setCategoryImageUploading(true);
+      setCategoryImageProgress(0);
+      const res = await uploadCatalogueImage(file, "categories", (progress) => {
+        setCategoryImageProgress(progress);
+      });
+
+      if (!res.success || !res.downloadUrl) {
+        toast.error(res.error || "Failed to upload category image to Firebase Storage.");
+        return;
+      }
+
+      setCategoryForm((prev) => ({ ...prev, imageUrl: res.downloadUrl! }));
+      toast.success("Category image uploaded successfully to Firebase Storage!");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to upload image.");
+    } finally {
+      setCategoryImageUploading(false);
+      setCategoryImageProgress(0);
+    }
+  };
 
   // Load All Data Directly from Firestore
   const loadData = async () => {
@@ -244,6 +322,17 @@ export default function ProductsManagementPage() {
             `Product created with stock 0, but initial stock ledger entry failed: ${adjResult.error}. Please adjust stock using the inventory controls.`
           );
         }
+      }
+
+      // Safe media lifecycle: delete old storage image ONLY after Firestore update succeeds
+      if (
+        isEditing &&
+        editingProduct?.imageUrl &&
+        editingProduct.imageUrl !== productForm.imageUrl
+      ) {
+        deleteOwnedStorageImage(editingProduct.imageUrl).catch((delErr) => {
+          console.warn("Could not delete old product image from storage:", delErr);
+        });
       }
 
       toast.success(
@@ -444,6 +533,16 @@ export default function ProductsManagementPage() {
       if (!result.success) {
         toast.error(result.error || "Failed to save category to database.");
         return;
+      }
+
+      // Safe media lifecycle: delete old storage image ONLY after Firestore update succeeds
+      if (
+        editingCategory?.imageUrl &&
+        editingCategory.imageUrl !== categoryForm.imageUrl
+      ) {
+        deleteOwnedStorageImage(editingCategory.imageUrl).catch((delErr) => {
+          console.warn("Could not delete old category image asset:", delErr);
+        });
       }
 
       toast.success(
@@ -1088,13 +1187,66 @@ export default function ProductsManagementPage() {
             </div>
 
             <div>
-              <Label className="text-xs font-bold text-slate-700">Image URL</Label>
-              <Input
-                placeholder="https://images.unsplash.com/..."
-                value={productForm.imageUrl}
-                onChange={(e) => setProductForm({ ...productForm, imageUrl: e.target.value })}
-                className="mt-1 h-10 rounded-xl text-xs"
-              />
+              <Label className="text-xs font-bold text-slate-700">Product Image</Label>
+              <div className="mt-1 space-y-2">
+                {productForm.imageUrl && (
+                  <div className="flex items-center gap-3 p-2 bg-slate-50 border border-slate-200 rounded-xl">
+                    <img
+                      src={productForm.imageUrl}
+                      alt="Product Preview"
+                      className="w-14 h-14 object-cover rounded-lg border border-slate-200 bg-white"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = "/images/placeholder.webp";
+                      }}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-slate-800 truncate">
+                        {productForm.imageUrl}
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        {isOwnedStorageUrl(productForm.imageUrl)
+                          ? "Managed Firebase Storage Object"
+                          : "External or catalogue URL"}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <label className="flex-1 cursor-pointer">
+                    <div className="flex items-center justify-center gap-2 px-3 py-2 border border-dashed border-slate-300 rounded-xl hover:border-orange-500 hover:bg-orange-50/50 transition text-xs font-medium text-slate-600">
+                      {productImageUploading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin text-orange-600" />
+                          <span>Uploading to Firebase Storage ({productImageProgress}%)...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-4 h-4 text-orange-600" />
+                          <span>Upload Local Image (JPEG, PNG, WebP &le; 5 MB)</span>
+                        </>
+                      )}
+                    </div>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      disabled={productImageUploading}
+                      onChange={handleProductImageUpload}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                <div>
+                  <Label className="text-[11px] text-slate-500">Or use an existing image URL:</Label>
+                  <Input
+                    placeholder="https://..."
+                    value={productForm.imageUrl}
+                    onChange={(e) => setProductForm({ ...productForm, imageUrl: e.target.value })}
+                    className="mt-0.5 h-9 rounded-xl text-xs font-mono"
+                  />
+                </div>
+              </div>
             </div>
 
             <div>
@@ -1241,13 +1393,66 @@ export default function ProductsManagementPage() {
             </div>
 
             <div>
-              <Label className="text-xs font-bold text-slate-700">Category Image URL</Label>
-              <Input
-                placeholder="https://..."
-                value={categoryForm.imageUrl}
-                onChange={(e) => setCategoryForm({ ...categoryForm, imageUrl: e.target.value })}
-                className="mt-1 h-10 rounded-xl text-xs"
-              />
+              <Label className="text-xs font-bold text-slate-700">Category Image</Label>
+              <div className="mt-1 space-y-2">
+                {categoryForm.imageUrl && (
+                  <div className="flex items-center gap-3 p-2 bg-slate-50 border border-slate-200 rounded-xl">
+                    <img
+                      src={categoryForm.imageUrl}
+                      alt="Category Preview"
+                      className="w-14 h-14 object-cover rounded-lg border border-slate-200 bg-white"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = "/images/placeholder.webp";
+                      }}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-slate-800 truncate">
+                        {categoryForm.imageUrl}
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        {isOwnedStorageUrl(categoryForm.imageUrl)
+                          ? "Managed Firebase Storage Object"
+                          : "External or catalogue URL"}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <label className="flex-1 cursor-pointer">
+                    <div className="flex items-center justify-center gap-2 px-3 py-2 border border-dashed border-slate-300 rounded-xl hover:border-orange-500 hover:bg-orange-50/50 transition text-xs font-medium text-slate-600">
+                      {categoryImageUploading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin text-orange-600" />
+                          <span>Uploading to Firebase Storage ({categoryImageProgress}%)...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-4 h-4 text-orange-600" />
+                          <span>Upload Local Image (JPEG, PNG, WebP &le; 5 MB)</span>
+                        </>
+                      )}
+                    </div>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      disabled={categoryImageUploading}
+                      onChange={handleCategoryImageUpload}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                <div>
+                  <Label className="text-[11px] text-slate-500">Or use an existing image URL:</Label>
+                  <Input
+                    placeholder="https://..."
+                    value={categoryForm.imageUrl}
+                    onChange={(e) => setCategoryForm({ ...categoryForm, imageUrl: e.target.value })}
+                    className="mt-0.5 h-9 rounded-xl text-xs font-mono"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-2">

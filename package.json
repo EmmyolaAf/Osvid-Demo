@@ -4,11 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build && node scripts/sync-out.js",
+    "build": "next build",
+    "build:legacy-static": "next build && node scripts/sync-out.js",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/run-tests.mjs"
+    "test": "node scripts/run-tests.mjs",
+    "test:emulator": "firebase emulators:exec --only firestore,storage \"node scripts/run-emulator-tests.mjs\""
   },
   "dependencies": {
     "@emailjs/browser": "^4.4.1",
@@ -67,6 +69,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@firebase/rules-unit-testing": "^6.0.0",
     "@tailwindcss/postcss": "^4",
     "@tailwindcss/typography": "^0.5.16",
     "@types/html-to-text": "^9.0.4",

@@ -22,6 +22,8 @@ interface ServiceDetailPageProps {
   params: Promise<{ slug: string }>;
 }
 
+export const revalidate = 3600; // 1-hour ISR for chemical services
+
 export async function generateStaticParams() {
   try {
     const result = await getServices();

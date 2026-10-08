@@ -13,6 +13,8 @@ interface ProductDetailsPageProps {
   params: Promise<{ slug: string }>;
 }
 
+export const revalidate = 60; // Dynamic short revalidation for product price/stock freshness
+
 export async function generateStaticParams() {
   try {
     const result = await getProducts();

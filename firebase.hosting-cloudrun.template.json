@@ -1,4 +1,5 @@
 {
+  "$comment": "Template for Firebase Hosting rewrite to Cloud Run osvid-web service. Replace <CLOUD_RUN_REGION_MANUAL_GATE> with your verified Cloud Run region (e.g. europe-west1, us-central1) during manual deployment.",
   "hosting": {
     "site": "osvid",
     "public": "public",
@@ -27,6 +28,15 @@
             "value": "no-store, no-cache, must-revalidate, max-age=0"
           }
         ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "run": {
+          "serviceId": "osvid-web",
+          "region": "<CLOUD_RUN_REGION_MANUAL_GATE>"
+        }
       }
     ]
   },

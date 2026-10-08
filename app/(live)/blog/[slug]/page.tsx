@@ -11,6 +11,8 @@ interface BlogPostPageProps {
   params: Promise<{ slug: string }>;
 }
 
+export const revalidate = 1800; // ISR revalidation every 30 minutes for blog articles
+
 export async function generateStaticParams() {
   try {
     const result = await getBlogPosts();

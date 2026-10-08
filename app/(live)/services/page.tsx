@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import PageHeader from "@/components/reusables/PageHeader";
 
+export const revalidate = 3600; // 1-hour ISR for chemical services
+
 export default async function ServicesPage() {
   const result = await getServices();
   const services = result.success ? result.data : [];

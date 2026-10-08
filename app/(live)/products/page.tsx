@@ -9,6 +9,8 @@ import { AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 
+export const revalidate = 300; // Revalidate categories every 5 minutes
+
 export default async function ProductCategoriesPage() {
   const result = await getProductCategories();
 

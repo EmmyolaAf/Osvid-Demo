@@ -5,10 +5,12 @@ import {
   finalizeProcessedRefund,
   updateRefundStatus,
 } from "@/lib/server/payment-finalizer";
+import { logger, getOrGenerateRequestId } from "@/lib/server/logger";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request): Promise<NextResponse> {
+  const requestId = getOrGenerateRequestId(req);
   try {
     // 1. Read raw text body required for signature verification
     const rawBody = await req.text();
@@ -17,7 +19,11 @@ export async function POST(req: Request): Promise<NextResponse> {
     // 2. Cryptographic signature check using constant-time HMAC SHA512
     const isValid = verifyWebhookSignature(rawBody, signature);
     if (!isValid) {
-      console.warn("Invalid Paystack webhook signature rejected.");
+      logger.warn("Invalid Paystack webhook signature rejected", {
+        requestId,
+        operation: "webhook",
+        outcome: "failure",
+      });
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -26,11 +32,22 @@ export async function POST(req: Request): Promise<NextResponse> {
     try {
       event = JSON.parse(rawBody);
     } catch {
+      logger.warn("Malformed webhook JSON payload", {
+        requestId,
+        operation: "webhook",
+        outcome: "failure",
+      });
       return NextResponse.json({ error: "Malformed event JSON" }, { status: 400 });
     }
 
     const eventType = event?.event;
     const data = event?.data;
+
+    logger.info(`Received Paystack webhook event: ${eventType}`, {
+      requestId,
+      operation: "webhook",
+      paystackReference: data?.reference,
+    });
 
     // 4. Handle events with retry-safe error propagation (Requirement 17 & 19)
     switch (eventType) {
@@ -44,9 +61,21 @@ export async function POST(req: Request): Promise<NextResponse> {
         }
         try {
           await finalizeSuccessfulPayment(reference);
+          logger.info("Successfully finalized payment via webhook", {
+            requestId,
+            operation: "payment_finalization",
+            paystackReference: reference,
+            outcome: "success",
+          });
         } catch (finErr: any) {
-          console.error(
-            `Error finalizing payment for reference "${reference}" via webhook:`,
+          logger.error(
+            `Error finalizing payment for reference "${reference}" via webhook`,
+            {
+              requestId,
+              operation: "payment_finalization",
+              paystackReference: reference,
+              outcome: "failure",
+            },
             finErr
           );
           // Return non-2xx so Paystack will retry delivery

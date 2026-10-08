@@ -788,6 +788,9 @@ export const releaseCheckoutReservation = releaseCheckoutReservationInternal;
  * Suitable for lazy invocation or scheduled worker.
  */
 export async function cleanupExpiredCheckoutReservations(maxBatch = 5): Promise<number> {
+  if (process.env.MOCK_CHECKOUT_CLEANUP === "true") {
+    return 0;
+  }
   try {
     const expiredSnaps = await adminDb
       .collection("checkout_sessions")

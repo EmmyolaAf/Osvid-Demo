@@ -23,6 +23,8 @@ interface ProductCategoryDetailPageProps {
   params: Promise<{ categorySlug: string }>;
 }
 
+export const revalidate = 60; // Dynamic short revalidation for category products freshness
+
 export async function generateStaticParams() {
   try {
     const categoriesRes = await getProductCategories();

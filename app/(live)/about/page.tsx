@@ -10,6 +10,8 @@ import IntroSectionAbout from "@/components/reusables/sections/about/IntroSectio
 import HistorySectionAbout from "@/components/reusables/sections/about/HistorySection.about";
 import TeamSectionAbout from "@/components/reusables/sections/about/TeamSection.about";
 
+export const revalidate = 3600; // 1-hour ISR for company information and team
+
 export default async function AboutPage() {
   const teamRes = await getTeamMembers();
   const teamMembers = teamRes.success ? teamRes.data : [];

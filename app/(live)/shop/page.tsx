@@ -1,4 +1,4 @@
-// src/app/(live)/shop/page.tsx
+import { Suspense } from "react";
 import PageHeader from "@/components/reusables/PageHeader";
 import { getProducts } from "@/lib/firebase/storefront";
 import ShopClientPage from "./ShopClientPage";
@@ -17,7 +17,7 @@ interface ProductsPageProps {
 
 const PRODUCTS_PER_PAGE = 12;
 
-export const dynamic = "force-static";
+export const revalidate = 60; // Dynamic short revalidation (60 seconds) for catalogue price/stock freshness
 
 export default async function ProductsPage({
   searchParams,
@@ -151,14 +151,16 @@ export default async function ProductsPage({
           },
         ]}
       />
-      <ShopClientPage
-        initialProducts={productsData}
-        totalProducts={totalProducts}
-        productsPerPage={PRODUCTS_PER_PAGE}
-        currentPage={currentPage}
-        currentSort={sortOrder}
-        currentSearch={searchTerm}
-      />
+      <Suspense fallback={<div className="min-h-[400px] flex items-center justify-center p-8 text-sm text-slate-500">Loading catalog...</div>}>
+        <ShopClientPage
+          initialProducts={productsData}
+          totalProducts={totalProducts}
+          productsPerPage={PRODUCTS_PER_PAGE}
+          currentPage={currentPage}
+          currentSort={sortOrder}
+          currentSearch={searchTerm}
+        />
+      </Suspense>
     </main>
   );
 }

@@ -19,6 +19,8 @@ import CTASection from "@/components/reusables/sections/cta";
 import TestimonialsSection from "@/components/reusables/sections/TestimonialsSection";
 import BlogSection from "@/components/reusables/sections/BlogSection.server";
 
+export const revalidate = 300; // 5-minute ISR for homepage showcase sections
+
 export default async function Home() {
   const [servicesRes, testimonialsRes] = await Promise.all([
     getServices(),

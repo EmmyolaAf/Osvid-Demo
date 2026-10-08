@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { finalizeSuccessfulPayment } from "@/lib/server/payment-finalizer";
 import { PaymentVerificationResponse } from "@/types/order-types";
+import { logger, getOrGenerateRequestId } from "@/lib/server/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,7 @@ const errorResponse = (message: string, status: number = 400) => {
 export async function POST(
   req: Request
 ): Promise<NextResponse<PaymentVerificationResponse>> {
+  const requestId = getOrGenerateRequestId(req);
   try {
     const contentType = req.headers.get("content-type");
     if (!contentType?.includes("application/json")) {
@@ -34,7 +36,11 @@ export async function POST(
     try {
       body = await req.json();
     } catch (e) {
-      console.error("Failed to parse request JSON in /api/payment/verify:", e);
+      logger.warn("Failed to parse request JSON in /api/payment/verify", {
+        requestId,
+        operation: "payment_verify",
+        outcome: "failure",
+      });
       return errorResponse("Malformed JSON payload", 400);
     }
 
@@ -43,6 +49,13 @@ export async function POST(
     if (!reference) {
       return errorResponse("Missing required payment reference");
     }
+
+    logger.info("Verifying payment transaction", {
+      requestId,
+      operation: "payment_verify",
+      paystackReference: reference,
+      checkoutSessionId,
+    });
 
     // Call the shared, authoritative payment finalizer
     const result = await finalizeSuccessfulPayment(reference, {
