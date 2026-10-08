@@ -3,7 +3,7 @@ import ProductCategoryCard from "@/components/reusables/cards/ProductCategoryCar
 import PageHeader from "@/components/reusables/PageHeader";
 import CTASection from "@/components/reusables/sections/cta";
 import TrustBuildingSection from "@/components/reusables/sections/TrustBuildingSection";
-import { getProductCategories } from "@/lib/firebase/storefront";
+import { getProductCategories } from "@/lib/server/storefront";
 import Image from "next/image";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";

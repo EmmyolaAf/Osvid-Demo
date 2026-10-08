@@ -1,6 +1,6 @@
 // app/(live)/services/page.tsx
 import React from "react";
-import { getServices } from "@/lib/firebase/storefront";
+import { getServices } from "@/lib/server/storefront";
 import ServicesSection from "@/components/reusables/sections/services-section";
 import CTASection from "@/components/reusables/sections/cta";
 import { AlertCircle } from "lucide-react";

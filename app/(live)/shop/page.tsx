@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import PageHeader from "@/components/reusables/PageHeader";
-import { getProducts } from "@/lib/firebase/storefront";
+import { getProducts } from "@/lib/server/storefront";
 import ShopClientPage from "./ShopClientPage";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ interface ProductsPageProps {
 
 const PRODUCTS_PER_PAGE = 12;
 
+export const dynamic = "force-dynamic";
 export const revalidate = 60; // Dynamic short revalidation (60 seconds) for catalogue price/stock freshness
 
 export default async function ProductsPage({

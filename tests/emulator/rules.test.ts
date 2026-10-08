@@ -255,65 +255,445 @@ describe("Firebase Security Rules Real Emulator Suite", () => {
   });
 
   // ==========================================================================
-  // 3. FIRESTORE PROVIDER & SUBSCRIPTION BOUNDARY
+  // 3. FIRESTORE RUNTIME & PROVIDER SETTINGS BOUNDARY (PACKET 5B)
   // ==========================================================================
-  describe("Firestore Provider & Subscription Boundary", () => {
-    it("subscription/runtime_settings is private from normal staff", async () => {
+  describe("Firestore Runtime & Provider Settings Boundary", () => {
+    beforeEach(async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
-        await ctx.firestore().collection("users").doc("admin_staff").set({
+        const db = ctx.firestore();
+        await db.collection("users").doc("admin_staff").set({
           role: "admin",
           isActive: true,
         });
+        await db.collection("users").doc("mgr_staff").set({
+          role: "manager",
+          isActive: true,
+          permissions: { canManageProducts: true },
+        });
+        await db.collection("system_settings").doc("subscription").set({
+          plan: "enterprise",
+          privateSecret: "sec_123",
+        });
+        await db.collection("system_settings").doc("main_business").set({
+          licenseKey: "lic_999",
+        });
+        await db.collection("system_settings").doc("general_info").set({
+          companyName: "OSVID Chemicals",
+        });
       });
-
-      const adminCtx = testEnv.authenticatedContext("admin_staff");
-      const db = adminCtx.firestore();
-
-      await assertFails(db.doc("runtime_settings/subscription").get());
     });
 
-    it("missing runtime subscription state blocks staff operational writes", async () => {
-      // Remove subscription doc
-      await testEnv.withSecurityRulesDisabled(async (ctx) => {
-        await ctx.firestore().doc("runtime_settings/subscription").delete();
-        await ctx.firestore().collection("users").doc("admin_staff").set({
-          role: "admin",
-          isActive: true,
-        });
-      });
+    it("runtime_settings/subscription is publicly readable by unauthenticated, customer, and staff", async () => {
+      // 1. Unauthenticated caller
+      const unauthDb = testEnv.unauthenticatedContext().firestore();
+      await assertSucceeds(unauthDb.doc("runtime_settings/subscription").get());
 
-      const adminCtx = testEnv.authenticatedContext("admin_staff");
-      const db = adminCtx.firestore();
+      // 2. Authenticated customer
+      const custDb = testEnv.authenticatedContext("cust_regular").firestore();
+      await assertSucceeds(custDb.doc("runtime_settings/subscription").get());
 
+      // 3. Admin & Manager staff
+      const adminDb = testEnv.authenticatedContext("admin_staff").firestore();
+      await assertSucceeds(adminDb.doc("runtime_settings/subscription").get());
+
+      const mgrDb = testEnv.authenticatedContext("mgr_staff").firestore();
+      await assertSucceeds(mgrDb.doc("runtime_settings/subscription").get());
+    });
+
+    it("runtime_settings/subscription direct client write is denied to ALL browser callers including Super Admin", async () => {
+      // Customer cannot write
+      const custDb = testEnv.authenticatedContext("cust_regular").firestore();
       await assertFails(
-        db.collection("products").doc("prod_new").set({
-          name: "Blocked Acid",
-          stockQuantity: 0,
-          isActive: true,
-        })
+        custDb.doc("runtime_settings/subscription").set({ isSuspended: false })
       );
-    });
 
-    it("Super Admin recovery semantics allow reading and writing subscription", async () => {
-      const saCtx = testEnv.authenticatedContext("super_admin_uid", {
-        email: SUPER_ADMIN_EMAIL,
-        email_verified: true,
-      });
-      const db = saCtx.firestore();
+      // Manager cannot write
+      const mgrDb = testEnv.authenticatedContext("mgr_staff").firestore();
+      await assertFails(
+        mgrDb.doc("runtime_settings/subscription").update({ isSuspended: false })
+      );
 
-      await assertSucceeds(db.doc("runtime_settings/subscription").get());
-      await assertSucceeds(
-        db.doc("runtime_settings/subscription").set({
+      // Admin cannot write
+      const adminDb = testEnv.authenticatedContext("admin_staff").firestore();
+      await assertFails(
+        adminDb.doc("runtime_settings/subscription").update({ isSuspended: false })
+      );
+
+      // Even verified Super Admin client SDK cannot write directly (server Admin API required)
+      const saDb = testEnv
+        .authenticatedContext("super_admin_uid", {
+          email: SUPER_ADMIN_EMAIL,
+          email_verified: true,
+        })
+        .firestore();
+      await assertFails(
+        saDb.doc("runtime_settings/subscription").set({
           clientId: "osvid",
           isSuspended: false,
           hardSuspendAt: new Date(Date.now() + 86400000 * 30),
         })
       );
     });
+
+    it("normal staff cannot read provider-private system_settings (subscription/main_business)", async () => {
+      const adminDb = testEnv.authenticatedContext("admin_staff").firestore();
+      await assertFails(adminDb.doc("system_settings/subscription").get());
+      await assertFails(adminDb.doc("system_settings/main_business").get());
+
+      // But staff can read non-private system settings
+      await assertSucceeds(adminDb.doc("system_settings/general_info").get());
+    });
+
+    it("verified Super Admin can read provider-private documents in system_settings", async () => {
+      const saDb = testEnv
+        .authenticatedContext("super_admin_uid", {
+          email: SUPER_ADMIN_EMAIL,
+          email_verified: true,
+        })
+        .firestore();
+
+      await assertSucceeds(saDb.doc("system_settings/subscription").get());
+      await assertSucceeds(saDb.doc("system_settings/main_business").get());
+    });
+
+    it("direct client writes to system_settings are sealed for ALL callers including Super Admin", async () => {
+      // Staff cannot write
+      const adminDb = testEnv.authenticatedContext("admin_staff").firestore();
+      await assertFails(
+        adminDb.doc("system_settings/general_info").set({ companyName: "Tampered" })
+      );
+
+      // Super Admin client write is also denied (must use server Admin API)
+      const saDb = testEnv
+        .authenticatedContext("super_admin_uid", {
+          email: SUPER_ADMIN_EMAIL,
+          email_verified: true,
+        })
+        .firestore();
+
+      await assertFails(
+        saDb.doc("system_settings/subscription").set({ plan: "unlimited" })
+      );
+      await assertFails(
+        saDb.doc("system_settings/general_info").set({ companyName: "Tampered" })
+      );
+    });
   });
 
   // ==========================================================================
-  // 4. FIRESTORE COMMERCE INTERNALS
+  // 4. MALFORMED RUNTIME SUBSCRIPTION CASES (FAIL-CLOSED SEMANTICS)
+  // ==========================================================================
+  describe("Malformed Runtime Subscription Fail-Closed Semantics", () => {
+    const futureDate = new Date(Date.now() + 86400000 * 30);
+    const pastDate = new Date(Date.now() - 86400000 * 5);
+
+    beforeEach(async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const db = ctx.firestore();
+        await db.collection("users").doc("pm_user").set({
+          role: "manager",
+          isActive: true,
+          permissions: { canManageProducts: true },
+        });
+      });
+    });
+
+    it("missing subscription doc fails closed (staff cannot write products)", async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc("runtime_settings/subscription").delete();
+      });
+
+      const pmDb = testEnv.authenticatedContext("pm_user").firestore();
+      await assertFails(
+        pmDb.collection("products").doc("prod_fail").set({
+          name: "Test Acid",
+          price: 1000,
+          stockQuantity: 0,
+        })
+      );
+    });
+
+    it("malformed subscription - missing clientId fails closed", async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc("runtime_settings/subscription").set({
+          isSuspended: false,
+          hardSuspendAt: futureDate,
+        });
+      });
+
+      const pmDb = testEnv.authenticatedContext("pm_user").firestore();
+      await assertFails(
+        pmDb.collection("products").doc("prod_fail").set({
+          name: "Test Acid",
+          price: 1000,
+          stockQuantity: 0,
+        })
+      );
+    });
+
+    it("malformed subscription - clientId != 'osvid' fails closed", async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc("runtime_settings/subscription").set({
+          clientId: "unauthorized_tenant",
+          isSuspended: false,
+          hardSuspendAt: futureDate,
+        });
+      });
+
+      const pmDb = testEnv.authenticatedContext("pm_user").firestore();
+      await assertFails(
+        pmDb.collection("products").doc("prod_fail").set({
+          name: "Test Acid",
+          price: 1000,
+          stockQuantity: 0,
+        })
+      );
+    });
+
+    it("malformed subscription - missing isSuspended fails closed", async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc("runtime_settings/subscription").set({
+          clientId: "osvid",
+          hardSuspendAt: futureDate,
+        });
+      });
+
+      const pmDb = testEnv.authenticatedContext("pm_user").firestore();
+      await assertFails(
+        pmDb.collection("products").doc("prod_fail").set({
+          name: "Test Acid",
+          price: 1000,
+          stockQuantity: 0,
+        })
+      );
+    });
+
+    it("malformed subscription - isSuspended wrong type (not bool) fails closed", async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc("runtime_settings/subscription").set({
+          clientId: "osvid",
+          isSuspended: "false", // String, not bool
+          hardSuspendAt: futureDate,
+        });
+      });
+
+      const pmDb = testEnv.authenticatedContext("pm_user").firestore();
+      await assertFails(
+        pmDb.collection("products").doc("prod_fail").set({
+          name: "Test Acid",
+          price: 1000,
+          stockQuantity: 0,
+        })
+      );
+    });
+
+    it("malformed subscription - missing hardSuspendAt fails closed", async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc("runtime_settings/subscription").set({
+          clientId: "osvid",
+          isSuspended: false,
+        });
+      });
+
+      const pmDb = testEnv.authenticatedContext("pm_user").firestore();
+      await assertFails(
+        pmDb.collection("products").doc("prod_fail").set({
+          name: "Test Acid",
+          price: 1000,
+          stockQuantity: 0,
+        })
+      );
+    });
+
+    it("malformed subscription - hardSuspendAt wrong type (string) fails closed", async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc("runtime_settings/subscription").set({
+          clientId: "osvid",
+          isSuspended: false,
+          hardSuspendAt: "2026-12-31T23:59:59Z", // String, not timestamp
+        });
+      });
+
+      const pmDb = testEnv.authenticatedContext("pm_user").firestore();
+      await assertFails(
+        pmDb.collection("products").doc("prod_fail").set({
+          name: "Test Acid",
+          price: 1000,
+          stockQuantity: 0,
+        })
+      );
+    });
+
+    it("expired hardSuspendAt fails closed for normal staff writes", async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc("runtime_settings/subscription").set({
+          clientId: "osvid",
+          isSuspended: false,
+          hardSuspendAt: pastDate, // Expired
+        });
+      });
+
+      const pmDb = testEnv.authenticatedContext("pm_user").firestore();
+      await assertFails(
+        pmDb.collection("products").doc("prod_fail").set({
+          name: "Test Acid",
+          price: 1000,
+          stockQuantity: 0,
+        })
+      );
+    });
+
+    it("valid operational runtime state allows authorized staff operation", async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc("runtime_settings/subscription").set({
+          clientId: "osvid",
+          isSuspended: false,
+          hardSuspendAt: futureDate,
+        });
+      });
+
+      const pmDb = testEnv.authenticatedContext("pm_user").firestore();
+      await assertSucceeds(
+        pmDb.collection("products").doc("prod_valid").set({
+          name: "Valid Operational Chemical",
+          price: 5000,
+          stockQuantity: 0,
+        })
+      );
+    });
+
+    it("Super Admin recovery allows product writes during suspension while keeping runtime_settings write sealed", async () => {
+      // Set suspended state
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc("runtime_settings/subscription").set({
+          clientId: "osvid",
+          isSuspended: true,
+          hardSuspendAt: pastDate,
+        });
+      });
+
+      const saDb = testEnv
+        .authenticatedContext("super_admin_uid", {
+          email: SUPER_ADMIN_EMAIL,
+          email_verified: true,
+        })
+        .firestore();
+
+      // Super Admin recovery write succeeds on product collection
+      await assertSucceeds(
+        saDb.collection("products").doc("prod_recovery").set({
+          name: "Emergency Recovery Product",
+          price: 9000,
+          stockQuantity: 0,
+        })
+      );
+
+      // But client write to runtime_settings/subscription is still denied
+      await assertFails(
+        saDb.doc("runtime_settings/subscription").update({ isSuspended: false })
+      );
+    });
+  });
+
+  // ==========================================================================
+  // 5. DISCOUNTS & COUPON COUNTERS BOUNDARY (PACKET 5B)
+  // ==========================================================================
+  describe("Discounts & Coupon Counter Boundary", () => {
+    beforeEach(async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const db = ctx.firestore();
+        await db.collection("users").doc("disc_mgr").set({
+          role: "manager",
+          isActive: true,
+          permissions: { canManageDiscounts: true },
+        });
+        await db.collection("discounts").doc("coupon_1").set({
+          code: "PROMO10",
+          percentage: 10,
+          usageCount: 5,
+          reservedUsageCount: 0,
+          description: "Ten percent off",
+        });
+        await db.collection("discounts").doc("coupon_active_reservations").set({
+          code: "LOCKED20",
+          percentage: 20,
+          usageCount: 2,
+          reservedUsageCount: 3,
+        });
+      });
+    });
+
+    it("customer cannot write or mutate discount records", async () => {
+      const custDb = testEnv.authenticatedContext("cust_1").firestore();
+      await assertFails(
+        custDb.collection("discounts").doc("cust_hack").set({ code: "FREE" })
+      );
+      await assertFails(
+        custDb.collection("discounts").doc("coupon_1").update({ percentage: 99 })
+      );
+      await assertFails(
+        custDb.collection("discounts").doc("coupon_1").delete()
+      );
+    });
+
+    it("authorized discount manager cannot directly modify usageCount", async () => {
+      const mgrDb = testEnv.authenticatedContext("disc_mgr").firestore();
+      await assertFails(
+        mgrDb.collection("discounts").doc("coupon_1").update({
+          usageCount: 10,
+        })
+      );
+    });
+
+    it("authorized discount manager cannot directly modify reservedUsageCount", async () => {
+      const mgrDb = testEnv.authenticatedContext("disc_mgr").firestore();
+      await assertFails(
+        mgrDb.collection("discounts").doc("coupon_1").update({
+          reservedUsageCount: 5,
+        })
+      );
+    });
+
+    it("authorized discount manager can update non-counter fields", async () => {
+      const mgrDb = testEnv.authenticatedContext("disc_mgr").firestore();
+      await assertSucceeds(
+        mgrDb.collection("discounts").doc("coupon_1").update({
+          description: "Updated promotional discount description",
+        })
+      );
+    });
+
+    it("creating discount with non-zero usageCount or reservedUsageCount fails", async () => {
+      const mgrDb = testEnv.authenticatedContext("disc_mgr").firestore();
+      await assertFails(
+        mgrDb.collection("discounts").doc("new_invalid_usage").set({
+          code: "BAD1",
+          usageCount: 1,
+        })
+      );
+      await assertFails(
+        mgrDb.collection("discounts").doc("new_invalid_reserved").set({
+          code: "BAD2",
+          reservedUsageCount: 1,
+        })
+      );
+    });
+
+    it("deleting discount while reservedUsageCount > 0 fails", async () => {
+      const mgrDb = testEnv.authenticatedContext("disc_mgr").firestore();
+      await assertFails(
+        mgrDb.collection("discounts").doc("coupon_active_reservations").delete()
+      );
+
+      // Deleting when reservedUsageCount == 0 succeeds
+      await assertSucceeds(
+        mgrDb.collection("discounts").doc("coupon_1").delete()
+      );
+    });
+  });
+
+  // ==========================================================================
+  // 6. FIRESTORE COMMERCE INTERNALS
   // ==========================================================================
   describe("Firestore Commerce Internals", () => {
     it("checkout_sessions browser read and write are denied", async () => {
@@ -366,7 +746,7 @@ describe("Firebase Security Rules Real Emulator Suite", () => {
   });
 
   // ==========================================================================
-  // 5. STORAGE RULES & MEDIA SECURITY
+  // 7. STORAGE RULES & MEDIA SECURITY
   // ==========================================================================
   describe("Storage Rules & Media Security", () => {
     const validJpgBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
@@ -387,12 +767,20 @@ describe("Firebase Security Rules Real Emulator Suite", () => {
       });
     });
 
-    it("public can read product assets", async () => {
+    it("public can read seeded product assets unauthenticated", async () => {
+      // 1. Seed a real test object using Super Admin context
+      const saCtx = testEnv.authenticatedContext("sa_storage", {
+        email: SUPER_ADMIN_EMAIL,
+        email_verified: true,
+      });
+      const saRef = saCtx.storage().ref("products/public-read.jpg");
+      await asPromise(saRef.put(validJpgBuffer, { contentType: "image/jpeg" }));
+
+      // 2. Unauthenticated caller reads the object metadata
       const unauthCtx = testEnv.unauthenticatedContext();
       const storage = unauthCtx.storage();
-      const fileRef = storage.ref("products/sample.jpg");
+      const fileRef = storage.ref("products/public-read.jpg");
 
-      // Reading metadata/download
       await assertSucceeds(fileRef.getMetadata());
     });
 

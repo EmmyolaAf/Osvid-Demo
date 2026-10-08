@@ -71,14 +71,65 @@ export function generateManagedStoragePath(
 }
 
 /**
- * Checks if a URL is an owned Firebase Storage URL for managed catalogue objects
+ * Returns the currently configured Firebase Storage bucket name.
  */
-export function isOwnedStorageUrl(url?: string | null): boolean {
+export function getConfiguredStorageBucket(): string {
+  if (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET) {
+    return process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
+  }
+  return storage?.app?.options?.storageBucket || "osvid-9d4d6.firebasestorage.app";
+}
+
+/**
+ * Checks if a URL is an owned Firebase Storage URL for managed catalogue objects.
+ * Strictly verifies:
+ * 1. Firebase Storage hostname (firebasestorage.googleapis.com)
+ * 2. Exact configured Firebase storage bucket
+ * 3. Decoded object path begins with products/ or categories/
+ * 4. No directory traversal attempts
+ */
+export function isOwnedStorageUrl(url?: string | null, expectedBucket: string = getConfiguredStorageBucket()): boolean {
   if (!url || typeof url !== "string") return false;
-  return (
-    url.includes("firebasestorage.googleapis.com") &&
-    (url.includes("/o/products%2F") || url.includes("/o/categories%2F"))
-  );
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== "firebasestorage.googleapis.com") {
+      return false;
+    }
+
+    // Pattern: /v0/b/{bucket}/o/{encodedPath}
+    const match = parsed.pathname.match(/^\/v0\/b\/([^/]+)\/o\/(.+)$/);
+    if (!match) {
+      return false;
+    }
+
+    const rawBucket = match[1];
+    const rawPath = match[2];
+
+    const decodedBucket = decodeURIComponent(rawBucket);
+    if (decodedBucket !== expectedBucket) {
+      return false;
+    }
+
+    const decodedPath = decodeURIComponent(rawPath);
+
+    // Defense-in-depth: disallow path traversal sequences
+    if (decodedPath.includes("..") || decodedPath.includes("\\")) {
+      return false;
+    }
+
+    // Must strictly start with products/ or categories/
+    if (
+      !decodedPath.startsWith("products/") &&
+      !decodedPath.startsWith("categories/")
+    ) {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

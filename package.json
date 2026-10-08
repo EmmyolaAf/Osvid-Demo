@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/run-tests.mjs",
-    "test:emulator": "firebase emulators:exec --only firestore,storage \"node scripts/run-emulator-tests.mjs\""
+    "test:emulator": "firebase emulators:exec --project demo-osvid-rules-test --only firestore,storage \"node scripts/run-emulator-tests.mjs\""
   },
   "dependencies": {
     "@emailjs/browser": "^4.4.1",
@@ -82,6 +82,7 @@
     "esbuild": "^0.19.12",
     "eslint": "^9",
     "eslint-config-next": "^16.2.2",
+    "firebase-tools": "^15.32.1",
     "libsodium-wrappers": "^0.8.4",
     "supabase": "^2.22.12",
     "tailwindcss": "^4",

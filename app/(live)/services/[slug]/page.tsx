@@ -1,5 +1,4 @@
-// app/(live)/services/[slug]/page.tsx
-import { getServices, getServiceBySlug } from "@/lib/firebase/storefront";
+import { getServices, getServiceBySlug } from "@/lib/server/storefront";
 import Image from "next/image";
 import { notFound } from "next/navigation";
 import { Metadata } from "next";

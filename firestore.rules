@@ -252,13 +252,15 @@ service cloud.firestore {
     // Provider system settings: strictly private to Super Admin.
     // Ordinary Admins and Managers MUST NOT be able to read subscription or main_business
     // through any overlapping wildcard rule.
+    // Direct client writes are sealed (allow write: if false); provider terms must be mutated
+    // exclusively through authenticated Super Admin API via Firebase Admin SDK.
     match /system_settings/{settingId} {
       allow read: if isSuperAdmin() || (
         isStaff() &&
         settingId != "subscription" &&
         settingId != "main_business"
       );
-      allow write: if isSuperAdmin();
+      allow write: if false;
     }
 
     // ===============================================================

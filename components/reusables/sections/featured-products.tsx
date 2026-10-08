@@ -1,7 +1,7 @@
 import React from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { getFeaturedProducts, getProducts } from "@/lib/firebase/storefront";
+import { getFeaturedProducts, getProducts } from "@/lib/server/storefront";
 import ProductCard from "../cards/ProductCard";
 
 export default async function FeaturedProducts() {

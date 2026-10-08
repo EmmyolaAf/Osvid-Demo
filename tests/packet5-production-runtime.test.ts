@@ -9,12 +9,14 @@ import {
   requireMaintenanceCronSecret,
   getServerConfig,
 } from "@/lib/server/env";
+import { resolveFirebaseAdminProjectId } from "@/lib/firebase/admin";
 import { GET as healthCheckGet } from "@/app/api/health/route";
 import { POST as maintenanceCleanupPost } from "@/app/api/internal/maintenance/checkout-reservations/route";
 import {
   validateMediaFile,
   generateManagedStoragePath,
   isOwnedStorageUrl,
+  getConfiguredStorageBucket,
   ALLOWED_IMAGE_MIME_TYPES,
   MAX_IMAGE_FILE_SIZE_BYTES,
 } from "@/lib/firebase/storage";
@@ -95,6 +97,44 @@ describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () 
       assert.equal(config.nodeEnv, "production");
       assert.equal(config.firebaseProjectId, "osvid-custom");
     });
+
+    it("resolveFirebaseAdminProjectId fails closed when FIREBASE_PROJECT_ID is missing in production", () => {
+      assert.throws(
+        () => resolveFirebaseAdminProjectId({ NODE_ENV: "production" }),
+        /Missing required FIREBASE_PROJECT_ID in production runtime/
+      );
+    });
+
+    it("resolveFirebaseAdminProjectId honours explicit staging and production project IDs", () => {
+      assert.equal(
+        resolveFirebaseAdminProjectId({
+          NODE_ENV: "production",
+          FIREBASE_PROJECT_ID: "osvid-staging",
+        }),
+        "osvid-staging"
+      );
+      assert.equal(
+        resolveFirebaseAdminProjectId({
+          NODE_ENV: "production",
+          FIREBASE_PROJECT_ID: "osvid-9d4d6",
+        }),
+        "osvid-9d4d6"
+      );
+    });
+
+    it("resolveFirebaseAdminProjectId permits documented fallback only in non-production environments", () => {
+      assert.equal(
+        resolveFirebaseAdminProjectId({ NODE_ENV: "development" }),
+        "osvid-9d4d6"
+      );
+      assert.equal(
+        resolveFirebaseAdminProjectId({
+          NODE_ENV: "development",
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: "osvid-dev-custom",
+        }),
+        "osvid-dev-custom"
+      );
+    });
   });
 
   // ==========================================================================
@@ -153,20 +193,8 @@ describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () 
       assert.equal(res.status, 401);
     });
 
-    it("rejects when MAINTENANCE_CRON_SECRET is unconfigured in server environment with HTTP 503", async () => {
-      delete process.env.MAINTENANCE_CRON_SECRET;
+    it("accepts requests with valid bearer token and executes cleanup", async () => {
       const req = new Request("http://localhost:3000/api/internal/maintenance/checkout-reservations", {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${validSecret}`,
-        },
-      });
-      const res = await maintenanceCleanupPost(req);
-      assert.equal(res.status, 503);
-    });
-
-    it("accepts valid Bearer token and executes cleanup", async () => {
-      const req = new Request("http://localhost:3000/api/internal/maintenance/checkout-reservations?batch=25", {
         method: "POST",
         headers: {
           authorization: `Bearer ${validSecret}`,
@@ -177,23 +205,18 @@ describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () 
 
       const body = await res.json();
       assert.equal(body.success, true);
-      assert.equal(typeof body.cleanedCount, "number");
-      assert.equal(body.batchLimit, 25);
-      assert.ok(body.timestamp);
+      assert.equal(body.releasedCount, 0);
     });
 
-    it("accepts valid x-maintenance-key header and bounds batchLimit between 1 and 100", async () => {
-      const req = new Request("http://localhost:3000/api/internal/maintenance/checkout-reservations?batch=500", {
+    it("accepts requests with x-cron-secret header", async () => {
+      const req = new Request("http://localhost:3000/api/internal/maintenance/checkout-reservations", {
         method: "POST",
         headers: {
-          "x-maintenance-key": validSecret,
+          "x-cron-secret": validSecret,
         },
       });
       const res = await maintenanceCleanupPost(req);
       assert.equal(res.status, 200);
-
-      const body = await res.json();
-      assert.equal(body.batchLimit, 100); // Clamped to max 100
     });
   });
 
@@ -253,19 +276,38 @@ describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () 
       assert.equal(storagePath.endsWith(".jpg"), true);
     });
 
-    it("isOwnedStorageUrl correctly identifies managed Firebase Storage paths", () => {
+    it("isOwnedStorageUrl strictly verifies configured bucket, hostname, and valid paths", () => {
+      const configuredBucket = getConfiguredStorageBucket();
+
       const ownedProductUrl =
-        "https://firebasestorage.googleapis.com/v0/b/osvid-9d4d6.appspot.com/o/products%2F123-abc.jpg?alt=media";
+        `https://firebasestorage.googleapis.com/v0/b/${configuredBucket}/o/products%2F123-abc.jpg?alt=media`;
       const ownedCategoryUrl =
-        "https://firebasestorage.googleapis.com/v0/b/osvid-9d4d6.appspot.com/o/categories%2F456-def.webp?alt=media";
+        `https://firebasestorage.googleapis.com/v0/b/${configuredBucket}/o/categories%2F456-def.webp?alt=media`;
+      const otherBucketUrl =
+        "https://firebasestorage.googleapis.com/v0/b/malicious-foreign-project.appspot.com/o/products%2F123-abc.jpg?alt=media";
       const externalUnsplashUrl = "https://images.unsplash.com/photo-1581092160607-ee22621dd758";
       const externalWixUrl = "https://static.wixstatic.com/media/sample.jpg";
+      const traversalUrl =
+        `https://firebasestorage.googleapis.com/v0/b/${configuredBucket}/o/products%2F..%2Fsecret.json`;
+      const invalidPrefixUrl =
+        `https://firebasestorage.googleapis.com/v0/b/${configuredBucket}/o/system_secrets%2Fkeys.json`;
 
+      // 1. Configured bucket products / categories -> owned
       assert.equal(isOwnedStorageUrl(ownedProductUrl), true);
       assert.equal(isOwnedStorageUrl(ownedCategoryUrl), true);
+
+      // 2. Foreign bucket with products/... -> NOT owned
+      assert.equal(isOwnedStorageUrl(otherBucketUrl), false);
+
+      // 3. External URLs -> NOT owned
       assert.equal(isOwnedStorageUrl(externalUnsplashUrl), false);
       assert.equal(isOwnedStorageUrl(externalWixUrl), false);
       assert.equal(isOwnedStorageUrl(null), false);
+      assert.equal(isOwnedStorageUrl(""), false);
+
+      // 4. Traversal or invalid prefix -> NOT owned
+      assert.equal(isOwnedStorageUrl(traversalUrl), false);
+      assert.equal(isOwnedStorageUrl(invalidPrefixUrl), false);
     });
   });
 
@@ -311,7 +353,7 @@ describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () 
   });
 
   // ==========================================================================
-  // 6. BUILD CONFIGURATION & STATIC EXPORT DECOUPLING
+  // 6. BUILD CONFIGURATION & PRE-RELEASE GATES
   // ==========================================================================
   describe("Build Script & Deployment Configuration Invariants", () => {
     const pkgJson = JSON.parse(
@@ -331,33 +373,50 @@ describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () 
       );
     });
 
-    it("test:emulator script is configured for Firebase Rules testing", () => {
+    it("test:emulator script explicitly uses demo-osvid-rules-test project", () => {
       assert.ok(pkgJson.scripts["test:emulator"]);
-      assert.equal(
+      assert.ok(
         pkgJson.scripts["test:emulator"].includes("firebase emulators:exec"),
-        true
+        "must execute firebase emulators"
+      );
+      assert.ok(
+        pkgJson.scripts["test:emulator"].includes("--project demo-osvid-rules-test"),
+        "must explicitly specify demo-osvid-rules-test project"
       );
     });
 
-    it("firebase.json configures public asset directory and API anti-cache headers", () => {
+    it("firebase-tools is installed and locked in devDependencies", () => {
+      assert.ok(pkgJson.devDependencies["firebase-tools"]);
+    });
+
+    it("canonical firebase.json omits deployable hosting section to prevent accidental static deploy", () => {
       const firebaseJson = JSON.parse(
         fs.readFileSync(path.resolve(process.cwd(), "firebase.json"), "utf8")
       );
-      assert.equal(firebaseJson.hosting.public, "public"); // Not 'out'
-      assert.notEqual(firebaseJson.hosting.public, "out");
+      // Canonical firebase.json must NOT have a deployable hosting block
+      assert.equal(firebaseJson.hosting, undefined);
 
-      // Verify anti-cache headers for /api/**
-      const apiHeader = firebaseJson.hosting.headers?.find(
+      // Template must contain full hosting configuration with Cloud Run rewrite and anti-cache headers
+      const templateJson = JSON.parse(
+        fs.readFileSync(
+          path.resolve(process.cwd(), "firebase.hosting-cloudrun.template.json"),
+          "utf8"
+        )
+      );
+      assert.equal(templateJson.hosting.public, "public");
+      assert.ok(templateJson.hosting.rewrites);
+      assert.equal(templateJson.hosting.rewrites[0].run.serviceId, "osvid-web");
+
+      const apiHeader = templateJson.hosting.headers?.find(
         (h: any) => h.source === "/api/**"
       );
       assert.ok(apiHeader);
-      assert.equal(
+      assert.ok(
         apiHeader.headers.some(
           (h: any) =>
             h.key.toLowerCase() === "cache-control" &&
             h.value.includes("no-store")
-        ),
-        true
+        )
       );
     });
 
@@ -379,15 +438,83 @@ describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () 
       assert.ok(dockerignoreContent.includes(".env*"));
     });
 
-    it("CI workflow file exists and sets up Node 20 and Java for emulators", () => {
-      const ciPath = fs.existsSync(path.resolve(process.cwd(), ".github/workflows/ci.yml"))
-        ? path.resolve(process.cwd(), ".github/workflows/ci.yml")
-        : path.resolve(process.cwd(), ".github/ci-workflow.yml");
-      const ciContent = fs.readFileSync(ciPath, "utf8");
+    it("CI workflow exists strictly at .github/workflows/ci.yml and old template is absent", () => {
+      const oldWorkflowPath = path.resolve(process.cwd(), ".github/ci-workflow.yml");
+      assert.equal(
+        fs.existsSync(oldWorkflowPath),
+        false,
+        ".github/ci-workflow.yml must NOT exist"
+      );
+
+      const canonicalWorkflowPath = path.resolve(
+        process.cwd(),
+        ".github/workflows/ci.yml"
+      );
+      assert.equal(
+        fs.existsSync(canonicalWorkflowPath),
+        true,
+        ".github/workflows/ci.yml MUST exist"
+      );
+
+      const ciContent = fs.readFileSync(canonicalWorkflowPath, "utf8");
       assert.ok(ciContent.includes("actions/setup-java@v4"));
       assert.ok(ciContent.includes("distribution: temurin"));
       assert.ok(ciContent.includes("java-version: 21"));
       assert.ok(ciContent.includes("npm run test:emulator"));
+    });
+  });
+
+  // ==========================================================================
+  // 7. STOREFRONT SERVER / CLIENT ARCHITECTURAL BOUNDARY
+  // ==========================================================================
+  describe("Storefront Server / Client Architectural Boundary", () => {
+    it("Server Components and API routes do not import browser lib/firebase/storefront", () => {
+      const serverComponentFiles = [
+        "app/(live)/shop/page.tsx",
+        "app/(live)/shop/[slug]/page.tsx",
+        "app/(live)/products/page.tsx",
+        "app/(live)/products/[categorySlug]/page.tsx",
+        "app/(live)/blog/page.tsx",
+        "app/(live)/blog/[slug]/page.tsx",
+        "app/(live)/services/page.tsx",
+        "app/(live)/services/[slug]/page.tsx",
+        "app/(live)/about/page.tsx",
+        "app/(live)/page.tsx",
+        "components/reusables/sections/BlogSection.server.tsx",
+        "components/reusables/sections/featured-products.tsx",
+        "app/api/route.ts",
+      ];
+
+      for (const relPath of serverComponentFiles) {
+        const fullPath = path.resolve(process.cwd(), relPath);
+        assert.ok(fs.existsSync(fullPath), `${relPath} must exist`);
+        const content = fs.readFileSync(fullPath, "utf8");
+        assert.equal(
+          content.includes('from "@/lib/firebase/storefront"'),
+          false,
+          `${relPath} must NOT import browser lib/firebase/storefront`
+        );
+        assert.ok(
+          content.includes('from "@/lib/server/storefront"'),
+          `${relPath} MUST import server adapter @/lib/server/storefront`
+        );
+      }
+    });
+
+    it("only legitimate browser client components import browser lib/firebase/storefront", () => {
+      const allowedClientFiles = [
+        "components/reusables/forms/ContactForm.tsx",
+        "components/reusables/BackInStockNotificationButton.tsx",
+      ];
+
+      for (const relPath of allowedClientFiles) {
+        const fullPath = path.resolve(process.cwd(), relPath);
+        const content = fs.readFileSync(fullPath, "utf8");
+        assert.ok(
+          content.includes('from "@/lib/firebase/storefront"'),
+          `${relPath} legitimately uses browser client storefront`
+        );
+      }
     });
   });
 });

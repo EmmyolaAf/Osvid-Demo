@@ -117,7 +117,7 @@ export async function getServerProductBySlug(
     const directDoc = await adminDb.collection("products").doc(slug).get();
     if (directDoc.exists) {
       const data = directDoc.data() || {};
-      if (data.isActive !== false) {
+      if (data.isActive === true) {
         const product: Product = {
           id: directDoc.id,
           name: data.name || "",
@@ -503,3 +503,18 @@ export async function getServerTeamMembers(): Promise<StorefrontResult<TeamMembe
     };
   }
 }
+
+// Aliases matching storefront function signatures for Server Components
+export {
+  getServerProducts as getProducts,
+  getServerProductBySlug as getProductBySlug,
+  getServerFeaturedProducts as getFeaturedProducts,
+  getServerProductCategories as getProductCategories,
+  getServerServices as getServices,
+  getServerServiceBySlug as getServiceBySlug,
+  getServerBlogPosts as getBlogPosts,
+  getServerBlogPostBySlug as getBlogPostBySlug,
+  getServerTestimonials as getTestimonials,
+  getServerTeamMembers as getTeamMembers,
+};
+

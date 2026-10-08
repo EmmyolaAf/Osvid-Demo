@@ -14,7 +14,7 @@ const ServicesOneSection = dynamic(
 import { Suspense } from "react";
 import { Loader } from "@/components/reusables/loader";
 import WhyChooseOsvid from "@/components/reusables/sections/why-choose-us";
-import { getServices, getTestimonials } from "@/lib/firebase/storefront";
+import { getServices, getTestimonials } from "@/lib/server/storefront";
 import CTASection from "@/components/reusables/sections/cta";
 import TestimonialsSection from "@/components/reusables/sections/TestimonialsSection";
 import BlogSection from "@/components/reusables/sections/BlogSection.server";

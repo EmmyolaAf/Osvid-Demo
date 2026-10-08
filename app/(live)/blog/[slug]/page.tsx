@@ -1,7 +1,7 @@
 // app/(live)/blog/[slug]/page.tsx
 import { Metadata } from "next";
 import Link from "next/link";
-import { getBlogPostBySlug, getBlogPosts } from "@/lib/firebase/storefront";
+import { getBlogPostBySlug, getBlogPosts } from "@/lib/server/storefront";
 import ContentViewer from "@/components/ContentViwer";
 import BlogSection from "@/components/reusables/sections/BlogSection.server";
 import { ArrowLeft, Calendar, User, Tag, AlertCircle } from "lucide-react";

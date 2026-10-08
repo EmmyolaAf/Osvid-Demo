@@ -13,7 +13,7 @@ import {
 import { AlertCircle } from "lucide-react";
 import companyData from "@/data/company";
 import CTASection from "@/components/reusables/sections/cta";
-import { getProductCategories, getProducts } from "@/lib/firebase/storefront";
+import { getProductCategories, getProducts } from "@/lib/server/storefront";
 import { ProductCategory } from "@/types";
 import ProductCategoryCard from "@/components/reusables/cards/ProductCategoryCard";
 import ProductCard from "@/components/reusables/cards/ProductCard";
@@ -23,19 +23,8 @@ interface ProductCategoryDetailPageProps {
   params: Promise<{ categorySlug: string }>;
 }
 
+export const dynamic = "force-dynamic";
 export const revalidate = 60; // Dynamic short revalidation for category products freshness
-
-export async function generateStaticParams() {
-  try {
-    const categoriesRes = await getProductCategories();
-    if (!categoriesRes.success || !categoriesRes.data) return [];
-    return categoriesRes.data.map((cat) => ({
-      categorySlug: cat.slug || cat._id,
-    }));
-  } catch {
-    return [];
-  }
-}
 
 export async function generateMetadata({
   params,

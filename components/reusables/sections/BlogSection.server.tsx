@@ -1,6 +1,6 @@
 // app/components/reusables/sections/BlogSection.server.tsx
 import React from "react";
-import { getBlogPosts } from "@/lib/firebase/storefront";
+import { getBlogPosts } from "@/lib/server/storefront";
 import BlogSectionClient from "./BlogSection.client";
 
 export default async function BlogSection() {

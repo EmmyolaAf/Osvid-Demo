@@ -1,7 +1,7 @@
 // app/(live)/blog/page.tsx
 import { Metadata } from "next";
 import Link from "next/link";
-import { getBlogPosts } from "@/lib/firebase/storefront";
+import { getBlogPosts } from "@/lib/server/storefront";
 import PageHeader from "@/components/reusables/PageHeader";
 import BlogCard from "@/components/reusables/cards/BlogCard";
 import { AlertCircle, BookOpen, RefreshCw } from "lucide-react";

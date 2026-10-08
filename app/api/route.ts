@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getBlogPosts } from "@/lib/firebase/storefront";
+import { getBlogPosts } from "@/lib/server/storefront";
 
 export const dynamic = "force-dynamic";
 

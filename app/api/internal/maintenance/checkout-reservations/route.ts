@@ -48,7 +48,7 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   // 2. Extract incoming authentication header
   const authHeader = req.headers.get("authorization");
-  const directKey = req.headers.get("x-maintenance-key");
+  const directKey = req.headers.get("x-maintenance-key") || req.headers.get("x-cron-secret");
 
   let candidateSecret: string | null = null;
   if (authHeader && authHeader.startsWith("Bearer ")) {
@@ -96,6 +96,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       {
         success: true,
         cleanedCount,
+        releasedCount: cleanedCount,
         batchLimit,
         timestamp: new Date().toISOString(),
       },

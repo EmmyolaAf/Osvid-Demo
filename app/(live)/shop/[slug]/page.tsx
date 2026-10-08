@@ -1,6 +1,6 @@
 // src/app/(live)/shop/[slug]/page.tsx
 import { Metadata } from "next";
-import { getProductBySlug, getProducts } from "@/lib/firebase/storefront";
+import { getProductBySlug } from "@/lib/server/storefront";
 import ProductDetailsClient from "./client";
 import TrustBuildingSection from "@/components/reusables/sections/TrustBuildingSection";
 import CTASection from "@/components/reusables/sections/cta";
@@ -13,17 +13,8 @@ interface ProductDetailsPageProps {
   params: Promise<{ slug: string }>;
 }
 
+export const dynamic = "force-dynamic";
 export const revalidate = 60; // Dynamic short revalidation for product price/stock freshness
-
-export async function generateStaticParams() {
-  try {
-    const result = await getProducts();
-    if (!result.success || !result.data) return [];
-    return result.data.map((product) => ({ slug: product.slug || product.id }));
-  } catch {
-    return [];
-  }
-}
 
 export async function generateMetadata({
   params,

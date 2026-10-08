@@ -98,7 +98,7 @@ test("firestore.rules restricts system_settings read to Super Admin and staff ex
   assert.match(blockSnippet, /settingId\s*!=\s*['"]subscription['"]/);
   assert.match(blockSnippet, /settingId\s*!=\s*['"]main_business['"]/);
   assert.doesNotMatch(blockSnippet, /allow read:\s*if isStaff\(\)\s*\|\|\s*isSuperAdmin\(\);/);
-  assert.match(blockSnippet, /allow write:\s*if isSuperAdmin\(\);/);
+  assert.match(blockSnippet, /allow write:\s*if false;/);
 });
 
 test("firestore.rules strictly restricts Super Admin to primary email and rejects token role", () => {

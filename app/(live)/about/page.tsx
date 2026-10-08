@@ -1,6 +1,6 @@
 import React from "react";
 
-import { getTeamMembers } from "@/lib/firebase/storefront";
+import { getTeamMembers } from "@/lib/server/storefront";
 import companyData from "@/data/company";
 import CTASection from "@/components/reusables/sections/cta";
 import PageHeader from "@/components/reusables/PageHeader";
