@@ -1,13 +1,13 @@
-import dynamic from "next/dynamic";
+import nextDynamic from "next/dynamic";
 import HeroSection from "@/components/reusables/sections/hero-section";
 
-const FoundationSection = dynamic(
+const FoundationSection = nextDynamic(
   () => import("@/components/reusables/sections/foundation-section")
 );
-const FeaturedProducts = dynamic(
+const FeaturedProducts = nextDynamic(
   () => import("@/components/reusables/sections/featured-products")
 );
-const ServicesOneSection = dynamic(
+const ServicesOneSection = nextDynamic(
   () => import("@/components/reusables/sections/featured-services")
 );
 
@@ -19,7 +19,7 @@ import CTASection from "@/components/reusables/sections/cta";
 import TestimonialsSection from "@/components/reusables/sections/TestimonialsSection";
 import BlogSection from "@/components/reusables/sections/BlogSection.server";
 
-export const revalidate = 300; // 5-minute ISR for homepage showcase sections
+export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const [servicesRes, testimonialsRes] = await Promise.all([

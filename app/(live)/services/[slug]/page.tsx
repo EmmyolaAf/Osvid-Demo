@@ -21,17 +21,7 @@ interface ServiceDetailPageProps {
   params: Promise<{ slug: string }>;
 }
 
-export const revalidate = 3600; // 1-hour ISR for chemical services
-
-export async function generateStaticParams() {
-  try {
-    const result = await getServices();
-    if (!result.success || !result.data) return [];
-    return result.data.map((service) => ({ slug: service.slug || service._id }));
-  } catch {
-    return [];
-  }
-}
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({
   params,

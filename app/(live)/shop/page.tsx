@@ -18,7 +18,6 @@ interface ProductsPageProps {
 const PRODUCTS_PER_PAGE = 12;
 
 export const dynamic = "force-dynamic";
-export const revalidate = 60; // Dynamic short revalidation (60 seconds) for catalogue price/stock freshness
 
 export default async function ProductsPage({
   searchParams,

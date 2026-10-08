@@ -40,20 +40,69 @@ The Cloud Run service should run with a dedicated Google Cloud service account:
 
 ---
 
-## 3. Server Environment & Secret Manager Contract
+## 3. Configuration Contract: Build-Time Client vs Runtime Server
 
-Configure the following secrets in Google Cloud Secret Manager and mount as environment variables on Cloud Run:
+### Critical Architectural Principle: Build-Time vs Runtime Boundary
+Next.js inlines `NEXT_PUBLIC_*` environment variables directly into client-side JavaScript bundles during `next build` (inside the Docker builder stage).
+Therefore, **Cloud Run runtime environment variables alone CANNOT change browser Firebase configuration after the image is built.**
 
-| Variable | Type | Source / Value Description |
+- Staging and production container images **MUST** be built separately with the correct public Firebase configuration for each environment.
+- Do NOT assume a single prebuilt container image can switch `NEXT_PUBLIC` Firebase projects at Cloud Run runtime.
+
+---
+
+### A. Client Build-Time Configuration (Non-Secret Docker Build Args)
+These variables must be passed as `--build-arg` during `docker build`:
+
+| Variable | Scope | Description / Example |
 | :--- | :--- | :--- |
-| `PAYSTACK_SECRET_KEY` | Secret | Live secret key `sk_live_...` from Paystack Dashboard |
-| `RESEND_API_KEY` | Secret | Production API key `re_...` from Resend Console |
-| `MAINTENANCE_CRON_SECRET` | Secret | Cryptographically random 32+ character hex string |
-| `FIREBASE_PROJECT_ID` | Non-Secret | `osvid-9d4d6` |
-| `NODE_ENV` | Non-Secret | `production` |
-| `FROM_EMAIL` | Non-Secret | Verified sender address (e.g. `orders@osvid.com.ng`) |
-| `BCC_EMAIL` | Non-Secret | Internal order notification mailbox (`osvidbusinesses@gmail.com`) |
-| `NEXT_PUBLIC_BASE_URL` | Public | Production domain `https://osvid.com.ng` |
+| `NEXT_PUBLIC_FIREBASE_API_KEY` | Build-time | Web API Key for target Firebase project |
+| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | Build-time | Auth domain (e.g. `<PROJECT_ID>.firebaseapp.com`) |
+| `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | Build-time | Target project ID (e.g. `osvid-9d4d6` or staging ID) |
+| `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` | Build-time | Storage bucket (e.g. `<PROJECT_ID>.firebasestorage.app`) |
+| `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID` | Build-time | Firebase Cloud Messaging Sender ID |
+| `NEXT_PUBLIC_FIREBASE_APP_ID` | Build-time | Firebase Web App ID (`1:...:web:...`) |
+| `NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID` | Build-time (Optional) | Google Analytics 4 measurement ID (`G-...`) |
+| `NEXT_PUBLIC_BASE_URL` | Build-time | Canonical public URL (e.g. `https://osvid.com.ng`) |
+
+#### Example Docker Image Build (Placeholders Only — Do Not Commit Real Values)
+```bash
+docker build \
+  --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="<PUBLIC_FIREBASE_API_KEY>" \
+  --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="<PROJECT_ID>.firebaseapp.com" \
+  --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID="<PROJECT_ID>" \
+  --build-arg NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET="<PROJECT_ID>.firebasestorage.app" \
+  --build-arg NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID="<MESSAGING_SENDER_ID>" \
+  --build-arg NEXT_PUBLIC_FIREBASE_APP_ID="<WEB_APP_ID>" \
+  --build-arg NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID="<OPTIONAL_MEASUREMENT_ID>" \
+  --build-arg NEXT_PUBLIC_BASE_URL="https://<CANONICAL_DOMAIN>" \
+  -t gcr.io/<PROJECT_ID>/osvid-web:<TAG> .
+```
+
+> ⚠️ **SECURITY WARNING**: NEVER supply `PAYSTACK_SECRET_KEY`, `RESEND_API_KEY`, `MAINTENANCE_CRON_SECRET`, or service account credentials as Docker build arguments. Those are strictly runtime secrets.
+
+---
+
+### B. Server Runtime Configuration (Cloud Run Environment & Secret Manager)
+Configure these variables directly on Cloud Run (via Google Cloud Secret Manager for secrets):
+
+| Variable | Scope / Type | Source / Value Description |
+| :--- | :--- | :--- |
+| `FIREBASE_PROJECT_ID` | Server Non-Secret | Target project ID (`osvid-9d4d6` or staging project ID) |
+| `PAYSTACK_SECRET_KEY` | Server Secret | Paystack Live Secret Key `sk_live_...` |
+| `RESEND_API_KEY` | Server Secret | Resend API key `re_...` |
+| `MAINTENANCE_CRON_SECRET` | Server Secret | Cryptographically random 32+ character hex string |
+| `NODE_ENV` | Server Non-Secret | `production` |
+| `FROM_EMAIL` | Server Non-Secret | Verified sender mailbox (e.g. `orders@osvid.com.ng`) |
+| `BCC_EMAIL` | Server Non-Secret | Operational order notification mailbox (`osvidbusinesses@gmail.com`) |
+
+---
+
+### C. Staging Environment & Split-Environment Prevention
+- Staging browser Firebase configuration and server `FIREBASE_PROJECT_ID` **must** refer to the exact same Firebase project.
+- > ⚠️ **MANUAL GATE — SEPARATE STAGING FIREBASE PROJECT**:
+  > If a dedicated staging Firebase project has not yet been provisioned in Google Cloud Console, do **NOT** silently point staging browser builds to OSVID production Firebase (`osvid-9d4d6`).
+  > Provision a distinct Firebase project (e.g. `osvid-staging`) before conducting full staging end-to-end testing.
 
 ---
 
@@ -62,9 +111,10 @@ Configure the following secrets in Google Cloud Secret Manager and mount as envi
 Follow this exact sequential order to prevent locking operational staff out due to fail-closed subscription security rules.
 
 ### Step 1: Provision Cloud Run Service & Secrets
-1. Create or update Cloud Run service `osvid-web` with the production container image built from the `Dockerfile`.
-2. Attach runtime service account `osvid-web-runtime@osvid-9d4d6.iam.gserviceaccount.com`.
-3. Configure environment variables and Secret Manager references.
+1. Build the production container image using Docker build arguments matching the production Firebase project.
+2. Create or update Cloud Run service `osvid-web` with the container image.
+3. Attach runtime service account `osvid-web-runtime@osvid-9d4d6.iam.gserviceaccount.com`.
+4. Configure runtime environment variables and Secret Manager references.
 
 ### Step 2: Deploy & Verify Health Check
 1. Deploy the initial Cloud Run revision.

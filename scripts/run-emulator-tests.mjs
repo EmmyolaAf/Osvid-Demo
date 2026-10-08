@@ -29,6 +29,7 @@ esbuild.buildSync({
   ],
   alias: {
     "@": process.cwd(),
+    "server-only": path.resolve(process.cwd(), "node_modules/server-only/empty.js"),
   },
 });
 

@@ -24,7 +24,6 @@ interface ProductCategoryDetailPageProps {
 }
 
 export const dynamic = "force-dynamic";
-export const revalidate = 60; // Dynamic short revalidation for category products freshness
 
 export async function generateMetadata({
   params,

@@ -13,7 +13,7 @@ export const metadata: Metadata = {
     "Technical articles, application guides, and expert chemical insights from OSVID CHEMICALS LTD.",
 };
 
-export const revalidate = 1800; // ISR revalidation every 30 minutes for blog articles
+export const dynamic = "force-dynamic";
 
 export default async function BlogPage() {
   const result = await getBlogPosts();

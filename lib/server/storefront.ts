@@ -1,11 +1,18 @@
+import "server-only";
+
 /**
  * Server-Side Storefront Services (Admin SDK Firestore Read Adapter)
  *
  * Enforces strict public boundary:
  * - Admin SDK queries bypass Security Rules, so these queries strictly enforce
  *   visibility filtering (e.g. isActive == true) and public field projection.
- * - Never returns private customer profiles, checkout sessions, internal costs,
- *   ledger documents, or subscription runtime secrets.
+ * - Categories: Excludes documents explicitly marked isActive == false while
+ *   preserving legacy documents where isActive is undefined.
+ * - Services, Blog Posts, Testimonials, Team: Respects existing publication / active
+ *   flags if present.
+ * - Never returns raw Admin SDK errors, credential errors, or transport diagnostics
+ *   to public pages. Logs server-side and returns customer-safe error messages.
+ * - Marked "server-only" to guarantee it cannot ever be bundled into client components.
  */
 
 import { adminDb } from "@/lib/firebase/admin";
@@ -66,7 +73,7 @@ export async function getServerProducts(
     console.error("Server Firestore getProducts error:", error);
     return {
       success: false,
-      error: error?.message || "Failed to retrieve products from server Firestore.",
+      error: "Unable to load products right now.",
     };
   }
 }
@@ -145,7 +152,7 @@ export async function getServerProductBySlug(
     console.error(`Server Firestore getProductBySlug (${slug}) error:`, error);
     return {
       success: false,
-      error: error?.message || `Failed to fetch product "${slug}".`,
+      error: "Unable to load product details right now.",
     };
   }
 }
@@ -191,13 +198,17 @@ export async function getServerFeaturedProducts(
     console.error("Server Firestore getFeaturedProducts error:", error);
     return {
       success: false,
-      error: error?.message || "Failed to fetch featured products.",
+      error: "Unable to load featured products right now.",
     };
   }
 }
 
 /**
  * Fetch all product categories
+ *
+ * Strict public visibility:
+ * - Excludes categories where isActive === false.
+ * - Preserves compatibility with legacy category documents where isActive is omitted.
  */
 export async function getServerProductCategories(): Promise<
   StorefrontResult<ProductCategory[]>
@@ -208,34 +219,38 @@ export async function getServerProductCategories(): Promise<
       .orderBy("priority", "asc")
       .get();
 
-    const categories: ProductCategory[] = snapshot.docs.map((d) => {
-      const data = d.data();
-      return {
-        _id: d.id,
-        _owner: "admin",
-        _createdDate: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
-        _updatedDate: typeof data.updatedAt === "string" ? data.updatedAt : new Date().toISOString(),
-        priority: Number(data.priority) || 0,
-        slug: data.slug || d.id,
-        title: data.title || data.name || "",
-        imageUrl: data.imageUrl || "/images/placeholder.webp",
-        description: data.description || "",
-        products: Array.isArray(data.products) ? data.products : [],
-      };
-    });
+    const categories: ProductCategory[] = snapshot.docs
+      .filter((d) => d.data().isActive !== false)
+      .map((d) => {
+        const data = d.data();
+        return {
+          _id: d.id,
+          _owner: "admin",
+          _createdDate: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
+          _updatedDate: typeof data.updatedAt === "string" ? data.updatedAt : new Date().toISOString(),
+          priority: Number(data.priority) || 0,
+          slug: data.slug || d.id,
+          title: data.title || data.name || "",
+          imageUrl: data.imageUrl || "/images/placeholder.webp",
+          description: data.description || "",
+          products: Array.isArray(data.products) ? data.products : [],
+        };
+      });
 
     return { success: true, data: categories };
   } catch (error: any) {
     console.error("Server Firestore getProductCategories error:", error);
     return {
       success: false,
-      error: error?.message || "Failed to fetch product categories.",
+      error: "Unable to load product categories right now.",
     };
   }
 }
 
 /**
  * Fetch all chemical services
+ *
+ * Visibility: Excludes services explicitly marked inactive or unpublished.
  */
 export async function getServerServices(): Promise<StorefrontResult<Service[]>> {
   try {
@@ -244,24 +259,29 @@ export async function getServerServices(): Promise<StorefrontResult<Service[]>> 
       .orderBy("priority", "asc")
       .get();
 
-    const services: Service[] = snapshot.docs.map((d) => {
-      const data = d.data();
-      return {
-        _id: d.id,
-        title: data.title || "",
-        slug: data.slug || d.id,
-        description: data.description || "",
-        image: data.image || data.imageUrl || "/images/placeholder.webp",
-        createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
-      };
-    });
+    const services: Service[] = snapshot.docs
+      .filter((d) => {
+        const data = d.data();
+        return data.isActive !== false && data.published !== false && data.isPublished !== false;
+      })
+      .map((d) => {
+        const data = d.data();
+        return {
+          _id: d.id,
+          title: data.title || "",
+          slug: data.slug || d.id,
+          description: data.description || "",
+          image: data.image || data.imageUrl || "/images/placeholder.webp",
+          createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
+        };
+      });
 
     return { success: true, data: services };
   } catch (error: any) {
     console.error("Server Firestore getServices error:", error);
     return {
       success: false,
-      error: error?.message || "Failed to fetch chemical services.",
+      error: "Unable to load chemical services right now.",
     };
   }
 }
@@ -286,33 +306,37 @@ export async function getServerServiceBySlug(
     if (!snapshot.empty) {
       const docSnap = snapshot.docs[0];
       const data = docSnap.data();
-      return {
-        success: true,
-        data: {
-          _id: docSnap.id,
-          title: data.title || "",
-          slug: data.slug || docSnap.id,
-          description: data.description || "",
-          image: data.image || data.imageUrl || "/images/placeholder.webp",
-          createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
-        },
-      };
+      if (data.isActive !== false && data.published !== false && data.isPublished !== false) {
+        return {
+          success: true,
+          data: {
+            _id: docSnap.id,
+            title: data.title || "",
+            slug: data.slug || docSnap.id,
+            description: data.description || "",
+            image: data.image || data.imageUrl || "/images/placeholder.webp",
+            createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
+          },
+        };
+      }
     }
 
     const directDoc = await adminDb.collection("services").doc(slug).get();
     if (directDoc.exists) {
       const data = directDoc.data() || {};
-      return {
-        success: true,
-        data: {
-          _id: directDoc.id,
-          title: data.title || "",
-          slug: data.slug || directDoc.id,
-          description: data.description || "",
-          image: data.image || data.imageUrl || "/images/placeholder.webp",
-          createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
-        },
-      };
+      if (data.isActive !== false && data.published !== false && data.isPublished !== false) {
+        return {
+          success: true,
+          data: {
+            _id: directDoc.id,
+            title: data.title || "",
+            slug: data.slug || directDoc.id,
+            description: data.description || "",
+            image: data.image || data.imageUrl || "/images/placeholder.webp",
+            createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
+          },
+        };
+      }
     }
 
     return { success: true, data: null };
@@ -320,13 +344,15 @@ export async function getServerServiceBySlug(
     console.error(`Server Firestore getServiceBySlug (${slug}) error:`, error);
     return {
       success: false,
-      error: error?.message || `Failed to fetch service "${slug}".`,
+      error: "Unable to load chemical service details right now.",
     };
   }
 }
 
 /**
  * Fetch published blog articles
+ *
+ * Visibility: Excludes articles explicitly marked inactive or unpublished.
  */
 export async function getServerBlogPosts(): Promise<StorefrontResult<BlogPost[]>> {
   try {
@@ -335,32 +361,37 @@ export async function getServerBlogPosts(): Promise<StorefrontResult<BlogPost[]>
       .orderBy("publishDate", "desc")
       .get();
 
-    const posts: BlogPost[] = snapshot.docs.map((d) => {
-      const data = d.data();
-      return {
-        id: d.id,
-        title: data.title || "",
-        slug: data.slug || d.id,
-        excerpt: data.excerpt || "",
-        content: data.content || "",
-        featuredImage: data.featuredImage || "/images/placeholder.webp",
-        publishDate: typeof data.publishDate === "string" ? data.publishDate : new Date().toISOString(),
-        author: {
-          name: data.author?.name || "OSVID Technical Team",
-          avatar: data.author?.avatar || undefined,
-        },
-        category: data.category || "Chemical Applications",
-        tags: Array.isArray(data.tags) ? data.tags : [],
-        comments: Number(data.comments) || 0,
-      };
-    });
+    const posts: BlogPost[] = snapshot.docs
+      .filter((d) => {
+        const data = d.data();
+        return data.isActive !== false && data.published !== false && data.isPublished !== false;
+      })
+      .map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          title: data.title || "",
+          slug: data.slug || d.id,
+          excerpt: data.excerpt || "",
+          content: data.content || "",
+          featuredImage: data.featuredImage || "/images/placeholder.webp",
+          publishDate: typeof data.publishDate === "string" ? data.publishDate : new Date().toISOString(),
+          author: {
+            name: data.author?.name || "OSVID Technical Team",
+            avatar: data.author?.avatar || undefined,
+          },
+          category: data.category || "Chemical Applications",
+          tags: Array.isArray(data.tags) ? data.tags : [],
+          comments: Number(data.comments) || 0,
+        };
+      });
 
     return { success: true, data: posts };
   } catch (error: any) {
     console.error("Server Firestore getBlogPosts error:", error);
     return {
       success: false,
-      error: error?.message || "Failed to fetch blog posts.",
+      error: "Unable to load blog posts right now.",
     };
   }
 }
@@ -385,25 +416,27 @@ export async function getServerBlogPostBySlug(
     if (!snapshot.empty) {
       const docSnap = snapshot.docs[0];
       const data = docSnap.data();
-      return {
-        success: true,
-        data: {
-          id: docSnap.id,
-          title: data.title || "",
-          slug: data.slug || docSnap.id,
-          excerpt: data.excerpt || "",
-          content: data.content || "",
-          featuredImage: data.featuredImage || "/images/placeholder.webp",
-          publishDate: typeof data.publishDate === "string" ? data.publishDate : new Date().toISOString(),
-          author: {
-            name: data.author?.name || "OSVID Technical Team",
-            avatar: data.author?.avatar || undefined,
+      if (data.isActive !== false && data.published !== false && data.isPublished !== false) {
+        return {
+          success: true,
+          data: {
+            id: docSnap.id,
+            title: data.title || "",
+            slug: data.slug || docSnap.id,
+            excerpt: data.excerpt || "",
+            content: data.content || "",
+            featuredImage: data.featuredImage || "/images/placeholder.webp",
+            publishDate: typeof data.publishDate === "string" ? data.publishDate : new Date().toISOString(),
+            author: {
+              name: data.author?.name || "OSVID Technical Team",
+              avatar: data.author?.avatar || undefined,
+            },
+            category: data.category || "Chemical Applications",
+            tags: Array.isArray(data.tags) ? data.tags : [],
+            comments: Number(data.comments) || 0,
           },
-          category: data.category || "Chemical Applications",
-          tags: Array.isArray(data.tags) ? data.tags : [],
-          comments: Number(data.comments) || 0,
-        },
-      };
+        };
+      }
     }
 
     return { success: true, data: null };
@@ -411,7 +444,7 @@ export async function getServerBlogPostBySlug(
     console.error(`Server Firestore getBlogPostBySlug (${slug}) error:`, error);
     return {
       success: false,
-      error: error?.message || `Failed to fetch blog post "${slug}".`,
+      error: "Unable to load blog post right now.",
     };
   }
 }
@@ -426,23 +459,28 @@ export async function getServerTestimonials(): Promise<StorefrontResult<Testimon
       .orderBy("rating", "desc")
       .get();
 
-    const testimonials: Testimonial[] = snapshot.docs.map((d) => {
-      const data = d.data();
-      return {
-        name: data.name || "Anonymous Client",
-        role: data.role || "Verified Buyer",
-        content: data.content || "",
-        imageUrl: data.imageUrl || null,
-        rating: Number(data.rating) || 5,
-      };
-    });
+    const testimonials: Testimonial[] = snapshot.docs
+      .filter((d) => {
+        const data = d.data();
+        return data.isActive !== false && data.published !== false;
+      })
+      .map((d) => {
+        const data = d.data();
+        return {
+          name: data.name || "Anonymous Client",
+          role: data.role || "Verified Buyer",
+          content: data.content || "",
+          imageUrl: data.imageUrl || null,
+          rating: Number(data.rating) || 5,
+        };
+      });
 
     return { success: true, data: testimonials };
   } catch (error: any) {
     console.error("Server Firestore getTestimonials error:", error);
     return {
       success: false,
-      error: error?.message || "Failed to fetch testimonials.",
+      error: "Unable to load testimonials right now.",
     };
   }
 }
@@ -459,14 +497,16 @@ export async function getServerTeamMembers(): Promise<StorefrontResult<TeamMembe
       .get();
 
     if (!snapshot.empty) {
-      const members: TeamMember[] = snapshot.docs.map((d) => {
-        const data = d.data();
-        return {
-          name: data.name || "Team Member",
-          role: data.role || "Specialist",
-          imageUrl: data.imageUrl || "/images/team-placeholder.jpg",
-        };
-      });
+      const members: TeamMember[] = snapshot.docs
+        .filter((d) => d.data().isActive !== false)
+        .map((d) => {
+          const data = d.data();
+          return {
+            name: data.name || "Team Member",
+            role: data.role || "Specialist",
+            imageUrl: data.imageUrl || "/images/team-placeholder.jpg",
+          };
+        });
       return { success: true, data: members };
     }
 
@@ -499,7 +539,7 @@ export async function getServerTeamMembers(): Promise<StorefrontResult<TeamMembe
     console.error("Server Firestore getTeamMembers error:", error);
     return {
       success: false,
-      error: error?.message || "Failed to fetch team members.",
+      error: "Unable to load team members right now.",
     };
   }
 }
@@ -517,4 +557,3 @@ export {
   getServerTestimonials as getTestimonials,
   getServerTeamMembers as getTeamMembers,
 };
-

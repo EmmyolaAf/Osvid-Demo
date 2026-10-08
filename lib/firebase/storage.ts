@@ -1,5 +1,6 @@
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { storage } from "./client";
+import { firebaseConfig } from "../firebase";
 
 export const ALLOWED_IMAGE_MIME_TYPES = [
   "image/jpeg",
@@ -72,12 +73,14 @@ export function generateManagedStoragePath(
 
 /**
  * Returns the currently configured Firebase Storage bucket name.
+ * Strictly aligned with the resolved client Firebase configuration.
+ * Avoids independent fallback that could disagree with staging configuration.
  */
 export function getConfiguredStorageBucket(): string {
-  if (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET) {
-    return process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
+  if (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET?.trim()) {
+    return process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET.trim();
   }
-  return storage?.app?.options?.storageBucket || "osvid-9d4d6.firebasestorage.app";
+  return firebaseConfig?.storageBucket?.trim() || storage?.app?.options?.storageBucket?.trim() || "";
 }
 
 /**

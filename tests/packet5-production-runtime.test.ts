@@ -21,6 +21,13 @@ import {
   MAX_IMAGE_FILE_SIZE_BYTES,
 } from "@/lib/firebase/storage";
 import { getOrGenerateRequestId, sanitizeLogData } from "@/lib/server/logger";
+import { resolveClientFirebaseConfig, firebaseConfig } from "@/lib/firebase";
+import { adminDb } from "@/lib/firebase/admin";
+import {
+  getServerProducts,
+  getServerProductCategories,
+  getServerBlogPosts,
+} from "@/lib/server/storefront";
 
 describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () => {
   const originalEnv = { ...process.env };
@@ -514,6 +521,319 @@ describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () 
           content.includes('from "@/lib/firebase/storefront"'),
           `${relPath} legitimately uses browser client storefront`
         );
+      }
+    });
+  });
+
+  // ==========================================================================
+  // 8. CLIENT FIREBASE CONFIG RESOLUTION & FAIL-CLOSED SEMANTICS
+  // ==========================================================================
+  describe("Client Firebase Configuration Resolver & Storage Alignment", () => {
+    it("fails closed in production build if required client Firebase fields are missing", () => {
+      assert.throws(
+        () => resolveClientFirebaseConfig({}, "production"),
+        /Missing required client Firebase configuration/
+      );
+    });
+
+    it("does not silently fall back to osvid-9d4d6 in production", () => {
+      assert.throws(
+        () =>
+          resolveClientFirebaseConfig(
+            {
+              apiKey: "some-key",
+              authDomain: "test.firebaseapp.com",
+            },
+            "production"
+          ),
+        /Missing required client Firebase configuration/
+      );
+    });
+
+    it("explicitly supplied production configuration resolves correctly", () => {
+      const explicitProd = {
+        apiKey: "AIzaSy_explicit_prod_key",
+        authDomain: "osvid-prod.firebaseapp.com",
+        projectId: "osvid-prod",
+        storageBucket: "osvid-prod.firebasestorage.app",
+        messagingSenderId: "1234567890",
+        appId: "1:1234567890:web:abcdef123",
+        measurementId: "G-PROD123",
+      };
+
+      const resolved = resolveClientFirebaseConfig(explicitProd, "production");
+      assert.equal(resolved.projectId, "osvid-prod");
+      assert.equal(resolved.storageBucket, "osvid-prod.firebasestorage.app");
+      assert.equal(resolved.apiKey, "AIzaSy_explicit_prod_key");
+      assert.equal(resolved.measurementId, "G-PROD123");
+    });
+
+    it("explicitly supplied staging configuration resolves correctly without production fallback", () => {
+      const stagingConfig = {
+        apiKey: "AIzaSy_explicit_staging_key",
+        authDomain: "osvid-staging.firebaseapp.com",
+        projectId: "osvid-staging",
+        storageBucket: "osvid-staging.firebasestorage.app",
+        messagingSenderId: "9876543210",
+        appId: "1:9876543210:web:fedcba321",
+      };
+
+      const resolved = resolveClientFirebaseConfig(stagingConfig, "production");
+      assert.equal(resolved.projectId, "osvid-staging");
+      assert.equal(resolved.storageBucket, "osvid-staging.firebasestorage.app");
+      assert.notEqual(resolved.projectId, "osvid-9d4d6");
+    });
+
+    it("provides safe documented demo fallback in development and test environments", () => {
+      const resolved = resolveClientFirebaseConfig({}, "test");
+      assert.ok(resolved.projectId);
+      assert.ok(resolved.storageBucket);
+      assert.ok(resolved.apiKey);
+    });
+
+    it("client projectId and storage bucket share the same configuration source", () => {
+      const customConfig = {
+        apiKey: "key-123",
+        authDomain: "custom-tenant.firebaseapp.com",
+        projectId: "custom-tenant",
+        storageBucket: "custom-tenant.firebasestorage.app",
+        messagingSenderId: "5555555555",
+        appId: "1:555:web:custom",
+      };
+      const resolved = resolveClientFirebaseConfig(customConfig, "production");
+      assert.ok(resolved.storageBucket.includes(resolved.projectId));
+    });
+
+    it("getConfiguredStorageBucket resolves bucket aligned with client config", () => {
+      const bucket = getConfiguredStorageBucket();
+      assert.ok(bucket && typeof bucket === "string");
+      if (firebaseConfig?.storageBucket) {
+        assert.equal(bucket, firebaseConfig.storageBucket);
+      }
+    });
+  });
+
+  // ==========================================================================
+  // 9. DOCKER BUILD-TIME VS RUNTIME BOUNDARY CONTRACT
+  // ==========================================================================
+  describe("Dockerfile Non-Secret Build ARGs & Environment Isolation", () => {
+    const dockerfileContent = fs.readFileSync(
+      path.resolve(process.cwd(), "Dockerfile"),
+      "utf8"
+    );
+
+    it("exposes only NON-SECRET NEXT_PUBLIC variables as builder ARGs", () => {
+      const requiredArgs = [
+        "ARG NEXT_PUBLIC_FIREBASE_API_KEY",
+        "ARG NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN",
+        "ARG NEXT_PUBLIC_FIREBASE_PROJECT_ID",
+        "ARG NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET",
+        "ARG NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID",
+        "ARG NEXT_PUBLIC_FIREBASE_APP_ID",
+        "ARG NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID",
+        "ARG NEXT_PUBLIC_BASE_URL",
+      ];
+
+      for (const arg of requiredArgs) {
+        assert.ok(
+          dockerfileContent.includes(arg),
+          `Dockerfile must declare builder build argument: ${arg}`
+        );
+      }
+    });
+
+    it("strictly DOES NOT expose runtime secrets as Docker build arguments", () => {
+      const forbiddenSecretArgs = [
+        "ARG PAYSTACK_SECRET_KEY",
+        "ARG RESEND_API_KEY",
+        "ARG MAINTENANCE_CRON_SECRET",
+        "ARG FIREBASE_SERVICE_ACCOUNT",
+      ];
+
+      for (const secretArg of forbiddenSecretArgs) {
+        assert.equal(
+          dockerfileContent.includes(secretArg),
+          false,
+          `SECURITY VIOLATION: Dockerfile must NEVER include secret build argument: ${secretArg}`
+        );
+      }
+    });
+  });
+
+  // ==========================================================================
+  // 10. CI WORKFLOW SAFE DEMO CONFIGURATION CONTRACT
+  // ==========================================================================
+  describe("CI Workflow Safe Demo Public Configuration Contract", () => {
+    it("canonical workflow file exists at .github/workflows/ci.yml", () => {
+      const ciPath = path.resolve(process.cwd(), ".github/workflows/ci.yml");
+      assert.ok(fs.existsSync(ciPath), ".github/workflows/ci.yml must exist");
+    });
+
+    it("ci.yml supplies safe demo NEXT_PUBLIC Firebase configuration", () => {
+      const ciContent = fs.readFileSync(
+        path.resolve(process.cwd(), ".github/workflows/ci.yml"),
+        "utf8"
+      );
+      assert.ok(ciContent.includes("NEXT_PUBLIC_FIREBASE_PROJECT_ID: demo-osvid-rules-test"));
+      assert.ok(ciContent.includes("NEXT_PUBLIC_FIREBASE_API_KEY: demo-api-key-for-ci-compilation-only"));
+      assert.ok(ciContent.includes("NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: demo-osvid-rules-test.firebaseapp.com"));
+      assert.ok(ciContent.includes("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: demo-osvid-rules-test.firebasestorage.app"));
+      assert.ok(ciContent.includes("NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID:"));
+      assert.ok(ciContent.includes("NEXT_PUBLIC_FIREBASE_APP_ID:"));
+      assert.ok(ciContent.includes("FIREBASE_PROJECT_ID: demo-osvid-rules-test"));
+    });
+  });
+
+  // ==========================================================================
+  // 11. REQUEST-TIME STOREFRONT RENDERING & SERVER MODULE BOUNDARIES
+  // ==========================================================================
+  describe("Request-Time Rendering & Static Generation Removal", () => {
+    const firestoreBackedRoutes = [
+      "app/(live)/page.tsx",
+      "app/(live)/shop/page.tsx",
+      "app/(live)/shop/[slug]/page.tsx",
+      "app/(live)/products/page.tsx",
+      "app/(live)/products/[categorySlug]/page.tsx",
+      "app/(live)/blog/page.tsx",
+      "app/(live)/blog/[slug]/page.tsx",
+      "app/(live)/services/page.tsx",
+      "app/(live)/services/[slug]/page.tsx",
+      "app/(live)/about/page.tsx",
+    ];
+
+    it("all Firestore-backed public routes are configured as force-dynamic", () => {
+      for (const routePath of firestoreBackedRoutes) {
+        const fullPath = path.resolve(process.cwd(), routePath);
+        const content = fs.readFileSync(fullPath, "utf8");
+        assert.ok(
+          content.includes('export const dynamic = "force-dynamic"'),
+          `${routePath} must declare export const dynamic = "force-dynamic"`
+        );
+      }
+    });
+
+    it("no force-dynamic storefront route retains misleading revalidate declarations", () => {
+      for (const routePath of firestoreBackedRoutes) {
+        const fullPath = path.resolve(process.cwd(), routePath);
+        const content = fs.readFileSync(fullPath, "utf8");
+        assert.equal(
+          content.includes("export const revalidate"),
+          false,
+          `${routePath} must NOT retain page-level revalidate declaration`
+        );
+      }
+    });
+
+    it("dynamic parameter routes do not execute generateStaticParams Firestore reads at build time", () => {
+      const slugRoutes = [
+        "app/(live)/blog/[slug]/page.tsx",
+        "app/(live)/services/[slug]/page.tsx",
+      ];
+      for (const routePath of slugRoutes) {
+        const fullPath = path.resolve(process.cwd(), routePath);
+        const content = fs.readFileSync(fullPath, "utf8");
+        assert.equal(
+          content.includes("generateStaticParams"),
+          false,
+          `${routePath} must NOT declare generateStaticParams`
+        );
+      }
+    });
+
+    it("server modules contain standard server-only boundary", () => {
+      const serverModules = [
+        "lib/server/storefront.ts",
+        "lib/firebase/admin.ts",
+      ];
+      for (const modPath of serverModules) {
+        const fullPath = path.resolve(process.cwd(), modPath);
+        const content = fs.readFileSync(fullPath, "utf8");
+        assert.ok(
+          content.includes('import "server-only"'),
+          `${modPath} must import "server-only"`
+        );
+      }
+    });
+  });
+
+  // ==========================================================================
+  // 12. PUBLIC DATA VISIBILITY & ERROR SANITIZATION
+  // ==========================================================================
+  describe("Public Storefront Adapter Visibility & Error Sanitization", () => {
+    it("getServerProductCategories filters out categories explicitly marked isActive === false", async () => {
+      const origCollection = adminDb.collection.bind(adminDb);
+      try {
+        (adminDb as any).collection = (colName: string) => {
+          if (colName === "product_categories") {
+            return {
+              orderBy: () => ({
+                get: async () => ({
+                  docs: [
+                    {
+                      id: "cat-active",
+                      data: () => ({
+                        name: "Active Category",
+                        slug: "active-cat",
+                        priority: 1,
+                        isActive: true,
+                      }),
+                    },
+                    {
+                      id: "cat-legacy",
+                      data: () => ({
+                        name: "Legacy Category",
+                        slug: "legacy-cat",
+                        priority: 2,
+                      }),
+                    },
+                    {
+                      id: "cat-disabled",
+                      data: () => ({
+                        name: "Disabled Category",
+                        slug: "disabled-cat",
+                        priority: 3,
+                        isActive: false,
+                      }),
+                    },
+                  ],
+                }),
+              }),
+            };
+          }
+          return origCollection(colName);
+        };
+
+        const res = await getServerProductCategories();
+        assert.equal(res.success, true);
+        const categories = res.data!;
+        assert.equal(categories.length, 2);
+        assert.ok(categories.some((c) => c._id === "cat-active"));
+        assert.ok(categories.some((c) => c._id === "cat-legacy"));
+        assert.equal(categories.some((c) => c._id === "cat-disabled"), false);
+      } finally {
+        (adminDb as any).collection = origCollection;
+      }
+    });
+
+    it("sanitizes Admin SDK errors and never leaks raw infrastructure errors to public pages", async () => {
+      const origCollection = adminDb.collection.bind(adminDb);
+      try {
+        (adminDb as any).collection = () => {
+          throw new Error("Could not load default credentials (ADC) from GCE metadata: 14 UNAVAILABLE");
+        };
+
+        const prodRes = await getServerProducts();
+        assert.equal(prodRes.success, false);
+        assert.equal(prodRes.error, "Unable to load products right now.");
+        assert.equal(prodRes.error!.includes("ADC"), false);
+        assert.equal(prodRes.error!.includes("14 UNAVAILABLE"), false);
+
+        const blogRes = await getServerBlogPosts();
+        assert.equal(blogRes.success, false);
+        assert.equal(blogRes.error, "Unable to load blog posts right now.");
+        assert.equal(blogRes.error!.includes("credentials"), false);
+      } finally {
+        (adminDb as any).collection = origCollection;
       }
     });
   });
