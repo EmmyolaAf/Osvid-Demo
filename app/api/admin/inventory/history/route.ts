@@ -8,6 +8,7 @@ import {
 } from "@/lib/server/auth";
 import { assertOperationalSubscription } from "@/lib/server/subscription-guard";
 import { InventoryMovement } from "@/types/inventory";
+import type { QuerySnapshot, DocumentData, QueryDocumentSnapshot } from "firebase-admin/firestore";
 
 export async function GET(req: NextRequest) {
   try {
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest) {
     const limitParam = parseInt(searchParams.get("limit") || "50", 10);
     const safeLimit = Math.min(Math.max(1, isNaN(limitParam) ? 50 : limitParam), 200);
 
-    let snap: FirebaseFirestore.QuerySnapshot;
+    let snap: QuerySnapshot<DocumentData>;
     try {
       if (productId && productId.trim().length > 0) {
         snap = await adminDb
@@ -59,7 +60,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const movements: InventoryMovement[] = snap.docs.map((d) => {
+    const movements: InventoryMovement[] = snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => {
       const data = d.data();
       return {
         id: d.id,

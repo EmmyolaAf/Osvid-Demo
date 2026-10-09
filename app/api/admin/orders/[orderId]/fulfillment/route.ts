@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
+import type { Transaction } from "firebase-admin/firestore";
 import {
   requireAuthenticatedUser,
   hasPermission,
@@ -173,7 +174,7 @@ export async function POST(
     // 4. Load and update order transactionally with audit logging
     const orderRef = adminDb.collection("orders").doc(cleanOrderId);
 
-    const result = await adminDb.runTransaction(async (transaction) => {
+    const result = await adminDb.runTransaction(async (transaction: Transaction) => {
       const orderSnap = await transaction.get(orderRef);
       if (!orderSnap.exists) {
         throw new AuthError(`Order not found: "${cleanOrderId}"`, 404);

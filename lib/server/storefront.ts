@@ -16,6 +16,7 @@ import "server-only";
  */
 
 import { adminDb } from "@/lib/firebase/admin";
+import type { QueryDocumentSnapshot, DocumentData } from "firebase-admin/firestore";
 import { Product } from "@/types/auth";
 import {
   ProductCategory,
@@ -46,7 +47,7 @@ export async function getServerProducts(
 
     const snapshot = await query.get();
 
-    const products: Product[] = snapshot.docs.map((d) => {
+    const products: Product[] = snapshot.docs.map((d: QueryDocumentSnapshot<DocumentData>) => {
       const data = d.data();
       return {
         id: d.id,
@@ -171,7 +172,7 @@ export async function getServerFeaturedProducts(
       .limit(limitCount)
       .get();
 
-    const products: Product[] = snapshot.docs.map((d) => {
+    const products: Product[] = snapshot.docs.map((d: QueryDocumentSnapshot<DocumentData>) => {
       const data = d.data();
       return {
         id: d.id,
@@ -220,8 +221,8 @@ export async function getServerProductCategories(): Promise<
       .get();
 
     const categories: ProductCategory[] = snapshot.docs
-      .filter((d) => d.data().isActive !== false)
-      .map((d) => {
+      .filter((d: QueryDocumentSnapshot<DocumentData>) => d.data().isActive !== false)
+      .map((d: QueryDocumentSnapshot<DocumentData>) => {
         const data = d.data();
         return {
           _id: d.id,
@@ -260,11 +261,11 @@ export async function getServerServices(): Promise<StorefrontResult<Service[]>> 
       .get();
 
     const services: Service[] = snapshot.docs
-      .filter((d) => {
+      .filter((d: QueryDocumentSnapshot<DocumentData>) => {
         const data = d.data();
         return data.isActive !== false && data.published !== false && data.isPublished !== false;
       })
-      .map((d) => {
+      .map((d: QueryDocumentSnapshot<DocumentData>) => {
         const data = d.data();
         return {
           _id: d.id,
@@ -362,11 +363,11 @@ export async function getServerBlogPosts(): Promise<StorefrontResult<BlogPost[]>
       .get();
 
     const posts: BlogPost[] = snapshot.docs
-      .filter((d) => {
+      .filter((d: QueryDocumentSnapshot<DocumentData>) => {
         const data = d.data();
         return data.isActive !== false && data.published !== false && data.isPublished !== false;
       })
-      .map((d) => {
+      .map((d: QueryDocumentSnapshot<DocumentData>) => {
         const data = d.data();
         return {
           id: d.id,
@@ -460,11 +461,11 @@ export async function getServerTestimonials(): Promise<StorefrontResult<Testimon
       .get();
 
     const testimonials: Testimonial[] = snapshot.docs
-      .filter((d) => {
+      .filter((d: QueryDocumentSnapshot<DocumentData>) => {
         const data = d.data();
         return data.isActive !== false && data.published !== false;
       })
-      .map((d) => {
+      .map((d: QueryDocumentSnapshot<DocumentData>) => {
         const data = d.data();
         return {
           name: data.name || "Anonymous Client",
@@ -498,8 +499,8 @@ export async function getServerTeamMembers(): Promise<StorefrontResult<TeamMembe
 
     if (!snapshot.empty) {
       const members: TeamMember[] = snapshot.docs
-        .filter((d) => d.data().isActive !== false)
-        .map((d) => {
+        .filter((d: QueryDocumentSnapshot<DocumentData>) => d.data().isActive !== false)
+        .map((d: QueryDocumentSnapshot<DocumentData>) => {
           const data = d.data();
           return {
             name: data.name || "Team Member",

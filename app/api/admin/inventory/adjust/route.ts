@@ -13,7 +13,7 @@ import {
   InventoryMovementType,
   InventoryAdjustmentResponse,
 } from "@/types/inventory";
-import { Timestamp } from "firebase-admin/firestore";
+import { Timestamp, type Transaction } from "firebase-admin/firestore";
 
 const ALLOWED_MOVEMENT_TYPES: InventoryMovementType[] = [
   "initial_stock",
@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
     const productRef = adminDb.collection("products").doc(cleanProductId);
     const movementRef = adminDb.collection("inventory_movements").doc(cleanRequestId);
 
-    const transactionResult = await adminDb.runTransaction(async (transaction) => {
+    const transactionResult = await adminDb.runTransaction(async (transaction: Transaction) => {
       // Idempotency check: see if this requestId was already processed
       const existingMovementSnap = await transaction.get(movementRef);
       if (existingMovementSnap.exists) {

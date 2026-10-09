@@ -1,7 +1,13 @@
 import crypto from "crypto";
 import { Resend } from "resend";
 import { adminDb } from "@/lib/firebase/admin";
-import { FieldValue } from "firebase-admin/firestore";
+import {
+  FieldValue,
+  type Transaction,
+  type DocumentReference,
+  type DocumentSnapshot,
+  type DocumentData,
+} from "firebase-admin/firestore";
 import {
   verifyPaystackTransaction,
   initiatePaystackRefund,
@@ -53,7 +59,7 @@ interface TransactionFinalizationOutcome {
  */
 export async function ensureReceiptEmailForFinalizedPayment(
   cleanRef: string,
-  paymentTxRef: FirebaseFirestore.DocumentReference,
+  paymentTxRef: DocumentReference<DocumentData>,
   customerEmail: string,
   orderData: {
     orderId: string;
@@ -82,7 +88,7 @@ export async function ensureReceiptEmailForFinalizedPayment(
     return false;
   }
 
-  const shouldSendEmail = await adminDb.runTransaction(async (transaction) => {
+  const shouldSendEmail = await adminDb.runTransaction(async (transaction: Transaction) => {
     const txSnap = await transaction.get(paymentTxRef);
     if (!txSnap.exists) return false;
     const tx = txSnap.data() as PaymentTransactionRecord;
@@ -268,7 +274,7 @@ export async function finalizeSuccessfulPayment(
   }
 
   // 3. Locate authoritative checkout session with strict binding invariants (Requirement 5)
-  let sessionDoc: FirebaseFirestore.DocumentSnapshot | null = null;
+  let sessionDoc: DocumentSnapshot<DocumentData> | null = null;
 
   if (options?.expectedCheckoutSessionId) {
     const expectedId = options.expectedCheckoutSessionId.trim();
@@ -399,7 +405,7 @@ export async function finalizeSuccessfulPayment(
 
   // 4. Atomic Firestore Transaction for business finalization (Requirement 10 & 11)
   const outcome: TransactionFinalizationOutcome = await adminDb.runTransaction(
-    async (transaction) => {
+    async (transaction: Transaction) => {
       // Re-read payment transaction record inside transaction
       const txSnap = await transaction.get(paymentTxRef);
       if (txSnap.exists) {
@@ -481,8 +487,8 @@ export async function finalizeSuccessfulPayment(
 
       // Requirement 4: Read ALL products transactionally before any writes
       const productDocs: Array<{
-        ref: FirebaseFirestore.DocumentReference;
-        data: FirebaseFirestore.DocumentData;
+        ref: DocumentReference<DocumentData>;
+        data: DocumentData;
         item: (typeof currentSession.items)[0];
       }> = [];
 
@@ -500,7 +506,7 @@ export async function finalizeSuccessfulPayment(
       }
 
       // Read coupon doc if applicable
-      let discountDocRef: FirebaseFirestore.DocumentReference | null = null;
+      let discountDocRef: DocumentReference<DocumentData> | null = null;
       let discountData: DiscountCode | null = null;
       let couponDisappeared = false;
       if (currentSession.couponId) {
@@ -514,7 +520,7 @@ export async function finalizeSuccessfulPayment(
       }
 
       // Read customer profile if authenticated (Packet 4D Requirement 1: fix inverted check)
-      let userDocRef: FirebaseFirestore.DocumentReference | null = null;
+      let userDocRef: DocumentReference<DocumentData> | null = null;
       if (currentSession.authenticatedUserId) {
         const candidateUserRef = adminDb.collection("users").doc(currentSession.authenticatedUserId);
         const uSnap = await transaction.get(candidateUserRef);
@@ -880,7 +886,7 @@ export async function finalizeSuccessfulPayment(
     // Only "none" or definitively retryable "failed" can transition to "initiating"
     let claimAcquired = false;
     try {
-      claimAcquired = await adminDb.runTransaction(async (transaction) => {
+      claimAcquired = await adminDb.runTransaction(async (transaction: Transaction) => {
         const txSnap = await transaction.get(paymentTxRef);
         if (!txSnap.exists) {
           return false;
@@ -938,7 +944,7 @@ export async function finalizeSuccessfulPayment(
 
       // Persist durable anomaly refund state on payment transaction conditionally (Packet 4E Requirement 5, 6, 7)
       try {
-        await adminDb.runTransaction(async (transaction) => {
+        await adminDb.runTransaction(async (transaction: Transaction) => {
           const currentTxSnap = await transaction.get(paymentTxRef);
           if (!currentTxSnap.exists) return;
           const currentTx = currentTxSnap.data() as PaymentTransactionRecord;
@@ -1146,7 +1152,7 @@ export async function finalizeProcessedRefund(refundData: any): Promise<{
 
     const nowIso = new Date().toISOString();
 
-    await adminDb.runTransaction(async (transaction) => {
+    await adminDb.runTransaction(async (transaction: Transaction) => {
       // 1. Read order
       const currentOrderSnap = await transaction.get(orderRef);
       if (!currentOrderSnap.exists) return;
@@ -1158,8 +1164,8 @@ export async function finalizeProcessedRefund(refundData: any): Promise<{
 
       // 2. Read ALL product docs before any writes (Requirement 4)
       const productDocs: Array<{
-        ref: FirebaseFirestore.DocumentReference;
-        data: FirebaseFirestore.DocumentData;
+        ref: DocumentReference<DocumentData>;
+        data: DocumentData;
         item: NonNullable<typeof currentOrder.items>[0];
       }> = [];
 
@@ -1178,8 +1184,8 @@ export async function finalizeProcessedRefund(refundData: any): Promise<{
       }
 
       // 3. Read user doc if applicable
-      let userRef: FirebaseFirestore.DocumentReference | null = null;
-      let userSnap: FirebaseFirestore.DocumentSnapshot | null = null;
+      let userRef: DocumentReference<DocumentData> | null = null;
+      let userSnap: DocumentSnapshot<DocumentData> | null = null;
       if (currentOrder.userId) {
         userRef = adminDb.collection("users").doc(currentOrder.userId);
         userSnap = await transaction.get(userRef);
@@ -1281,7 +1287,7 @@ export async function finalizeProcessedRefund(refundData: any): Promise<{
 
   // 2. Anomaly Refund Reconciliation Without An Order (Requirement 18, Packet 4F Transactional)
   const payTxRef = adminDb.collection("payment_transactions").doc(cleanTxRef);
-  const anomalyRes = await adminDb.runTransaction(async (transaction) => {
+  const anomalyRes = await adminDb.runTransaction(async (transaction: Transaction) => {
     const payTxSnap = await transaction.get(payTxRef);
     if (!payTxSnap.exists) {
       return { found: false, alreadyProcessed: false };
@@ -1490,9 +1496,9 @@ export async function updateRefundStatus(
   const initialOrderId = !ordersSnap.empty ? ordersSnap.docs[0].id : undefined;
   const payTxDocRef = adminDb.collection("payment_transactions").doc(cleanTxRef);
 
-  const txResult = await adminDb.runTransaction(async (transaction) => {
+  const txResult = await adminDb.runTransaction(async (transaction: Transaction) => {
     // Step 1: Read orders/{orderId} if one exists
-    let orderSnap: FirebaseFirestore.DocumentSnapshot | null = null;
+    let orderSnap: DocumentSnapshot<DocumentData> | null = null;
     if (orderDocRef) {
       orderSnap = await transaction.get(orderDocRef);
     }

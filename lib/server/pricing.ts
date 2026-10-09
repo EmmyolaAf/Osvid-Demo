@@ -1,4 +1,9 @@
 import { adminDb } from "@/lib/firebase/admin";
+import type {
+  DocumentSnapshot,
+  DocumentData,
+  Transaction,
+} from "firebase-admin/firestore";
 import {
   AuthoritativeQuoteItem,
   CartInputItem,
@@ -245,8 +250,8 @@ export interface AuthoritativePricingResult {
     discountValue: number;
     description?: string;
   };
-  productSnapshots: Map<string, FirebaseFirestore.DocumentSnapshot>;
-  discountSnapshot?: FirebaseFirestore.DocumentSnapshot;
+  productSnapshots: Map<string, DocumentSnapshot<DocumentData>>;
+  discountSnapshot?: DocumentSnapshot<DocumentData>;
 }
 
 /**
@@ -259,10 +264,10 @@ export async function calculateAuthoritativeQuote(params: {
   deliveryMethod?: "shipping" | "pickup";
   shippingAddress?: any;
   pickupLocationId?: string;
-  transaction?: FirebaseFirestore.Transaction;
+  transaction?: Transaction;
 }): Promise<AuthoritativePricingResult> {
   const canonicalItems = canonicalizeCartItems(params.rawItems);
-  const productSnapshots = new Map<string, FirebaseFirestore.DocumentSnapshot>();
+  const productSnapshots = new Map<string, DocumentSnapshot<DocumentData>>();
   const pricedItems: AuthoritativeQuoteItem[] = [];
 
   // 1. Fetch authoritative product snapshots
@@ -327,11 +332,11 @@ export async function calculateAuthoritativeQuote(params: {
   // 4. Authoritative coupon validation
   let discountAmount = 0;
   let couponInfo: AuthoritativePricingResult["coupon"] = undefined;
-  let discountSnapshot: FirebaseFirestore.DocumentSnapshot | undefined = undefined;
+  let discountSnapshot: DocumentSnapshot<DocumentData> | undefined = undefined;
 
   const rawCouponCode = params.couponCode ? params.couponCode.trim().toUpperCase() : "";
   if (rawCouponCode) {
-    let discountDoc: FirebaseFirestore.DocumentSnapshot | null = null;
+    let discountDoc: DocumentSnapshot<DocumentData> | null = null;
 
     if (params.transaction) {
       // Transactions require direct doc get; query the collection first if doc ID unknown, or query before

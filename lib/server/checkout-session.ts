@@ -1,6 +1,13 @@
 import crypto from "crypto";
 import { adminDb } from "@/lib/firebase/admin";
-import { Timestamp, FieldValue } from "firebase-admin/firestore";
+import {
+  Timestamp,
+  FieldValue,
+  type Transaction,
+  type DocumentReference,
+  type DocumentSnapshot,
+  type DocumentData,
+} from "firebase-admin/firestore";
 import {
   canonicalizeCartItems,
   CommerceValidationError,
@@ -206,7 +213,7 @@ export async function createCheckoutSession(
     .update(rawReleaseToken)
     .digest("hex");
 
-  return adminDb.runTransaction(async (transaction) => {
+  return adminDb.runTransaction(async (transaction: Transaction) => {
     // 1. Transactional Idempotency Check using deterministic session document
     const existingSnap = await transaction.get(sessionRef);
 
@@ -253,8 +260,8 @@ export async function createCheckoutSession(
     // 2. Transactionally Re-read and Revalidate Catalogue Items (Requirement 6)
     const pricedItems: AuthoritativeQuoteItem[] = [];
     const productDocs: Array<{
-      ref: FirebaseFirestore.DocumentReference;
-      data: FirebaseFirestore.DocumentData;
+      ref: DocumentReference<DocumentData>;
+      data: DocumentData;
       item: { productId: string; quantity: number };
     }> = [];
 
@@ -324,7 +331,7 @@ export async function createCheckoutSession(
 
     // 3. Transactionally Re-read and Revalidate Coupon (Requirement 6)
     let discountAmount = 0;
-    let couponDocRef: FirebaseFirestore.DocumentReference | null = null;
+    let couponDocRef: DocumentReference<DocumentData> | null = null;
     let couponDocData: DiscountCode | null = null;
 
     if (normalizedCoupon) {
@@ -495,7 +502,7 @@ export async function claimPaymentInitialization(
 
   const sessionRef = adminDb.collection("checkout_sessions").doc(sessionId);
 
-  return adminDb.runTransaction(async (transaction) => {
+  return adminDb.runTransaction(async (transaction: Transaction) => {
     const snap = await transaction.get(sessionRef);
     if (!snap.exists) {
       throw new CommerceValidationError("Checkout session not found.", 404);
@@ -637,7 +644,7 @@ async function executeReservationRelease(
 
   const sessionRef = adminDb.collection("checkout_sessions").doc(sessionId);
 
-  return adminDb.runTransaction(async (transaction) => {
+  return adminDb.runTransaction(async (transaction: Transaction) => {
     // 1. Read session doc
     const snap = await transaction.get(sessionRef);
     if (!snap.exists) {
@@ -680,8 +687,8 @@ async function executeReservationRelease(
       }))
     );
 
-    let discountSnap: FirebaseFirestore.DocumentSnapshot | null = null;
-    let discountRef: FirebaseFirestore.DocumentReference | null = null;
+    let discountSnap: DocumentSnapshot<DocumentData> | null = null;
+    let discountRef: DocumentReference<DocumentData> | null = null;
     if (session.couponId) {
       discountRef = adminDb.collection("discounts").doc(session.couponId);
       discountSnap = await transaction.get(discountRef);
@@ -827,7 +834,7 @@ export async function rotateSessionReleaseToken(sessionId: string): Promise<stri
     .update(freshRawReleaseToken)
     .digest("hex");
 
-  await adminDb.runTransaction(async (transaction) => {
+  await adminDb.runTransaction(async (transaction: Transaction) => {
     const snap = await transaction.get(sessionRef);
     if (!snap.exists) {
       throw new CommerceValidationError(

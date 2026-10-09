@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import type { QueryDocumentSnapshot, DocumentData } from "firebase-admin/firestore";
 import { UserProfile } from "@/types/auth";
 import {
   requireAdminOrSuperAdmin,
@@ -15,7 +16,7 @@ export async function GET(req: NextRequest) {
     // 1. Fetch from Firestore `users` collection
     try {
       const snap = await adminDb.collection("users").get();
-      snap.forEach((doc) => {
+      snap.forEach((doc: QueryDocumentSnapshot<DocumentData>) => {
         const data = doc.data() as UserProfile;
         if (
           data &&

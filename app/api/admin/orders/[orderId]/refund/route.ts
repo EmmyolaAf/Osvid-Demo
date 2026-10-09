@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, type Transaction, type DocumentSnapshot, type DocumentData } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 import {
   requireAuthenticatedUser,
@@ -61,7 +61,7 @@ export async function POST(
     const nowIso = new Date().toISOString();
     const orderRef = adminDb.collection("orders").doc(cleanOrderId);
 
-    const orderData = await adminDb.runTransaction(async (transaction) => {
+    const orderData = await adminDb.runTransaction(async (transaction: Transaction) => {
       // 1. Read order document
       const orderSnap = await transaction.get(orderRef);
       if (!orderSnap.exists) {
@@ -225,7 +225,7 @@ export async function POST(
 
     let persistResult: { authoritativeStatus: string; statePreserved: boolean };
     try {
-      persistResult = await adminDb.runTransaction(async (transaction) => {
+      persistResult = await adminDb.runTransaction(async (transaction: Transaction) => {
         // 1. Transactionally read order document
         const curOrderSnap = await transaction.get(orderRef);
         if (!curOrderSnap.exists) {
@@ -234,7 +234,7 @@ export async function POST(
         const curOrder = curOrderSnap.data() as Order;
 
         // 2. Transactionally read payment_transactions document if present
-        let curPayTxSnap: FirebaseFirestore.DocumentSnapshot | null = null;
+        let curPayTxSnap: DocumentSnapshot<DocumentData> | null = null;
         let curPayTx: PaymentTransactionRecord | null = null;
         if (payTxRef) {
           curPayTxSnap = await transaction.get(payTxRef);

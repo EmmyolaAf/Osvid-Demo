@@ -1,4 +1,5 @@
 import { adminDb } from "@/lib/firebase/admin";
+import type { DocumentReference, DocumentData, QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { AuditLogEntry, AuditLogCreateInput } from "@/types/audit";
 import { OSVID_CLIENT_CONFIG } from "@/config/client";
 
@@ -52,7 +53,7 @@ export function sanitizeMetadata(data: any): any {
  * Used for atomic Firestore batch commits alongside business document mutations.
  */
 export function buildAuditLogRecord(input: AuditLogCreateInput): {
-  docRef: FirebaseFirestore.DocumentReference;
+  docRef: DocumentReference<DocumentData>;
   entry: AuditLogEntry;
 } {
   const docRef = adminDb.collection("audit_logs").doc();
@@ -102,7 +103,7 @@ export async function getRecentAuditLogs(limitCount = 100): Promise<AuditLogEntr
       .limit(limitCount)
       .get();
 
-    return snapshot.docs.map((doc) => ({
+    return snapshot.docs.map((doc: QueryDocumentSnapshot<DocumentData>) => ({
       id: doc.id,
       ...(doc.data() as Omit<AuditLogEntry, "id">),
     }));
