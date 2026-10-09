@@ -12,6 +12,9 @@
     "test": "node scripts/run-tests.mjs",
     "test:emulator": "firebase emulators:exec --project demo-osvid-rules-test --only firestore,storage \"node scripts/run-emulator-tests.mjs\""
   },
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "@emailjs/browser": "^4.4.1",
     "@hookform/resolvers": "^5.0.1",

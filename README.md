@@ -50,7 +50,7 @@ Production web application and e-commerce platform for **OSVID CHEMICALS LTD.**,
 - **Server Identity**: Firebase Admin SDK with Google ADC
 - **Payment Processing**: Paystack API (Inline Popup V2, Webhooks, HMAC SHA-512 verification)
 - **Transactional Email**: Resend API
-- **Containerization**: Multi-stage Docker (`node:20-alpine`)
+- **Containerization**: Multi-stage Docker (`node:22-alpine` / Node.js 22 LTS)
 
 ---
 

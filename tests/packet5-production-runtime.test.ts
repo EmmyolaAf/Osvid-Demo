@@ -432,7 +432,7 @@ describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () 
         path.resolve(process.cwd(), "Dockerfile"),
         "utf8"
       );
-      assert.ok(dockerfileContent.includes("node:20-alpine"));
+      assert.ok(dockerfileContent.includes("node:22-alpine"));
       assert.ok(dockerfileContent.includes(".next/standalone"));
       assert.ok(dockerfileContent.includes("USER nextjs"));
       assert.ok(dockerfileContent.includes("PORT=8080"));
