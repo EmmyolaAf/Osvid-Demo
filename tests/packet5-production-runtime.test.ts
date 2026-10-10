@@ -973,6 +973,7 @@ describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () 
 
     it("POST /api/email validates payload and rejects malformed inputs with 400 for authorized caller", async () => {
       const origVerifyIdToken = adminAuth.verifyIdToken.bind(adminAuth);
+      const origCollection = adminDb.collection.bind(adminDb);
       try {
         (adminAuth as any).verifyIdToken = async () => ({
           uid: "super-1",
@@ -980,6 +981,19 @@ describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () 
           email_verified: true,
           role: "super_admin",
         });
+        (adminDb as any).collection = (colName: string) => {
+          if (colName === "users") {
+            return {
+              doc: () => ({
+                get: async () => ({
+                  exists: true,
+                  data: () => ({ role: "super_admin", isActive: true }),
+                }),
+              }),
+            };
+          }
+          return origCollection(colName);
+        };
 
         const testCases = [
           { payload: {}, expectedMsg: /Recipient email \('to'\) is required/ },
@@ -1018,11 +1032,13 @@ describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () 
         assert.equal(badJsonRes.status, 400);
       } finally {
         (adminAuth as any).verifyIdToken = origVerifyIdToken;
+        (adminDb as any).collection = origCollection;
       }
     });
 
     it("POST /api/email fails closed with 503 when Resend credentials are unset for authorized caller", async () => {
       const origVerifyIdToken = adminAuth.verifyIdToken.bind(adminAuth);
+      const origCollection = adminDb.collection.bind(adminDb);
       try {
         delete process.env.RESEND_API_KEY;
         delete process.env.FROM_EMAIL;
@@ -1033,6 +1049,19 @@ describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () 
           email_verified: true,
           role: "super_admin",
         });
+        (adminDb as any).collection = (colName: string) => {
+          if (colName === "users") {
+            return {
+              doc: () => ({
+                get: async () => ({
+                  exists: true,
+                  data: () => ({ role: "super_admin", isActive: true }),
+                }),
+              }),
+            };
+          }
+          return origCollection(colName);
+        };
 
         const req = new NextRequest("http://localhost:3000/api/email", {
           method: "POST",
@@ -1057,6 +1086,7 @@ describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () 
         assert.equal(serialized.includes("secret"), false);
       } finally {
         (adminAuth as any).verifyIdToken = origVerifyIdToken;
+        (adminDb as any).collection = origCollection;
       }
     });
 
