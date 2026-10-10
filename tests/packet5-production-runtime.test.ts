@@ -22,12 +22,16 @@ import {
 } from "@/lib/firebase/storage";
 import { getOrGenerateRequestId, sanitizeLogData } from "@/lib/server/logger";
 import { resolveClientFirebaseConfig, firebaseConfig } from "@/lib/firebase";
-import { adminDb } from "@/lib/firebase/admin";
+import { adminDb, adminAuth } from "@/lib/firebase/admin";
 import {
   getServerProducts,
   getServerProductCategories,
   getServerBlogPosts,
 } from "@/lib/server/storefront";
+import { NextRequest } from "next/server";
+import { POST as emailRoutePost, getResendClient } from "@/app/api/email/route";
+import { POST as libEmailPost } from "@/lib/email";
+import { PRIMARY_SUPER_ADMIN_EMAIL } from "@/lib/server/auth";
 
 describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () => {
   const originalEnv = { ...process.env };
@@ -835,6 +839,246 @@ describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () 
       } finally {
         (adminDb as any).collection = origCollection;
       }
+    });
+  });
+
+  // ==========================================================================
+  // 13. TRANSACTIONAL EMAIL ROUTE & RUNTIME DEFERRED INITIALIZATION
+  // ==========================================================================
+  describe("Transactional Email Route & Runtime Deferred Initialization", () => {
+    it("importing email route and helper does not throw when RESEND_API_KEY is unset", () => {
+      delete process.env.RESEND_API_KEY;
+      delete process.env.FROM_EMAIL;
+      assert.equal(typeof emailRoutePost, "function");
+      assert.equal(typeof libEmailPost, "function");
+      assert.equal(typeof getResendClient, "function");
+    });
+
+    it("getResendClient fails closed with 503 when RESEND_API_KEY or FROM_EMAIL is missing", () => {
+      delete process.env.RESEND_API_KEY;
+      delete process.env.FROM_EMAIL;
+      assert.throws(
+        () => getResendClient(),
+        (err: any) => err.status === 503
+      );
+
+      process.env.RESEND_API_KEY = "re_test_key";
+      delete process.env.FROM_EMAIL;
+      assert.throws(
+        () => getResendClient(),
+        (err: any) => err.status === 503
+      );
+
+      delete process.env.RESEND_API_KEY;
+      process.env.FROM_EMAIL = "noreply@osvid.com";
+      assert.throws(
+        () => getResendClient(),
+        (err: any) => err.status === 503
+      );
+
+      process.env.RESEND_API_KEY = "re_test_key";
+      process.env.FROM_EMAIL = "noreply@osvid.com";
+      const client = getResendClient();
+      assert.ok(client.resend);
+      assert.equal(client.fromEmail, "noreply@osvid.com");
+    });
+
+    it("POST /api/email rejects unauthenticated requests with 401", async () => {
+      delete process.env.RESEND_API_KEY;
+      delete process.env.FROM_EMAIL;
+      const req = new NextRequest("http://localhost:3000/api/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: "customer@example.com",
+          subject: "Test Subject",
+          html: "<p>Hello</p>",
+        }),
+      });
+
+      const res = await emailRoutePost(req);
+      assert.equal(res.status, 401);
+      const data = await res.json();
+      assert.match(data.error, /Missing or invalid Authorization header/);
+    });
+
+    it("POST /api/email rejects requests with invalid bearer token with 401", async () => {
+      delete process.env.RESEND_API_KEY;
+      delete process.env.FROM_EMAIL;
+      const req = new NextRequest("http://localhost:3000/api/email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer invalid.fake.token",
+        },
+        body: JSON.stringify({
+          to: "customer@example.com",
+          subject: "Test Subject",
+          html: "<p>Hello</p>",
+        }),
+      });
+
+      const res = await emailRoutePost(req);
+      assert.equal(res.status, 401);
+      const data = await res.json();
+      assert.match(data.error, /Invalid authentication token|Unauthorized/);
+    });
+
+    it("POST /api/email rejects non-admin authenticated users with 403", async () => {
+      const origVerifyIdToken = adminAuth.verifyIdToken.bind(adminAuth);
+      const origCollection = adminDb.collection.bind(adminDb);
+      try {
+        (adminAuth as any).verifyIdToken = async () => ({
+          uid: "customer-123",
+          email: "customer@example.com",
+          email_verified: true,
+          role: "user",
+        });
+        (adminDb as any).collection = (colName: string) => {
+          if (colName === "users") {
+            return {
+              doc: () => ({
+                get: async () => ({
+                  exists: true,
+                  data: () => ({ role: "user", isActive: true }),
+                }),
+              }),
+            };
+          }
+          return origCollection(colName);
+        };
+
+        const req = new NextRequest("http://localhost:3000/api/email", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer valid-customer-token",
+          },
+          body: JSON.stringify({
+            to: "target@example.com",
+            subject: "Test Subject",
+            html: "<p>Hello</p>",
+          }),
+        });
+
+        const res = await emailRoutePost(req);
+        assert.equal(res.status, 403);
+        const data = await res.json();
+        assert.match(data.error, /Administrator or Super Admin privileges are required/);
+      } finally {
+        (adminAuth as any).verifyIdToken = origVerifyIdToken;
+        (adminDb as any).collection = origCollection;
+      }
+    });
+
+    it("POST /api/email validates payload and rejects malformed inputs with 400 for authorized caller", async () => {
+      const origVerifyIdToken = adminAuth.verifyIdToken.bind(adminAuth);
+      try {
+        (adminAuth as any).verifyIdToken = async () => ({
+          uid: "super-1",
+          email: PRIMARY_SUPER_ADMIN_EMAIL,
+          email_verified: true,
+          role: "super_admin",
+        });
+
+        const testCases = [
+          { payload: {}, expectedMsg: /Recipient email \('to'\) is required/ },
+          { payload: { to: "   " }, expectedMsg: /Recipient email \('to'\) is required/ },
+          { payload: { to: "not-an-email" }, expectedMsg: /Invalid recipient email address/ },
+          { payload: { to: "valid@example.com" }, expectedMsg: /Email subject is required/ },
+          { payload: { to: "valid@example.com", subject: "   " }, expectedMsg: /Email subject is required/ },
+          { payload: { to: "valid@example.com", subject: "Valid Subj" }, expectedMsg: /Email body \('html'\) is required/ },
+          { payload: { to: "valid@example.com", subject: "Valid Subj", html: "   " }, expectedMsg: /Email body \('html'\) is required/ },
+        ];
+
+        for (const tc of testCases) {
+          const req = new NextRequest("http://localhost:3000/api/email", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer valid-admin-token",
+            },
+            body: JSON.stringify(tc.payload),
+          });
+          const res = await emailRoutePost(req);
+          assert.equal(res.status, 400, `Expected 400 for payload ${JSON.stringify(tc.payload)}`);
+          const data = await res.json();
+          assert.match(data.error, tc.expectedMsg);
+        }
+
+        const badJsonReq = new NextRequest("http://localhost:3000/api/email", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer valid-admin-token",
+          },
+          body: "invalid-json-string",
+        });
+        const badJsonRes = await emailRoutePost(badJsonReq);
+        assert.equal(badJsonRes.status, 400);
+      } finally {
+        (adminAuth as any).verifyIdToken = origVerifyIdToken;
+      }
+    });
+
+    it("POST /api/email fails closed with 503 when Resend credentials are unset for authorized caller", async () => {
+      const origVerifyIdToken = adminAuth.verifyIdToken.bind(adminAuth);
+      try {
+        delete process.env.RESEND_API_KEY;
+        delete process.env.FROM_EMAIL;
+
+        (adminAuth as any).verifyIdToken = async () => ({
+          uid: "super-1",
+          email: PRIMARY_SUPER_ADMIN_EMAIL,
+          email_verified: true,
+          role: "super_admin",
+        });
+
+        const req = new NextRequest("http://localhost:3000/api/email", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer valid-admin-token",
+          },
+          body: JSON.stringify({
+            to: "customer@example.com",
+            subject: "Order Confirmation",
+            html: "<p>Thank you for your order</p>",
+          }),
+        });
+
+        const res = await emailRoutePost(req);
+        assert.equal(res.status, 503);
+        const data = await res.json();
+        assert.match(data.error, /Transactional email service is currently unavailable/);
+        const serialized = JSON.stringify(data).toLowerCase();
+        assert.equal(serialized.includes("resend"), false);
+        assert.equal(serialized.includes("key"), false);
+        assert.equal(serialized.includes("secret"), false);
+      } finally {
+        (adminAuth as any).verifyIdToken = origVerifyIdToken;
+      }
+    });
+
+    it("lib/email POST returns 503 when credentials are unconfigured without crashing", async () => {
+      delete process.env.RESEND_API_KEY;
+      delete process.env.FROM_EMAIL;
+
+      const req = new Request("http://localhost:3000/api/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: "customer@example.com",
+          subject: "Test",
+          html: "<p>Test</p>",
+        }),
+      });
+
+      const res = await libEmailPost(req);
+      assert.equal(res.status, 503);
+      const data = await res.json();
+      assert.equal(data.success, false);
+      assert.match(data.error, /unconfigured/);
     });
   });
 });
