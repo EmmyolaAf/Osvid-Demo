@@ -17,6 +17,7 @@ import {
   Settings,
   LayoutDashboard,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,10 +25,23 @@ import { toast } from "sonner";
 import { saveUserProfile } from "@/lib/firebase/firestore";
 
 export default function AccountPage() {
-  const { user, userProfile, role, logout, isStaff, refreshProfile } = useAuth();
+  const router = useRouter();
+  const { user, userProfile, role, logout, isStaff, isSuperAdmin, refreshProfile } = useAuth();
   const [displayName, setDisplayName] = useState(userProfile?.displayName || "");
   const [phoneNumber, setPhoneNumber] = useState(userProfile?.phoneNumber || "");
   const [saving, setSaving] = useState(false);
+
+  React.useEffect(() => {
+    const isSuper =
+      isSuperAdmin ||
+      role === "super_admin" ||
+      userProfile?.role === "super_admin" ||
+      user?.email?.toLowerCase() === "abolarinwaemmanuelfree@gmail.com";
+
+    if (isSuper) {
+      router.replace("/dashboard/super-admin");
+    }
+  }, [isSuperAdmin, role, userProfile, user, router]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();

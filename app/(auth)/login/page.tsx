@@ -17,22 +17,36 @@ function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const { login, role } = useAuth();
+  const { login, role, isSuperAdmin, user, userProfile } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectUrl = searchParams.get("redirect");
 
-  const handleRedirect = (targetProfile?: any) => {
-    if (redirectUrl) {
-      router.push(redirectUrl);
-      return;
+  // If already authenticated as Super Admin, send straight to Super Admin Dashboard
+  React.useEffect(() => {
+    const isSuper =
+      isSuperAdmin ||
+      role === "super_admin" ||
+      userProfile?.role === "super_admin" ||
+      user?.email?.toLowerCase() === "abolarinwaemmanuelfree@gmail.com";
+
+    if (user && isSuper) {
+      router.replace("/dashboard/super-admin");
     }
+  }, [user, isSuperAdmin, role, userProfile, router]);
+
+  const handleRedirect = (targetProfile?: any) => {
     const userRole = targetProfile?.role || role;
     const userEmail = (targetProfile?.email || email).trim().toLowerCase();
 
-    // 1. Platform Super Admin -> Landlord Command Hub
+    // 1. Platform Super Admin -> ALWAYS straight to Super Admin Dashboard
     if (userRole === "super_admin" || userEmail === "abolarinwaemmanuelfree@gmail.com") {
       router.push("/dashboard/super-admin");
+      return;
+    }
+
+    if (redirectUrl) {
+      router.push(redirectUrl);
       return;
     }
 

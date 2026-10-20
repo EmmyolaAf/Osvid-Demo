@@ -23,12 +23,26 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import formatCurrency from "@/helpers/formatCurrency";
+import { useRouter } from "next/navigation";
 
 export default function CustomerOrdersPage() {
-  const { user } = useAuth();
+  const router = useRouter();
+  const { user, role, isSuperAdmin, userProfile } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const isSuper =
+      isSuperAdmin ||
+      role === "super_admin" ||
+      userProfile?.role === "super_admin" ||
+      user?.email?.toLowerCase() === "abolarinwaemmanuelfree@gmail.com";
+
+    if (isSuper) {
+      router.replace("/dashboard/super-admin");
+    }
+  }, [isSuperAdmin, role, userProfile, user, router]);
 
   const loadUserOrders = async () => {
     if (!user) return;

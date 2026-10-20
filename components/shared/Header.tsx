@@ -16,6 +16,7 @@ import {
   User,
   ChevronRight,
   UserPlus,
+  LogOut,
 } from "lucide-react";
 import Image from "next/image";
 import companyData from "@/data/company";
@@ -32,7 +33,14 @@ export default function Header() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
-  const { user, userProfile, isStaff } = useAuth();
+  const { user, userProfile, isStaff, isSuperAdmin, role, logout } = useAuth();
+
+  const isSuperAdminUser = Boolean(
+    isSuperAdmin ||
+    role === "super_admin" ||
+    userProfile?.role === "super_admin" ||
+    user?.email?.toLowerCase() === "abolarinwaemmanuelfree@gmail.com"
+  );
 
   const menu = [
     { name: "Home", link: "/" },
@@ -187,70 +195,95 @@ export default function Header() {
 
           {/* Right Side Actions */}
           <div className="flex items-center gap-2 sm:gap-3">
-            {user ? (
-              <div className="flex items-center gap-2">
-                {isStaff ? (
-                  <Link href="/dashboard" className="hidden sm:block">
-                    <Button
-                      size="sm"
-                      className="h-9 px-3.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-1.5 shadow-sm"
+            {isSuperAdminUser ? (
+              <div className="flex items-center gap-2 sm:gap-3">
+                <Button
+                  onClick={async () => {
+                    await logout();
+                    window.location.href = "/login";
+                  }}
+                  variant="outline"
+                  size="sm"
+                  className="h-9 sm:h-10 px-3.5 sm:px-4 rounded-lg text-xs font-bold border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                >
+                  <LogOut size={15} />
+                  <span>Sign Out</span>
+                </Button>
+
+                <Link href="#getQuote">
+                  <Button className="h-9 sm:h-10 px-3.5 sm:px-5 rounded-lg text-xs sm:text-sm font-medium bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-700 hover:to-orange-600 text-white shadow-sm cursor-pointer">
+                    Get a Quote
+                  </Button>
+                </Link>
+              </div>
+            ) : (
+              <>
+                {user ? (
+                  <div className="flex items-center gap-2">
+                    {isStaff ? (
+                      <Link href="/dashboard" className="hidden sm:block">
+                        <Button
+                          size="sm"
+                          className="h-9 px-3.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-1.5 shadow-sm"
+                        >
+                          <LayoutDashboard size={14} />
+                          <span>Staff Dashboard</span>
+                        </Button>
+                      </Link>
+                    ) : (
+                      <Link href="/account/orders" className="hidden sm:block">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-9 px-3 rounded-lg text-xs font-semibold text-slate-700 hover:text-orange-600 flex items-center gap-1.5"
+                        >
+                          <ShoppingBag size={14} />
+                          <span>Orders</span>
+                        </Button>
+                      </Link>
+                    )}
+
+                    <Link
+                      href="/account"
+                      className="w-9 h-9 rounded-full bg-gradient-to-tr from-orange-600 to-amber-500 text-white font-bold flex items-center justify-center text-xs shadow-sm hover:scale-105 transition-transform"
+                      title="My Account"
                     >
-                      <LayoutDashboard size={14} />
-                      <span>Staff Dashboard</span>
-                    </Button>
-                  </Link>
+                      {userProfile?.displayName?.charAt(0).toUpperCase() || "U"}
+                    </Link>
+                  </div>
                 ) : (
-                  <Link href="/account/orders" className="hidden sm:block">
+                  <Link href="/login" className="hidden sm:block">
                     <Button
                       variant="outline"
                       size="sm"
-                      className="h-9 px-3 rounded-lg text-xs font-semibold text-slate-700 hover:text-orange-600 flex items-center gap-1.5"
+                      className="h-9 px-3.5 rounded-lg text-xs font-semibold border-slate-200 text-slate-700 hover:text-orange-600 hover:border-orange-500 flex items-center gap-1.5"
                     >
-                      <ShoppingBag size={14} />
-                      <span>Orders</span>
+                      <LogIn size={14} />
+                      <span>Sign In</span>
                     </Button>
                   </Link>
                 )}
 
-                <Link
-                  href="/account"
-                  className="w-9 h-9 rounded-full bg-gradient-to-tr from-orange-600 to-amber-500 text-white font-bold flex items-center justify-center text-xs shadow-sm hover:scale-105 transition-transform"
-                  title="My Account"
-                >
-                  {userProfile?.displayName?.charAt(0).toUpperCase() || "U"}
+                <Link href="#getQuote" className="hidden md:block">
+                  <Button className="h-10 px-5 rounded-lg font-medium bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-700 hover:to-orange-600 text-white shadow-sm">
+                    Get a Quote
+                  </Button>
                 </Link>
-              </div>
-            ) : (
-              <Link href="/login" className="hidden sm:block">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-9 px-3.5 rounded-lg text-xs font-semibold border-slate-200 text-slate-700 hover:text-orange-600 hover:border-orange-500 flex items-center gap-1.5"
+
+                <CartTrigger />
+
+                {/* Mobile Menu Hamburger Trigger */}
+                <button
+                  onClick={toggleMenu}
+                  type="button"
+                  className="lg:hidden p-2.5 rounded-xl bg-slate-50 hover:bg-orange-50 text-slate-700 hover:text-orange-600 transition-colors border border-slate-200/80 active:scale-95"
+                  aria-label="Toggle navigation menu"
+                  aria-expanded={isMenuOpen}
                 >
-                  <LogIn size={14} />
-                  <span>Sign In</span>
-                </Button>
-              </Link>
+                  <Menu size={24} />
+                </button>
+              </>
             )}
-
-            <Link href="#getQuote" className="hidden md:block">
-              <Button className="h-10 px-5 rounded-lg font-medium bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-700 hover:to-orange-600 text-white shadow-sm">
-                Get a Quote
-              </Button>
-            </Link>
-
-            <CartTrigger />
-
-            {/* Mobile Menu Hamburger Trigger */}
-            <button
-              onClick={toggleMenu}
-              type="button"
-              className="lg:hidden p-2.5 rounded-xl bg-slate-50 hover:bg-orange-50 text-slate-700 hover:text-orange-600 transition-colors border border-slate-200/80 active:scale-95"
-              aria-label="Toggle navigation menu"
-              aria-expanded={isMenuOpen}
-            >
-              <Menu size={24} />
-            </button>
           </div>
         </div>
       </header>
@@ -309,7 +342,7 @@ export default function Header() {
               <div className="overflow-y-auto flex-1 overscroll-contain flex flex-col justify-between">
                 {/* Navigation Links */}
                 <div className="p-4 space-y-1">
-                  {isStaff && (
+                  {isStaff && !isSuperAdminUser && (
                     <Link
                       href="/dashboard"
                       onClick={closeMenu}
@@ -353,7 +386,22 @@ export default function Header() {
                 {/* Bottom Section: Sign In / Register directly above Request a Quote */}
                 <div className="p-4 border-t border-slate-100 space-y-3 bg-slate-50/50 mt-auto">
                   {/* Account / Auth Actions */}
-                  {user ? (
+                  {isSuperAdminUser ? (
+                    <div className="space-y-2">
+                      <Button
+                        onClick={async () => {
+                          closeMenu();
+                          await logout();
+                          window.location.href = "/login";
+                        }}
+                        variant="outline"
+                        className="w-full h-10 border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <LogOut size={15} />
+                        <span>Sign Out</span>
+                      </Button>
+                    </div>
+                  ) : user ? (
                     <div className="bg-white border border-slate-200 p-3 rounded-2xl flex items-center justify-between shadow-xs">
                       <div className="flex items-center gap-2.5 overflow-hidden">
                         <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-orange-600 to-amber-500 text-white font-bold flex items-center justify-center text-xs shadow-xs shrink-0">
