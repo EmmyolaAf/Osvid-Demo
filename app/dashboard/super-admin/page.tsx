@@ -49,6 +49,9 @@ import {
   Server,
   ArrowRight,
   FileText,
+  Copy,
+  Check,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,7 +70,7 @@ import { toast } from "sonner";
 type SuperAdminTab = "overview" | "tenant-admins" | "audit-log" | "notifications" | "lease-control";
 
 export default function SuperAdminDashboard() {
-  const { userProfile, logout } = useAuth();
+  const { user, userProfile, logout } = useAuth();
   const router = useRouter();
 
   const [activeTab, setActiveTab] = useState<SuperAdminTab>("overview");
@@ -113,6 +116,16 @@ export default function SuperAdminDashboard() {
   const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [newAdminPhone, setNewAdminPhone] = useState("");
 
+  // Post-Creation Confirmation Modal
+  const [createdAdminCredentials, setCreatedAdminCredentials] = useState<{
+    name: string;
+    email: string;
+    password?: string;
+    role: string;
+  } | null>(null);
+  const [isCreatedModalOpen, setIsCreatedModalOpen] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
   // Tab 3: Notification Broadcast State
   const [showWarningToggle, setShowWarningToggle] = useState(false);
   const [warningText, setWarningText] = useState(
@@ -147,10 +160,36 @@ export default function SuperAdminDashboard() {
   }, []);
 
   // Fetch Live Data
-  const loadData = async () => {
+  const loadData = async (showFullScreenLoading?: boolean | React.MouseEvent) => {
+    const isFullScreen = typeof showFullScreenLoading === "boolean" ? showFullScreenLoading : false;
     try {
-      setLoading(true);
-      const token = await auth.currentUser?.getIdToken();
+      if (isFullScreen && admins.length === 0) {
+        setLoading(true);
+      }
+      const token = await (auth.currentUser || user)?.getIdToken().catch(() => undefined);
+
+      // Fast tenant directory discovery (Priority 1)
+      const adminListPromise = getTenantAdministrators(token)
+        .then((list) => {
+          if (list && Array.isArray(list)) {
+            setAdmins(list);
+            setStats((prev) => ({
+              ...prev,
+              activeAdmins: list.filter((a) => a.isActive).length,
+              activeManagers: list.filter((a) => a.role === "manager" && a.isActive).length,
+            }));
+          }
+          return list;
+        })
+        .catch((err) => {
+          console.warn("Tenant admin fast query fallback:", err);
+          return [];
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+
+      // Background telemetry, audit logs, and subscription
       const auditPromise = token
         ? fetch("/api/admin/audit-logs?limit=100", {
             headers: { Authorization: `Bearer ${token}` },
@@ -159,19 +198,37 @@ export default function SuperAdminDashboard() {
             .catch(() => ({ success: false, data: [] }))
         : Promise.resolve({ success: false, data: [] });
 
-      const [kpis, adminList, subRes, auditRes] = await Promise.all([
-        getExecutiveGovernanceStats(),
-        getTenantAdministrators(),
-        getSubscriptionStatus(),
+      const kpisPromise = getExecutiveGovernanceStats().catch((err) => {
+        console.warn("Stats query fallback:", err);
+        return null;
+      });
+
+      const subPromise = getSubscriptionStatus().catch((err) => {
+        console.warn("Subscription query fallback:", err);
+        return { success: false, data: null };
+      });
+
+      await adminListPromise;
+
+      const [kpisRes, subRes, auditRes] = await Promise.all([
+        kpisPromise,
+        subPromise,
         auditPromise,
       ]);
-      setStats(kpis);
-      setAdmins(adminList);
+
+      if (kpisRes) {
+        setStats((prev) => ({
+          ...kpisRes,
+          activeAdmins: admins.length > 0 ? admins.filter((a) => a.isActive).length : kpisRes.activeAdmins,
+          activeManagers: admins.length > 0 ? admins.filter((a) => a.role === "manager" && a.isActive).length : kpisRes.activeManagers,
+        }));
+      }
+
       if (auditRes?.success && Array.isArray(auditRes.data)) {
         setAuditLogs(auditRes.data);
       }
 
-      if (subRes.success && subRes.data) {
+      if (subRes && subRes.success && subRes.data) {
         setSubscription(subRes.data);
         setShowWarningToggle(subRes.data.showWarning);
         setWarningText(subRes.data.warningNotice || warningText);
@@ -192,8 +249,9 @@ export default function SuperAdminDashboard() {
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    loadData(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   const handleSignOut = async () => {
     try {
@@ -224,7 +282,7 @@ export default function SuperAdminDashboard() {
     }
     try {
       setSavingAction(true);
-      const token = await auth.currentUser?.getIdToken();
+      const token = await (auth.currentUser || user)?.getIdToken().catch(() => undefined);
       if (!token) {
         throw new Error("Authentication required to create administrator");
       }
@@ -251,7 +309,25 @@ export default function SuperAdminDashboard() {
 
       if (data.user) {
         setAdmins((prev) => [data.user, ...prev.filter((a) => a.uid !== data.user.uid)]);
+        setStats((prev) => ({
+          ...prev,
+          activeAdmins: prev.activeAdmins + 1,
+        }));
       }
+
+      const assignedPassword =
+        data.initialPassword ||
+        data.temporaryPassword ||
+        newAdminPassword.trim() ||
+        "(Password configured)";
+
+      setCreatedAdminCredentials({
+        name: newAdminName.trim(),
+        email: newAdminEmail.trim().toLowerCase(),
+        password: assignedPassword,
+        role: "Tenant Store Account (Admin)",
+      });
+      setIsCreatedModalOpen(true);
 
       if (data.temporaryPassword) {
         toast.success(
@@ -267,7 +343,9 @@ export default function SuperAdminDashboard() {
       setNewAdminPhone("");
       setNewAdminBusiness("Tenant Store Account");
       setNewAdminPassword("");
-      await loadData();
+
+      // Silent background refresh
+      loadData(false);
     } catch (e: any) {
       toast.error(e.message || "Failed to create administrator");
     } finally {
@@ -291,7 +369,7 @@ export default function SuperAdminDashboard() {
 
     try {
       setSavingAction(true);
-      const token = await auth.currentUser?.getIdToken();
+      const token = await (auth.currentUser || user)?.getIdToken().catch(() => undefined);
       if (!token) {
         throw new Error("Authentication required to update administrator");
       }
@@ -330,7 +408,7 @@ export default function SuperAdminDashboard() {
   const handleToggleAdminStatus = async (adm: UserProfile) => {
     try {
       const newStatus = !adm.isActive;
-      const token = await auth.currentUser?.getIdToken();
+      const token = await (auth.currentUser || user)?.getIdToken().catch(() => undefined);
       if (!token) {
         throw new Error("Authentication required to alter admin status");
       }
@@ -363,7 +441,7 @@ export default function SuperAdminDashboard() {
       return;
     }
     try {
-      const token = await auth.currentUser?.getIdToken();
+      const token = await (auth.currentUser || user)?.getIdToken().catch(() => undefined);
       if (!token) {
         throw new Error("Authentication required to delete admin");
       }
@@ -718,10 +796,22 @@ export default function SuperAdminDashboard() {
                 </div>
               </div>
 
+              <Link
+                href="/products"
+                target="_blank"
+                className="flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold text-orange-700 bg-orange-50 hover:bg-orange-100/80 border border-orange-200/80 transition-colors shadow-xs"
+              >
+                <div className="flex items-center gap-2">
+                  <ExternalLink size={15} className="text-orange-600" />
+                  <span>Visit Storefront</span>
+                </div>
+                <ChevronRight size={14} className="text-orange-400" />
+              </Link>
+
               <Button
                 onClick={handleSignOut}
                 variant="outline"
-                className="w-full text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300 font-bold text-xs h-10 rounded-xl flex items-center justify-center gap-2 shadow-sm transition-all"
+                className="w-full text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300 font-bold text-xs h-10 rounded-xl flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
               >
                 <LogOut size={16} />
                 <span>Sign Out of Dashboard</span>
@@ -760,14 +850,13 @@ export default function SuperAdminDashboard() {
                 <span>{currentTime || "Loading..."}</span>
               </div>
 
-              <Link href="/" target="_blank">
+              <Link href="/products" target="_blank">
                 <Button
-                  variant="outline"
                   size="sm"
-                  className="text-slate-700 text-xs font-semibold gap-1.5 rounded-xl h-9 bg-white hover:bg-slate-50"
+                  className="bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold gap-1.5 rounded-xl h-9 shadow-xs cursor-pointer"
                 >
                   <ExternalLink size={14} />
-                  <span>Storefront</span>
+                  <span>Visit Storefront</span>
                 </Button>
               </Link>
 
@@ -1776,6 +1865,118 @@ export default function SuperAdminDashboard() {
                 </Button>
               </div>
             </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* ============================================================ */}
+        {/* MODAL: ADMIN CREDENTIALS CONFIRMATION */}
+        {/* ============================================================ */}
+        <Dialog open={isCreatedModalOpen} onOpenChange={setIsCreatedModalOpen}>
+          <DialogContent className="max-w-md bg-white border border-slate-200 text-slate-900 rounded-2xl p-6 shadow-2xl">
+            <DialogHeader>
+              <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-2 mx-auto">
+                <CheckCircle2 size={26} />
+              </div>
+              <DialogTitle className="text-lg font-bold text-slate-900 text-center">
+                Tenant Administrator Created!
+              </DialogTitle>
+              <DialogDescription className="text-xs text-slate-500 text-center mt-1">
+                The account has been provisioned with full administrative privileges. Provide these login details to the tenant.
+              </DialogDescription>
+            </DialogHeader>
+
+            {createdAdminCredentials && (
+              <div className="space-y-3 my-3">
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-500">Administrator</span>
+                    <p className="font-semibold text-slate-900">{createdAdminCredentials.name}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-500">Designation</span>
+                    <p className="font-semibold text-orange-600">{createdAdminCredentials.role}</p>
+                  </div>
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-200">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500">Login Email</span>
+                      <p className="font-mono font-medium text-slate-800">{createdAdminCredentials.email}</p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        navigator.clipboard.writeText(createdAdminCredentials.email);
+                        setCopiedField("email");
+                        setTimeout(() => setCopiedField(null), 2000);
+                        toast.success("Email copied to clipboard!");
+                      }}
+                      className="h-7 px-2 text-xs"
+                    >
+                      {copiedField === "email" ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-200">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-500">Password</span>
+                      <p className="font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 inline-block">
+                        {createdAdminCredentials.password}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        if (createdAdminCredentials.password) {
+                          navigator.clipboard.writeText(createdAdminCredentials.password);
+                          setCopiedField("password");
+                          setTimeout(() => setCopiedField(null), 2000);
+                          toast.success("Password copied to clipboard!");
+                        }
+                      }}
+                      className="h-7 px-2 text-xs"
+                    >
+                      {copiedField === "password" ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                    </Button>
+                  </div>
+                  <div className="pt-1 border-t border-slate-200 text-[11px] text-slate-500 flex items-center justify-between">
+                    <span>Login URL</span>
+                    <span className="font-mono font-medium text-slate-700">/login</span>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800 flex items-start gap-2">
+                  <Shield size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                  <span>The tenant administrator can immediately sign in at <strong>/login</strong> using these exact credentials to access their operational store dashboard.</span>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-end mt-2">
+              <Button
+                type="button"
+                onClick={() => {
+                  if (createdAdminCredentials) {
+                    const text = `OSVID Tenant Administrator Account\nName: ${createdAdminCredentials.name}\nEmail: ${createdAdminCredentials.email}\nPassword: ${createdAdminCredentials.password}\nLogin URL: ${window.location.origin}/login`;
+                    navigator.clipboard.writeText(text);
+                    toast.success("All credentials copied to clipboard!");
+                  }
+                }}
+                variant="outline"
+                className="rounded-xl text-xs gap-1.5"
+              >
+                <Copy size={14} />
+                <span>Copy All</span>
+              </Button>
+              <Button
+                type="button"
+                onClick={() => setIsCreatedModalOpen(false)}
+                className="bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs rounded-xl"
+              >
+                Done
+              </Button>
+            </div>
           </DialogContent>
         </Dialog>
 

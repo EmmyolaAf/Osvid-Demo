@@ -17,6 +17,8 @@ import "server-only";
 
 import { adminDb } from "@/lib/firebase/admin";
 import type { QueryDocumentSnapshot, DocumentData } from "firebase-admin/firestore";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { Product } from "@/types/auth";
 import {
   ProductCategory,
@@ -25,6 +27,16 @@ import {
   Testimonial,
   TeamMember,
 } from "@/types";
+
+async function getLocalProducts(): Promise<Product[]> {
+  try {
+    const filePath = path.join(process.cwd(), "data", "products.json");
+    const data = await fs.readFile(filePath, "utf8");
+    return JSON.parse(data) as Product[];
+  } catch (err) {
+    return [];
+  }
+}
 
 export type StorefrontResult<T> =
   | { success: true; data: T; error?: never }
@@ -46,32 +58,48 @@ export async function getServerProducts(
     }
 
     const snapshot = await query.get();
+    let products: Product[] = [];
 
-    const products: Product[] = snapshot.docs.map((d: QueryDocumentSnapshot<DocumentData>) => {
-      const data = d.data();
-      return {
-        id: d.id,
-        name: data.name || "",
-        slug: data.slug || d.id,
-        description: data.description || "",
-        price: Number(data.price) || 0,
-        discountPrice: data.discountPrice ? Number(data.discountPrice) : undefined,
-        stockQuantity: Number(data.stockQuantity) || 0,
-        category: data.category || "General",
-        imageUrl: data.imageUrl || "/images/placeholder.webp",
-        galleryImages: Array.isArray(data.galleryImages) ? data.galleryImages : [],
-        unit: data.unit || "kg",
-        sku: data.sku || "",
-        isFeatured: Boolean(data.isFeatured),
-        isActive: true,
-        createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
-        updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : new Date().toISOString(),
-      };
-    });
+    if (snapshot.docs.length > 0) {
+      products = snapshot.docs.map((d: QueryDocumentSnapshot<DocumentData>) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          name: data.name || "",
+          slug: data.slug || d.id,
+          description: data.description || "",
+          price: Number(data.price) || 0,
+          discountPrice: data.discountPrice ? Number(data.discountPrice) : undefined,
+          stockQuantity: Number(data.stockQuantity) || 0,
+          category: data.category || "General",
+          imageUrl: data.imageUrl || "/images/placeholder.webp",
+          galleryImages: Array.isArray(data.galleryImages) ? data.galleryImages : [],
+          unit: data.unit || "kg",
+          sku: data.sku || "",
+          isFeatured: Boolean(data.isFeatured),
+          isActive: true,
+          createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
+          updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : new Date().toISOString(),
+        };
+      });
+    } else {
+      // Resilient fallback to local catalog when Firestore has no active documents
+      const local = await getLocalProducts();
+      products = local.filter((p) => {
+        if (p.isActive === false) return false;
+        if (categorySlug && categorySlug !== "all") {
+          return (
+            p.category?.toLowerCase() === categorySlug.toLowerCase() ||
+            p.categorySlug?.toLowerCase() === categorySlug.toLowerCase()
+          );
+        }
+        return true;
+      });
+    }
 
     return { success: true, data: products };
   } catch (error: any) {
-    console.error("Server Firestore getProducts error:", error);
+    console.error("Storefront getServerProducts error:", error?.message);
     return {
       success: false,
       error: "Unable to load products right now.",
@@ -148,9 +176,20 @@ export async function getServerProductBySlug(
       }
     }
 
+    // Local catalog fallback
+    const local = await getLocalProducts();
+    const found = local.find(
+      (p) =>
+        (p.slug === slug || p.id === slug) &&
+        p.isActive !== false
+    );
+    if (found) {
+      return { success: true, data: found };
+    }
+
     return { success: true, data: null };
   } catch (error: any) {
-    console.error(`Server Firestore getProductBySlug (${slug}) error:`, error);
+    console.error(`Storefront getServerProductBySlug (${slug}) error:`, error?.message);
     return {
       success: false,
       error: "Unable to load product details right now.",
@@ -172,31 +211,38 @@ export async function getServerFeaturedProducts(
       .limit(limitCount)
       .get();
 
-    const products: Product[] = snapshot.docs.map((d: QueryDocumentSnapshot<DocumentData>) => {
-      const data = d.data();
-      return {
-        id: d.id,
-        name: data.name || "",
-        slug: data.slug || d.id,
-        description: data.description || "",
-        price: Number(data.price) || 0,
-        discountPrice: data.discountPrice ? Number(data.discountPrice) : undefined,
-        stockQuantity: Number(data.stockQuantity) || 0,
-        category: data.category || "General",
-        imageUrl: data.imageUrl || "/images/placeholder.webp",
-        galleryImages: Array.isArray(data.galleryImages) ? data.galleryImages : [],
-        unit: data.unit || "kg",
-        sku: data.sku || "",
-        isFeatured: true,
-        isActive: true,
-        createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
-        updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : new Date().toISOString(),
-      };
-    });
+    let products: Product[] = [];
+    if (snapshot.docs.length > 0) {
+      products = snapshot.docs.map((d: QueryDocumentSnapshot<DocumentData>) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          name: data.name || "",
+          slug: data.slug || d.id,
+          description: data.description || "",
+          price: Number(data.price) || 0,
+          discountPrice: data.discountPrice ? Number(data.discountPrice) : undefined,
+          stockQuantity: Number(data.stockQuantity) || 0,
+          category: data.category || "General",
+          imageUrl: data.imageUrl || "/images/placeholder.webp",
+          galleryImages: Array.isArray(data.galleryImages) ? data.galleryImages : [],
+          unit: data.unit || "kg",
+          sku: data.sku || "",
+          isFeatured: true,
+          isActive: true,
+          createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
+          updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : new Date().toISOString(),
+        };
+      });
+    } else {
+      const local = await getLocalProducts();
+      const featured = local.filter((p) => p.isActive !== false && p.isFeatured);
+      products = (featured.length > 0 ? featured : local.filter((p) => p.isActive !== false)).slice(0, limitCount);
+    }
 
     return { success: true, data: products };
   } catch (error: any) {
-    console.error("Server Firestore getFeaturedProducts error:", error);
+    console.error("Storefront getServerFeaturedProducts error:", error?.message);
     return {
       success: false,
       error: "Unable to load featured products right now.",

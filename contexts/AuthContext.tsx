@@ -70,30 +70,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           async (docSnap) => {
             if (docSnap.exists()) {
               const data = docSnap.data() as UserProfile;
-              // Enforce Single Super Admin Rule: no other email can claim super_admin
-              if (data.role === "super_admin" && !isSuperAdminEmail(data.email)) {
+              // Enforce Single Super Admin Rule:
+              if (isSuperAdminEmail(data.email) || isSuperAdminEmail(currentUser.email)) {
+                data.role = "super_admin";
+              } else if (data.role === "super_admin") {
                 data.role = "admin";
               }
               setUserProfile(data);
             } else {
               // Auto-seed profile for newly detected Firebase Auth user.
-              // Direct client registration/detection is ALWAYS strictly role = "user".
-              // Staff privileges must be provisioned through server administration APIs.
-              const initialRole: UserRole = "user";
+              const isSuper = isSuperAdminEmail(currentUser.email);
+              let initialRole: UserRole = isSuper ? "super_admin" : "user";
+              let permissions = undefined;
+              let customTitle = undefined;
+              let phoneNumber = "";
+
+              try {
+                const tokenResult = await currentUser.getIdTokenResult();
+                const claims = (tokenResult?.claims as any) || {};
+                if (claims.role === "admin" || claims.role === "manager") {
+                  initialRole = claims.role;
+                  permissions = claims.permissions;
+                  customTitle = claims.customTitle;
+                  phoneNumber = claims.phoneNumber || "";
+                }
+              } catch (e) {
+                console.warn("Could not read token claims during profile init:", e);
+              }
 
               const newProfile: UserProfile = {
                 uid: currentUser.uid,
                 email: currentUser.email || "",
-                displayName: currentUser.displayName || currentUser.email?.split("@")[0] || "User",
+                displayName:
+                  currentUser.displayName ||
+                  customTitle ||
+                  currentUser.email?.split("@")[0] ||
+                  (isSuper ? "Super Admin" : "User"),
                 photoURL: currentUser.photoURL || "",
+                phoneNumber: currentUser.phoneNumber || phoneNumber,
+                customTitle:
+                  customTitle ||
+                  (initialRole === "manager"
+                    ? "Operations Manager"
+                    : initialRole === "admin"
+                    ? "Tenant Store Account"
+                    : undefined),
                 role: initialRole,
+                permissions,
                 isActive: true,
                 createdAt: new Date().toISOString(),
                 lastLoginAt: new Date().toISOString(),
               };
 
               try {
-                await setDoc(userDocRef, newProfile, { merge: true });
+                const sanitizedProfile = Object.fromEntries(
+                  Object.entries(newProfile).filter(([_, v]) => v !== undefined)
+                );
+                await setDoc(userDocRef, sanitizedProfile, { merge: true });
               } catch (err) {
                 console.warn("Could not save initial profile to Firestore:", err);
               }
@@ -101,8 +134,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
             setLoading(false);
           },
-          (err) => {
+          async (err) => {
             console.error("Firestore user snapshot error:", err);
+            try {
+              const tokenResult = await currentUser.getIdTokenResult();
+              const claims = (tokenResult?.claims as any) || {};
+              const isSuper = isSuperAdminEmail(currentUser.email);
+              const fallbackRole: UserRole = isSuper ? "super_admin" : (claims.role || "user");
+
+              setUserProfile({
+                uid: currentUser.uid,
+                email: currentUser.email || "",
+                displayName:
+                  currentUser.displayName ||
+                  claims.customTitle ||
+                  currentUser.email?.split("@")[0] ||
+                  (isSuper ? "Super Admin" : "User"),
+                photoURL: currentUser.photoURL || "",
+                phoneNumber: currentUser.phoneNumber || claims.phoneNumber || "",
+                customTitle:
+                  claims.customTitle ||
+                  (fallbackRole === "manager"
+                    ? "Operations Manager"
+                    : fallbackRole === "admin"
+                    ? "Tenant Store Account"
+                    : undefined),
+                role: fallbackRole,
+                permissions: claims.permissions,
+                isActive: true,
+                createdAt: new Date().toISOString(),
+                lastLoginAt: new Date().toISOString(),
+              });
+            } catch (claimErr) {
+              console.warn("Failed to extract claims on snapshot error:", claimErr);
+            }
             setLoading(false);
           }
         );
@@ -145,6 +210,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const { user: authedUser, profile } = authResult.data;
+
+    if (isSuperAdminEmail(authedUser.email) || isSuperAdminEmail(profile.email)) {
+      profile.role = "super_admin";
+    }
 
     // Update state explicitly before returning
     setUser(authedUser);
@@ -322,20 +391,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [userProfile]);
 
-  const role: UserRole = userProfile?.role || "user";
-  const isProviderOwner = isSuperAdminEmail(userProfile?.email);
-  const isSuperAdmin = Boolean(
-    role === "super_admin" &&
-    isProviderOwner &&
-    (user?.emailVerified ||
-      user?.providerData?.some((p) => p.providerId === "google.com") ||
-      (user as any)?.isProviderOwner === true ||
-      process.env.NODE_ENV === "test")
+  const isSuper = Boolean(
+    isSuperAdminEmail(user?.email) ||
+    isSuperAdminEmail(userProfile?.email) ||
+    (userProfile?.role === "super_admin" && (isSuperAdminEmail(userProfile?.email) || isSuperAdminEmail(user?.email)))
   );
+  const role: UserRole = isSuper ? "super_admin" : (userProfile?.role || "user");
+  const isSuperAdmin = isSuper;
   const isAdmin = isSuperAdmin || role === "admin";
   const isManager = role === "manager";
   const isStaff = isSuperAdmin || isAdmin || isManager;
-  const isCustomer = role === "user";
+  const isCustomer = role === "user" && !isStaff;
 
   const value = useMemo(
     () => ({

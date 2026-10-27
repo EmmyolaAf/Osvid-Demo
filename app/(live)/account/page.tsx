@@ -38,8 +38,14 @@ export default function AccountPage() {
       userProfile?.role === "super_admin" ||
       user?.email?.toLowerCase() === "abolarinwaemmanuelfree@gmail.com";
 
+    const isAdminUser =
+      role === "admin" ||
+      userProfile?.role === "admin";
+
     if (isSuper) {
       router.replace("/dashboard/super-admin");
+    } else if (isAdminUser) {
+      router.replace("/dashboard");
     }
   }, [isSuperAdmin, role, userProfile, user, router]);
 

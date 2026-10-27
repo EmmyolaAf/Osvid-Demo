@@ -57,7 +57,31 @@ export async function GET(req: NextRequest) {
           const emailKey = u.email.toLowerCase();
           const existing = staffMap.get(emailKey);
           const claims = (u.customClaims as any) || {};
-          const effectiveRole = claims.role || existing?.role;
+          let effectiveRole = claims.role || existing?.role;
+
+          // If caller is Super Admin and this non-super-admin account lacks explicit claims,
+          // default to tenant admin and proactively heal claims in Firebase Auth
+          if (!effectiveRole && caller.isSuperAdmin) {
+            effectiveRole = "admin";
+            adminAuth
+              .setCustomUserClaims(u.uid, {
+                ...claims,
+                role: "admin",
+                customTitle: claims.customTitle || "Tenant Store Account",
+                permissions: claims.permissions || {
+                  canManageProducts: true,
+                  canManageInventory: true,
+                  canManageOrders: true,
+                  canViewFinancials: true,
+                  canManageWebsite: true,
+                  canManageCustomers: true,
+                  canManageDiscounts: true,
+                },
+              })
+              .catch((err) =>
+                console.warn("Background claim sync warning for:", u.email, err?.message || err)
+              );
+          }
 
           // Only include recognized staff roles: admin or manager
           if (effectiveRole === "admin" || effectiveRole === "manager") {

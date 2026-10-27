@@ -1,7 +1,5 @@
 // lib/utils/email-templates.ts
 
-/* eslint-disable  @typescript-eslint/no-explicit-any */
-
 import { PaymentVerificationRequest } from "@/types/order-types";
 
 export const generateOrderConfirmationEmail = (

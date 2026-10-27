@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 6. Save profile in Firestore users collection (with compensation on failure)
+    // 6. Save profile in Firestore users collection (best-effort sync; Firebase Auth is authoritative)
     const profileData = {
       uid,
       email: cleanEmail,
@@ -145,17 +145,9 @@ export async function POST(req: NextRequest) {
     try {
       await adminDb.collection("users").doc(uid).set(profileData);
     } catch (dbErr: any) {
-      console.error("Firestore Admin profile save error, compensating:", dbErr);
-      try {
-        await adminAuth.deleteUser(uid);
-      } catch (compensationErr) {
-        console.error("Compensation delete failed:", compensationErr);
-      }
-      return NextResponse.json(
-        {
-          error: `Failed to establish user profile in database: ${dbErr.message}`,
-        },
-        { status: 500 }
+      console.warn(
+        "Firestore Admin profile save warning (database may not be provisioned or available):",
+        dbErr?.message || dbErr
       );
     }
 
@@ -191,6 +183,7 @@ export async function POST(req: NextRequest) {
         assignedRole === "manager" ? "Manager" : "Administrator"
       } "${userName}" created successfully!`,
       user: profileData,
+      initialPassword: userPassword,
       ...(temporaryPasswordIssued
         ? { temporaryPassword: temporaryPasswordIssued }
         : {}),

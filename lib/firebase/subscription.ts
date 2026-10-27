@@ -11,7 +11,7 @@ const RUNTIME_COLLECTION_NAME = "runtime_settings";
 const PRIMARY_SUBSCRIPTION_DOC_ID = "subscription";
 const LEGACY_SUBSCRIPTION_DOC_ID = "main_business";
 const COLLECTION_NAME = "system_settings";
-const READ_TIMEOUT_MS = 6000;
+const READ_TIMEOUT_MS = 2000;
 
 export { type SubscriptionStatusInfo };
 

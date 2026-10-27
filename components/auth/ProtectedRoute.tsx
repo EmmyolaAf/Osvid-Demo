@@ -8,6 +8,8 @@ import { Loader2, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 
+import { isSuperAdminEmail } from "@/lib/firebase/auth";
+
 interface ProtectedRouteProps {
   children: React.ReactNode;
   allowedRoles?: UserRole[];
@@ -47,12 +49,24 @@ export default function ProtectedRoute({
   }
 
   // Check role authorization
-  const roleAllowed = !allowedRoles || allowedRoles.length === 0 || allowedRoles.includes(role);
+  const isSuper = Boolean(
+    isSuperAdmin ||
+    role === "super_admin" ||
+    isSuperAdminEmail(user?.email) ||
+    isSuperAdminEmail(userProfile?.email)
+  );
+  const effectiveRole: UserRole = isSuper ? "super_admin" : role;
+
+  const roleAllowed =
+    !allowedRoles ||
+    allowedRoles.length === 0 ||
+    allowedRoles.includes(effectiveRole) ||
+    (isSuper && (allowedRoles.includes("super_admin") || allowedRoles.includes("admin")));
 
   // Check granular permission requirement
   let permissionAllowed = true;
   if (requiredPermission) {
-    if (isSuperAdmin || isAdmin) {
+    if (isSuper || isSuperAdmin || isAdmin) {
       permissionAllowed = true;
     } else if (role === "manager" && userProfile?.permissions) {
       const normalized = normalizeManagerPermissions(userProfile.permissions);
@@ -78,12 +92,12 @@ export default function ProtectedRoute({
           <Link href="/">
             <Button variant="outline">Return to Homepage</Button>
           </Link>
-          {role === "user" ? (
+          {role === "user" && !isSuper ? (
             <Link href="/account">
               <Button className="bg-orange-600 hover:bg-orange-700 text-white">Go to My Account</Button>
             </Link>
           ) : (
-            <Link href={role === "super_admin" ? "/dashboard/super-admin" : "/dashboard"}>
+            <Link href={isSuper || role === "super_admin" ? "/dashboard/super-admin" : "/dashboard"}>
               <Button className="bg-orange-600 hover:bg-orange-700 text-white">Go to Dashboard</Button>
             </Link>
           )}

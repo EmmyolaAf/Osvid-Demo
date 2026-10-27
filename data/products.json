@@ -1,0 +1,211 @@
+[
+  {
+    "id": "prod_osvid_bond_glue",
+    "name": "OSVID Bond Glue Heavy-Duty",
+    "slug": "osvid-bond-glue-heavy-duty",
+    "description": "Premium industrial grade adhesive formulated with high-strength synthetic polymers. Engineered for exceptional tensile bonding strength across concrete, timber, ceramic tiles, and industrial composite panels.",
+    "price": 45000,
+    "discountPrice": 42000,
+    "stockQuantity": 150,
+    "category": "Industrial Adhesives",
+    "categorySlug": "industrial-adhesives",
+    "imageUrl": "/images/products/osvid-bond-glue.webp",
+    "galleryImages": [
+      "/images/products/osvid-bond-glue.webp",
+      "/images/placeholder.webp"
+    ],
+    "unit": "20kg",
+    "sku": "OSV-BND-020",
+    "isFeatured": true,
+    "features": [
+      "Ultra-high tensile bond strength (> 2.5 MPa)",
+      "Fast setting with extended open workability time",
+      "Resistant to high humidity, moisture, and thermal cycling",
+      "Formulated for heavy pedestrian and vehicular traffic areas"
+    ],
+    "specifications": {
+      "Appearance": "Smooth viscous paste",
+      "Curing Time": "24 hours",
+      "Coverage": "1.5 - 2.0 kg/m²",
+      "Application Temperature": "10°C - 45°C"
+    },
+    "suggestedProductIds": ["prod_osvid_tile_master"],
+    "isActive": true,
+    "createdAt": "2026-01-15T08:00:00.000Z",
+    "updatedAt": "2026-10-27T12:00:00.000Z"
+  },
+  {
+    "id": "prod_osvid_tile_master",
+    "name": "OSVID Tile Master Pro Adhesive",
+    "slug": "osvid-tile-master-pro-adhesive",
+    "description": "High-performance polymer-fortified tile adhesive formulated for vitrified, porcelain, granite, and marble tiles on internal and external wall and floor surfaces.",
+    "price": 14500,
+    "discountPrice": 12500,
+    "stockQuantity": 280,
+    "category": "Tile Adhesives",
+    "categorySlug": "tile-adhesives",
+    "imageUrl": "/images/ceramic-flooring.jpg",
+    "galleryImages": [
+      "/images/ceramic-flooring.jpg",
+      "/images/placeholder.webp"
+    ],
+    "unit": "25kg",
+    "sku": "OSV-TLM-025",
+    "isFeatured": true,
+    "features": [
+      "No vertical slip with excellent grab",
+      "Suitable for large format porcelain & vitrified tiles",
+      "Superior flexibility accommodating substrate movement",
+      "Waterproof formulation ideal for wet areas"
+    ],
+    "specifications": {
+      "Pot Life": "Approx. 2 hours",
+      "Bed Thickness": "3 - 10 mm",
+      "Open Time": "30 minutes",
+      "Classification": "C2TE compliant"
+    },
+    "suggestedProductIds": ["prod_osvid_bond_glue"],
+    "isActive": true,
+    "createdAt": "2026-01-20T09:30:00.000Z",
+    "updatedAt": "2026-10-27T12:00:00.000Z"
+  },
+  {
+    "id": "prod_osvid_epoxshield_3d",
+    "name": "OSVID EpoxShield 3D Floor Resin",
+    "slug": "osvid-epoxshield-3d-floor-resin",
+    "description": "Two-component, 100% solids, clear epoxy resin system engineered for seamless metallic, decorative 3D, and heavy-duty industrial floor coating with crystal clarity and mirror finish.",
+    "price": 95000,
+    "discountPrice": 88000,
+    "stockQuantity": 85,
+    "category": "Epoxy Flooring",
+    "categorySlug": "epoxy-flooring",
+    "imageUrl": "/images/epoxy-resin.jpg",
+    "galleryImages": [
+      "/images/epoxy-resin.jpg",
+      "/images/placeholder.webp"
+    ],
+    "unit": "15L",
+    "sku": "OSV-EPX-015",
+    "isFeatured": true,
+    "features": [
+      "Ultra-clear, non-yellowing UV-resistant formulation",
+      "Self-leveling properties for seamless high-gloss mirror finish",
+      "High chemical, solvent, and abrasive mechanical resistance",
+      "Zero VOC, low odor, food-grade facility compliant"
+    ],
+    "specifications": {
+      "Mix Ratio": "2:1 by weight",
+      "Compressive Strength": "> 70 MPa",
+      "Pot Life": "40 minutes at 25°C",
+      "Full Cure": "7 days"
+    },
+    "suggestedProductIds": ["prod_osvid_aquablock"],
+    "isActive": true,
+    "createdAt": "2026-02-10T11:00:00.000Z",
+    "updatedAt": "2026-10-27T12:00:00.000Z"
+  },
+  {
+    "id": "prod_osvid_aquablock",
+    "name": "OSVID AquaBlock Elastomeric Waterproof Sealant",
+    "slug": "osvid-aquablock-elastomeric-waterproof-sealant",
+    "description": "Advanced two-part polymer-modified flexible cementitious waterproof coating designed for retaining walls, basements, balconies, water reservoirs, and concrete roofs.",
+    "price": 32000,
+    "discountPrice": 28500,
+    "stockQuantity": 190,
+    "category": "Waterproofing",
+    "categorySlug": "waterproofing",
+    "imageUrl": "/images/why-osvid.webp",
+    "galleryImages": [
+      "/images/why-osvid.webp",
+      "/images/placeholder.webp"
+    ],
+    "unit": "20kg",
+    "sku": "OSV-AQB-020",
+    "isFeatured": true,
+    "features": [
+      "Withstands positive and negative hydrostatic pressure",
+      "Elastomeric crack-bridging capability up to 2mm",
+      "Seamless and monolithic membrane barrier",
+      "Non-toxic, safe for potable water reservoirs"
+    ],
+    "specifications": {
+      "Elongation at Break": "> 80%",
+      "Adhesion to Concrete": "> 1.5 MPa",
+      "Number of Coats": "2 coats recommended",
+      "Drying Time": "4 hours between coats"
+    },
+    "suggestedProductIds": ["prod_osvid_tile_master"],
+    "isActive": true,
+    "createdAt": "2026-02-18T14:20:00.000Z",
+    "updatedAt": "2026-10-27T12:00:00.000Z"
+  },
+  {
+    "id": "prod_osvid_plastcrete",
+    "name": "OSVID PlastCrete Superplasticizer Admixture",
+    "slug": "osvid-plastcrete-superplasticizer-admixture",
+    "description": "Third-generation polycarboxylate ether (PCE) based superplasticizer formulated to achieve high early compressive strength and exceptional workability in ready-mix concrete.",
+    "price": 38000,
+    "stockQuantity": 120,
+    "category": "Construction Chemicals",
+    "categorySlug": "construction-chemicals",
+    "imageUrl": "/images/about-section.webp",
+    "galleryImages": [
+      "/images/about-section.webp",
+      "/images/placeholder.webp"
+    ],
+    "unit": "25L",
+    "sku": "OSV-PLC-025",
+    "isFeatured": true,
+    "features": [
+      "Up to 35% water reduction without slump loss",
+      "Significantly accelerates early 24-hour and 28-day concrete strength",
+      "Improves concrete impermeability and surface finish",
+      "Chloride-free formulation protecting reinforcing rebar steel"
+    ],
+    "specifications": {
+      "Specific Gravity": "1.08 ± 0.02 g/cm³",
+      "Dosage Range": "0.6% - 1.8% by weight of cement",
+      "pH Value": "6.0 - 7.5",
+      "Compliance": "ASTM C494 Type F & G"
+    },
+    "suggestedProductIds": ["prod_osvid_aquablock"],
+    "isActive": true,
+    "createdAt": "2026-03-01T10:15:00.000Z",
+    "updatedAt": "2026-10-27T12:00:00.000Z"
+  },
+  {
+    "id": "prod_osvid_grout_pro",
+    "name": "OSVID Tile Grout Premium Anti-Fungal",
+    "slug": "osvid-tile-grout-premium-anti-fungal",
+    "description": "Premium water-repellent cementitious tile joint filler enriched with biocide additives to resist mould, bacterial growth, and efflorescence in joint widths 1-6mm.",
+    "price": 5500,
+    "discountPrice": 4800,
+    "stockQuantity": 350,
+    "category": "Tile Adhesives",
+    "categorySlug": "tile-adhesives",
+    "imageUrl": "/images/ceramic-flooring.jpg",
+    "galleryImages": [
+      "/images/ceramic-flooring.jpg",
+      "/images/placeholder.webp"
+    ],
+    "unit": "5kg",
+    "sku": "OSV-GRT-005",
+    "isFeatured": false,
+    "features": [
+      "Anti-fungal, anti-mould formula for hygienic wet areas",
+      "Hydrophobic water-drop beading effect",
+      "Non-shrink, non-cracking smooth joint finish",
+      "Wide color stability under continuous sunlight exposure"
+    ],
+    "specifications": {
+      "Joint Width": "1 mm to 6 mm",
+      "Compressive Strength": "> 15 N/mm²",
+      "Flexural Strength": "> 3.5 N/mm²",
+      "Pot Life": "1 hour"
+    },
+    "suggestedProductIds": ["prod_osvid_tile_master"],
+    "isActive": true,
+    "createdAt": "2026-03-10T12:00:00.000Z",
+    "updatedAt": "2026-10-27T12:00:00.000Z"
+  }
+]

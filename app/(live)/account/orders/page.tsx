@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
@@ -44,12 +44,13 @@ export default function CustomerOrdersPage() {
     }
   }, [isSuperAdmin, role, userProfile, user, router]);
 
-  const loadUserOrders = async () => {
+  const loadUserOrders = useCallback(async () => {
     if (!user) return;
+    const currentUser = user;
     try {
       setLoading(true);
       setError(null);
-      const list = await getUserOrdersFromDb(user.uid, user.email || undefined);
+      const list = await getUserOrdersFromDb(currentUser.uid, currentUser.email || undefined);
       setOrders(list);
     } catch (err: any) {
       console.error("Error fetching customer orders:", err);
@@ -58,11 +59,11 @@ export default function CustomerOrdersPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     loadUserOrders();
-  }, [user]);
+  }, [loadUserOrders]);
 
   const getStatusStep = (status: OrderStatus) => {
     const steps = [

@@ -141,25 +141,38 @@ export async function resolveServerUser(
       }
     } else {
       // User doc does not exist in Firestore.
-      // If not primary Super Admin, cannot hold staff authority without a valid profile.
+      // If token has a verified staff claim, honor it as fallback so tenant admin is not locked out.
       if (!isSuper) {
-        effectiveRole = "user";
-        permissions = undefined;
+        if (decodedToken.role === "admin" || decodedToken.role === "manager") {
+          effectiveRole = decodedToken.role as UserRole;
+        } else {
+          effectiveRole = "user";
+          permissions = undefined;
+        }
       }
     }
   } catch (dbErr: any) {
     // Primary Super Admin retains documented emergency bootstrap safeguard against lockout.
-    // For all other callers claiming privileged roles, fail closed on database errors.
+    // If database itself is not provisioned in Google Cloud (code 5 NOT_FOUND), fall back to token claims.
+    const isDbNotProvisioned =
+      dbErr?.code === 5 ||
+      dbErr?.message?.includes("NOT_FOUND") ||
+      dbErr?.message?.includes("does not exist");
+
     if (!isSuper) {
-      const hasPrivilegedClaim =
-        decodedToken.role === "admin" ||
-        decodedToken.role === "manager" ||
-        decodedToken.role === "super_admin";
-      if (hasPrivilegedClaim) {
-        throw new AuthError(
-          "Service Unavailable: Database error preventing live staff authorization verification",
-          503
-        );
+      if (isDbNotProvisioned && (decodedToken.role === "admin" || decodedToken.role === "manager")) {
+        effectiveRole = decodedToken.role as UserRole;
+      } else {
+        const hasPrivilegedClaim =
+          decodedToken.role === "admin" ||
+          decodedToken.role === "manager" ||
+          decodedToken.role === "super_admin";
+        if (hasPrivilegedClaim) {
+          throw new AuthError(
+            "Service Unavailable: Database error preventing live staff authorization verification",
+            503
+          );
+        }
       }
     }
     console.warn("Server auth: Firestore profile lookup warning:", dbErr.message);

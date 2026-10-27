@@ -1191,6 +1191,7 @@ export default function ProductsManagementPage() {
               <div className="mt-1 space-y-2">
                 {productForm.imageUrl && (
                   <div className="flex items-center gap-3 p-2 bg-slate-50 border border-slate-200 rounded-xl">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={productForm.imageUrl}
                       alt="Product Preview"
@@ -1397,6 +1398,7 @@ export default function ProductsManagementPage() {
               <div className="mt-1 space-y-2">
                 {categoryForm.imageUrl && (
                   <div className="flex items-center gap-3 p-2 bg-slate-50 border border-slate-200 rounded-xl">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={categoryForm.imageUrl}
                       alt="Category Preview"
@@ -1487,7 +1489,7 @@ export default function ProductsManagementPage() {
       {/* MODAL 3: DELIBERATE ADJUST STOCK MODAL */}
       {/* ======================================================== */}
       <Dialog open={isAdjustModalOpen} onOpenChange={setIsAdjustModalOpen}>
-        <DialogContent className="sm:max-w-lg bg-white rounded-3xl p-6 sm:p-8">
+        <DialogContent className="sm:max-w-lg bg-white rounded-lg p-5 sm:p-6">
           <DialogHeader className="text-left space-y-1">
             <DialogTitle className="text-xl font-black text-slate-900 flex items-center gap-2">
               <SlidersHorizontal size={20} className="text-orange-600" />
@@ -1611,7 +1613,7 @@ export default function ProductsManagementPage() {
       {/* MODAL 4: INVENTORY HISTORY LEDGER MODAL */}
       {/* ======================================================== */}
       <Dialog open={isHistoryModalOpen} onOpenChange={setIsHistoryModalOpen}>
-        <DialogContent className="sm:max-w-3xl bg-white rounded-3xl p-6 sm:p-8 max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-3xl bg-white rounded-lg p-5 sm:p-6 max-h-[85vh] overflow-y-auto">
           <DialogHeader className="text-left space-y-1">
             <div className="flex items-center justify-between">
               <DialogTitle className="text-xl font-black text-slate-900 flex items-center gap-2">

@@ -11,58 +11,90 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Lock, Mail, Loader2, ArrowRight, Eye, EyeOff } from "lucide-react";
 
+import { isSuperAdminEmail } from "@/lib/firebase/auth";
+
 function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const { login, role, isSuperAdmin, user, userProfile } = useAuth();
+  const { login, role, isSuperAdmin, isAdmin, user, userProfile } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectUrl = searchParams.get("redirect");
 
-  // If already authenticated as Super Admin, send straight to Super Admin Dashboard
+  // If already authenticated as Super Admin or Admin, send straight to their respective Dashboard
   React.useEffect(() => {
     const isSuper =
       isSuperAdmin ||
       role === "super_admin" ||
       userProfile?.role === "super_admin" ||
-      user?.email?.toLowerCase() === "abolarinwaemmanuelfree@gmail.com";
+      isSuperAdminEmail(user?.email);
 
-    if (user && isSuper) {
-      router.replace("/dashboard/super-admin");
+    const isAdminUser =
+      isAdmin ||
+      role === "admin" ||
+      userProfile?.role === "admin";
+
+    if (user) {
+      if (isSuper) {
+        router.replace("/dashboard/super-admin");
+      } else if (isAdminUser) {
+        router.replace("/dashboard");
+      }
     }
-  }, [user, isSuperAdmin, role, userProfile, router]);
+  }, [user, isSuperAdmin, isAdmin, role, userProfile, router]);
 
   const handleRedirect = (targetProfile?: any) => {
     const userRole = targetProfile?.role || role;
     const userEmail = (targetProfile?.email || email).trim().toLowerCase();
 
     // 1. Platform Super Admin -> ALWAYS straight to Super Admin Dashboard
-    if (userRole === "super_admin" || userEmail === "abolarinwaemmanuelfree@gmail.com") {
-      router.push("/dashboard/super-admin");
-      return;
-    }
-
-    if (redirectUrl) {
-      router.push(redirectUrl);
+    if (
+      userRole === "super_admin" ||
+      targetProfile?.role === "super_admin" ||
+      isSuperAdminEmail(userEmail) ||
+      isSuperAdminEmail(user?.email)
+    ) {
+      if (redirectUrl && redirectUrl.startsWith("/dashboard/super-admin")) {
+        router.push(redirectUrl);
+      } else {
+        router.push("/dashboard/super-admin");
+      }
       return;
     }
 
     // 2. Tenant Store Administrator -> Admin Store Management Dashboard
-    if (userRole === "admin") {
-      router.push("/dashboard");
+    if (userRole === "admin" || targetProfile?.role === "admin") {
+      if (
+        redirectUrl &&
+        redirectUrl.startsWith("/dashboard") &&
+        !redirectUrl.startsWith("/dashboard/super-admin")
+      ) {
+        router.push(redirectUrl);
+      } else {
+        router.push("/dashboard");
+      }
       return;
     }
 
     // 3. Operations Manager -> Manager Staff & Operations Hub
-    if (userRole === "manager") {
-      router.push("/dashboard/managers");
+    if (userRole === "manager" || targetProfile?.role === "manager") {
+      if (redirectUrl && redirectUrl.startsWith("/dashboard")) {
+        router.push(redirectUrl);
+      } else {
+        router.push("/dashboard/managers");
+      }
       return;
     }
 
-    // 4. Regular User / Customer -> Customer Account Hub
+    // 4. Regular User / Customer -> Customer Account Hub (honoring safe non-dashboard redirects)
+    if (redirectUrl && !redirectUrl.startsWith("/dashboard")) {
+      router.push(redirectUrl);
+      return;
+    }
+
     router.push("/account");
   };
 

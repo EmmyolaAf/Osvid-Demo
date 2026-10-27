@@ -1,7 +1,7 @@
 // components/TileRevealImage.tsx
 "use client";
 
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useMemo } from "react";
 import Image from "next/image";
 import { motion, Variants } from "framer-motion";
 
@@ -34,13 +34,10 @@ export default function TileRevealImage({
   tileStagger = 0.03,
 }: TileRevealImageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [tiles, setTiles] = useState<number[]>([]);
-
-  useEffect(() => {
-    // Generate tiles dynamically
-    const numTiles = tileCount.rows * tileCount.cols;
-    setTiles(Array.from({ length: numTiles }, (_, i) => i));
-  }, [tileCount]);
+  const tiles = useMemo(() => {
+    const numTiles = (tileCount?.rows || 8) * (tileCount?.cols || 8);
+    return Array.from({ length: numTiles }, (_, i) => i);
+  }, [tileCount?.rows, tileCount?.cols]);
 
   const tileVariants: Variants = {
     hidden: { opacity: 1, scale: 1 },

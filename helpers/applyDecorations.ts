@@ -1,5 +1,3 @@
-/* eslint-disable  @typescript-eslint/no-explicit-any */
-
 // Helper function to apply inline decorations (bold, italic, links)
 function applyDecorations(
   text: string,

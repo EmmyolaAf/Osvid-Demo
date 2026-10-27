@@ -98,7 +98,8 @@ function initAdminApp() {
   }
 }
 
-const adminApp = initAdminApp();
+export const adminApp = initAdminApp();
 
 export const adminAuth = getAuth(adminApp);
 export const adminDb: Firestore = getFirestore(adminApp);
+

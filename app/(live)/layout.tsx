@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Header from "@/components/shared/Header";
 import Footer from "@/components/shared/Footer";
 import WhatsAppButton from "@/components/reusables/WhatsappButton";
@@ -9,6 +10,7 @@ import { CartProvider } from "@/providers/CartProvider";
 import { CheckoutProvider } from "@/providers/CheckoutProvider";
 import { CartDrawer } from "@/components/reusables/cart";
 import VisualEditorToolbar from "@/components/editor/VisualEditorToolbar";
+import SiteContentApplier from "@/components/editor/SiteContentApplier";
 
 export default async function RootLayout({
   children,
@@ -19,12 +21,15 @@ export default async function RootLayout({
     <ReactQueryProvider>
       <CartProvider>
         <CheckoutProvider>
+          <SiteContentApplier />
           <Header />
           {children}
           <Toaster richColors position="top-right" />
           <Footer />
           <CartDrawer />
-          <VisualEditorToolbar />
+          <Suspense fallback={null}>
+            <VisualEditorToolbar />
+          </Suspense>
         </CheckoutProvider>
       </CartProvider>
       <WhatsAppButton />

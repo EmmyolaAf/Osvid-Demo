@@ -202,39 +202,39 @@ export default function ManagersManagementPage() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-orange-600 to-amber-500 text-white flex items-center justify-center shadow-md shadow-orange-600/20">
-                <Briefcase size={20} />
+              <div className="w-9 h-9 rounded-md bg-slate-900 text-white flex items-center justify-center">
+                <Briefcase size={18} />
               </div>
-              <h1 className="text-2xl sm:text-3xl font-black text-slate-900">Manager &amp; Staff Roles</h1>
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Manager &amp; Staff Roles</h1>
             </div>
-            <p className="text-sm text-slate-500 mt-1">
+            <p className="text-xs sm:text-sm text-slate-500 mt-1">
               Appoint custom managers (e.g. Logistics, Products, Storefront) and delegate granular module permissions.
             </p>
           </div>
 
           <Button
             onClick={() => setIsCreateOpen(true)}
-            className="bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-2xl shadow-lg shadow-orange-600/25 flex items-center gap-2 h-11 px-5"
+            className="bg-orange-600 hover:bg-orange-700 text-white font-medium rounded-md flex items-center gap-2 h-9 px-4 text-xs cursor-pointer shadow-none"
           >
-            <UserPlus size={18} />
+            <UserPlus size={15} />
             <span>Create New Manager</span>
           </Button>
         </div>
 
         {/* Search Bar */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-3">
-          <Search className="w-5 h-5 text-slate-400" />
+        <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-none flex items-center gap-3">
+          <Search className="w-4 h-4 text-slate-400" />
           <input
             type="text"
             placeholder="Search managers by name, custom title, email, or phone..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full text-sm bg-transparent outline-none text-slate-800 placeholder:text-slate-400 font-medium"
+            className="w-full text-xs bg-transparent outline-none text-slate-800 placeholder:text-slate-400 font-medium"
           />
         </div>
 
         {/* Managers Table */}
-        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-lg border border-slate-200 shadow-none overflow-hidden">
           {loading ? (
             <div className="py-16 flex flex-col items-center justify-center gap-3">
               <Loader2 className="w-8 h-8 text-orange-600 animate-spin" />
@@ -275,12 +275,12 @@ export default function ManagersManagementPage() {
                       <tr key={mgr.uid} className="hover:bg-slate-50/80 transition-colors">
                         <td className="py-4 px-6">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-800 font-bold flex items-center justify-center text-sm">
+                            <div className="w-8 h-8 rounded-md bg-slate-900 text-white font-bold flex items-center justify-center text-xs shrink-0">
                               {mgr.displayName?.charAt(0).toUpperCase() || "M"}
                             </div>
                             <div>
-                              <p className="font-bold text-slate-900 text-sm">{mgr.displayName}</p>
-                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                              <p className="font-semibold text-slate-900 text-xs">{mgr.displayName}</p>
+                              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
                                 {mgr.customTitle || "Operations Manager"}
                               </span>
                             </div>
@@ -396,9 +396,9 @@ export default function ManagersManagementPage() {
 
         {/* Create Manager Dialog Modal */}
         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-          <DialogContent className="sm:max-w-lg bg-white rounded-3xl p-6">
+          <DialogContent className="sm:max-w-lg bg-white rounded-lg p-6">
             <DialogHeader>
-              <DialogTitle className="text-xl font-black text-slate-900 flex items-center gap-2">
+              <DialogTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
                 <UserPlus className="text-orange-600 w-5 h-5" />
                 Create New Operations Manager
               </DialogTitle>
@@ -410,58 +410,58 @@ export default function ManagersManagementPage() {
             <form onSubmit={handleCreateManager} className="space-y-4 py-2">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <Label className="text-xs font-bold uppercase text-slate-700">Full Name *</Label>
+                  <Label className="text-xs font-semibold text-slate-700">Full Name *</Label>
                   <Input
                     required
                     placeholder="e.g. John Olabisi"
                     value={formData.displayName}
                     onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
-                    className="mt-1 h-10 rounded-xl"
+                    className="mt-1 h-9 rounded-md text-xs"
                   />
                 </div>
 
                 <div>
-                  <Label className="text-xs font-bold uppercase text-slate-700">Custom Title / Role</Label>
+                  <Label className="text-xs font-semibold text-slate-700">Custom Title / Role</Label>
                   <Input
                     placeholder="e.g. Logistics Lead, Product Manager"
                     value={formData.customTitle}
                     onChange={(e) => setFormData({ ...formData, customTitle: e.target.value })}
-                    className="mt-1 h-10 rounded-xl"
+                    className="mt-1 h-9 rounded-md text-xs"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <Label className="text-xs font-bold uppercase text-slate-700">Email Address *</Label>
+                  <Label className="text-xs font-semibold text-slate-700">Email Address *</Label>
                   <Input
                     type="email"
                     required
                     placeholder="manager@osvidchemicals.com"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="mt-1 h-10 rounded-xl"
+                    className="mt-1 h-9 rounded-md text-xs"
                   />
                 </div>
 
                 <div>
-                  <Label className="text-xs font-bold uppercase text-slate-700">Phone Number</Label>
+                  <Label className="text-xs font-semibold text-slate-700">Phone Number</Label>
                   <Input
                     type="tel"
                     placeholder="+234 800 000 0000"
                     value={formData.phoneNumber}
                     onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
-                    className="mt-1 h-10 rounded-xl"
+                    className="mt-1 h-9 rounded-md text-xs"
                   />
                 </div>
               </div>
 
               {/* Granular Permissions Checkboxes */}
               <div className="pt-2 border-t border-slate-100">
-                <Label className="text-xs font-bold uppercase text-slate-700 mb-2 block">
+                <Label className="text-xs font-semibold text-slate-700 mb-2 block">
                   Assign Delegated Permissions
                 </Label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-slate-50 p-3.5 rounded-2xl border border-slate-200/80">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-slate-50 p-3 rounded-lg border border-slate-200">
                   <label className="flex items-center gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer">
                     <input
                       type="checkbox"
@@ -593,9 +593,9 @@ export default function ManagersManagementPage() {
 
         {/* Edit Manager Permissions Modal */}
         <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-          <DialogContent className="sm:max-w-md bg-white rounded-3xl p-6">
+          <DialogContent className="sm:max-w-md bg-white rounded-lg p-6">
             <DialogHeader>
-              <DialogTitle className="text-xl font-black text-slate-900 flex items-center gap-2">
+              <DialogTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
                 <Settings className="text-orange-600 w-5 h-5" />
                 Edit Manager Permissions
               </DialogTitle>
@@ -606,21 +606,21 @@ export default function ManagersManagementPage() {
 
             <form onSubmit={handleSaveEdit} className="space-y-4 py-2">
               <div>
-                <Label className="text-xs font-bold uppercase text-slate-700">Custom Title / Designation</Label>
+                <Label className="text-xs font-semibold text-slate-700">Custom Title / Designation</Label>
                 <Input
                   value={editTitle}
                   onChange={(e) => setEditTitle(e.target.value)}
                   placeholder="e.g. Warehouse & Logistics Lead"
                   required
-                  className="mt-1 h-10 rounded-xl"
+                  className="mt-1 h-9 rounded-md text-xs"
                 />
               </div>
 
               <div>
-                <Label className="text-xs font-bold uppercase text-slate-700 mb-2 block">
+                <Label className="text-xs font-semibold text-slate-700 mb-2 block">
                   Permissions Scope
                 </Label>
-                <div className="grid grid-cols-1 gap-2 bg-slate-50 p-4 rounded-2xl border border-slate-200/80">
+                <div className="grid grid-cols-1 gap-2 bg-slate-50 p-3 rounded-lg border border-slate-200">
                   <label className="flex items-center gap-2.5 text-xs text-slate-800 font-semibold cursor-pointer">
                     <input
                       type="checkbox"

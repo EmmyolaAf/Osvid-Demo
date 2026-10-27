@@ -1,8 +1,6 @@
 // components/checkout/AddressAutocomplete.tsx
 "use client";
 
-/* eslint-disable  @typescript-eslint/no-explicit-any */
-
 // Add global declaration for window.google
 declare global {
   interface Window {

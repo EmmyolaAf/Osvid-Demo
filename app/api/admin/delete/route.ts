@@ -71,8 +71,17 @@ export async function POST(req: NextRequest) {
       await adminDb.collection("users").doc(uid).delete();
       firestoreDeleted = true;
     } catch (e: any) {
-      firestoreError = e.message;
-      console.error("Firestore delete user error:", e);
+      if (
+        e.code === 5 ||
+        e.code === "not-found" ||
+        e.message?.includes("NOT_FOUND") ||
+        e.message?.includes("does not exist")
+      ) {
+        firestoreDeleted = true;
+      } else {
+        firestoreError = e.message;
+        console.warn("Firestore delete user warning:", e?.message || e);
+      }
     }
 
     if (!authDeleted || !firestoreDeleted) {

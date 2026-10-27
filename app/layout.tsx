@@ -8,6 +8,11 @@ import InstantPreloader from "@/components/reusables/InstantPreloader";
 import { AuthProvider } from "@/contexts/AuthContext";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.NEXT_PUBLIC_BASE_URL ||
+    "https://osvidcompany.com"
+  ),
   title: companyData.openGraph.title,
   description: companyData.description,
   keywords: companyData.keywords,

@@ -6,6 +6,7 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  deleteField,
   query,
   where,
   orderBy,
@@ -25,6 +26,29 @@ import {
   DiscountCode,
   ManagerPermissions,
 } from "@/types/auth";
+
+/**
+ * Recursively strips keys with undefined values to prevent Firestore setDoc/updateDoc
+ * from throwing "Function setDoc() called with invalid data. Unsupported field value: undefined"
+ */
+export function cleanFirestoreData<T>(data: T): T {
+  if (data === null || data === undefined) {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data.map((item) => cleanFirestoreData(item)) as unknown as T;
+  }
+  if (typeof data === "object" && !(data instanceof Date) && !(data instanceof Timestamp)) {
+    const cleaned: Record<string, any> = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) {
+        cleaned[key] = cleanFirestoreData(value);
+      }
+    }
+    return cleaned as T;
+  }
+  return data;
+}
 
 // ==========================================
 // USER & RBAC PROFILE SERVICES
@@ -109,13 +133,13 @@ export async function getUsersByRole(role: UserRole): Promise<UserProfile[]> {
 /**
  * Fetch all tenant administrators and operations managers (excluding the platform owner Super Admin)
  */
-export async function getTenantAdministrators(): Promise<UserProfile[]> {
+export async function getTenantAdministrators(authToken?: string): Promise<UserProfile[]> {
   const SUPER_ADMIN_EMAIL = "abolarinwaemmanuelfree@gmail.com";
 
   // 1. Try server-side consolidated discovery API
   if (typeof window !== "undefined") {
     try {
-      const token = await auth.currentUser?.getIdToken();
+      const token = authToken || (await auth.currentUser?.getIdToken().catch(() => undefined));
       const res = await fetch(`/api/admin/list?t=${Date.now()}`, {
         cache: "no-store",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -227,7 +251,7 @@ export async function createOrderInDb(orderData: Omit<Order, "id" | "createdAt" 
         },
       ],
     };
-    await setDoc(orderRef, newOrder);
+    await setDoc(orderRef, cleanFirestoreData(newOrder));
     return orderRef.id;
   } catch (error) {
     console.error("Error creating order in Firestore:", error);
@@ -245,7 +269,12 @@ export async function getOrdersFromDb(statusFilter?: OrderStatus): Promise<Order
         orderBy("createdAt", "desc")
       );
     }
-    const snap = await getDocs(q);
+    const snap = await Promise.race([
+      getDocs(q),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Orders query timed out")), 2500)
+      ),
+    ]);
     return snap.docs.map((d) => d.data() as Order);
   } catch (error) {
     console.error("Error fetching orders:", error);
@@ -445,7 +474,7 @@ export async function saveCategoryToDb(
 
     const docRef = doc(db, "categories", categoryId);
     await withDbTimeout(
-      setDoc(docRef, payload, { merge: true }),
+      setDoc(docRef, cleanFirestoreData(payload), { merge: true }),
       12000,
       "Failed to save category: Firestore write timed out."
     );
@@ -514,36 +543,59 @@ export async function deleteCategoryFromDb(categoryId: string): Promise<Mutation
 export async function getProductsFromDb(): Promise<Product[]> {
   try {
     const q = query(collection(db, "products"), orderBy("createdAt", "desc"));
-    const snap = await getDocs(q);
-    return snap.docs.map((d) => {
-      const data = d.data();
-      return {
-        id: d.id,
-        name: data.name || "",
-        slug: data.slug || data.name?.toLowerCase().replace(/\s+/g, "-") || d.id,
-        description: data.description || "",
-        price: Number(data.price) || 0,
-        discountPrice: data.discountPrice ? Number(data.discountPrice) : undefined,
-        stockQuantity: Number(data.stockQuantity) || 0,
-        category: data.category || "General",
-        categorySlug: data.categorySlug || data.category?.toLowerCase().replace(/\s+/g, "-"),
-        imageUrl: data.imageUrl || "/images/placeholder.webp",
-        galleryImages: Array.isArray(data.galleryImages) ? data.galleryImages : [],
-        unit: data.unit || "kg",
-        sku: data.sku || "",
-        isFeatured: Boolean(data.isFeatured),
-        features: Array.isArray(data.features) ? data.features : [],
-        specifications: data.specifications || {},
-        suggestedProductIds: Array.isArray(data.suggestedProductIds) ? data.suggestedProductIds : [],
-        isActive: data.isActive !== false,
-        createdAt: data.createdAt || new Date().toISOString(),
-        updatedAt: data.updatedAt || new Date().toISOString(),
-      } as Product;
-    });
+    const snap = await Promise.race([
+      getDocs(q),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Products query timed out")), 2000)
+      ),
+    ]);
+    if (snap.docs.length > 0) {
+      return snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          name: data.name || "",
+          slug: data.slug || data.name?.toLowerCase().replace(/\s+/g, "-") || d.id,
+          description: data.description || "",
+          price: Number(data.price) || 0,
+          discountPrice: data.discountPrice ? Number(data.discountPrice) : undefined,
+          stockQuantity: Number(data.stockQuantity) || 0,
+          category: data.category || "General",
+          categorySlug: data.categorySlug || data.category?.toLowerCase().replace(/\s+/g, "-"),
+          imageUrl: data.imageUrl || "/images/placeholder.webp",
+          galleryImages: Array.isArray(data.galleryImages) ? data.galleryImages : [],
+          unit: data.unit || "kg",
+          sku: data.sku || "",
+          isFeatured: Boolean(data.isFeatured),
+          features: Array.isArray(data.features) ? data.features : [],
+          specifications: data.specifications || {},
+          suggestedProductIds: Array.isArray(data.suggestedProductIds) ? data.suggestedProductIds : [],
+          isActive: data.isActive !== false,
+          createdAt: data.createdAt || new Date().toISOString(),
+          updatedAt: data.updatedAt || new Date().toISOString(),
+        } as Product;
+      });
+    }
   } catch (error) {
-    console.error("Error fetching products from Firestore:", error);
-    return [];
+    console.warn("Direct Firestore products read failed/timed out, checking server products API:", error);
   }
+
+  // Resilient fallback to /api/admin/products
+  if (typeof window !== "undefined") {
+    try {
+      const res = await fetch("/api/admin/products", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.products) && data.products.length > 0) {
+          return data.products;
+        }
+      }
+    } catch (apiErr) {
+      console.warn("Products API fallback fetch error:", apiErr);
+    }
+  }
+
+  return [];
 }
 
 export async function saveProductToDb(
@@ -556,6 +608,37 @@ export async function saveProductToDb(
     }
     if (productData.price === undefined || isNaN(Number(productData.price)) || Number(productData.price) < 0) {
       return { success: false, error: "A valid non-negative product price is required." };
+    }
+
+    // Attempt authoritative server API save first if token exists
+    if (typeof window !== "undefined") {
+      try {
+        const token = await auth.currentUser?.getIdToken();
+        if (token) {
+          const res = await fetch("/api/admin/products", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              product: {
+                ...productData,
+                omitStock: options?.omitStock,
+              },
+            }),
+          });
+
+          if (res.ok) {
+            const resData = await res.json();
+            if (resData.success && resData.product) {
+              return { success: true, data: resData.product };
+            }
+          }
+        }
+      } catch (apiErr) {
+        console.warn("Server product save API unreachable, falling back to direct Firestore:", apiErr);
+      }
     }
 
     const productId = productData.id || doc(collection(db, "products")).id;
@@ -598,12 +681,15 @@ export async function saveProductToDb(
         isActive: productData.isActive !== false,
         updatedAt: now,
       };
-      if (productData.discountPrice !== undefined) {
-        updatePayload.discountPrice = Number(productData.discountPrice);
+      const rawDiscount: any = productData.discountPrice;
+      if (rawDiscount !== undefined && rawDiscount !== null && rawDiscount !== "" && !isNaN(Number(rawDiscount))) {
+        updatePayload.discountPrice = Number(rawDiscount);
+      } else if (rawDiscount === null || rawDiscount === "" || rawDiscount === 0) {
+        updatePayload.discountPrice = deleteField();
       }
 
       await withDbTimeout(
-        updateDoc(docRef, updatePayload),
+        updateDoc(docRef, cleanFirestoreData(updatePayload)),
         15000,
         "Failed to save product: Firestore operation timed out."
       );
@@ -619,13 +705,12 @@ export async function saveProductToDb(
     }
 
     // New products are always created with stockQuantity 0; initial positive stock is applied via inventory API
-    const newProduct: Product = {
+    const newProduct: any = {
       id: productId,
       name: productData.name.trim(),
       slug,
       description: productData.description?.trim() || "",
       price: Number(productData.price),
-      discountPrice: productData.discountPrice ? Number(productData.discountPrice) : undefined,
       stockQuantity: 0,
       category: productData.category?.trim() || "Industrial Chemicals",
       categorySlug:
@@ -650,13 +735,19 @@ export async function saveProductToDb(
       updatedAt: now,
     };
 
+    if (productData.discountPrice !== undefined && productData.discountPrice !== null && !isNaN(Number(productData.discountPrice))) {
+      newProduct.discountPrice = Number(productData.discountPrice);
+    }
+
+    const cleanedProduct = cleanFirestoreData(newProduct);
+
     await withDbTimeout(
-      setDoc(docRef, newProduct, { merge: true }),
+      setDoc(docRef, cleanedProduct, { merge: true }),
       15000,
       "Failed to save product: Firestore operation timed out."
     );
 
-    return { success: true, data: newProduct };
+    return { success: true, data: cleanedProduct as Product };
   } catch (error: any) {
     console.error("Error saving product to Firestore:", error);
     return {
@@ -781,10 +872,17 @@ export async function deleteProductFromDb(productId: string): Promise<MutationRe
 
 export async function getDashboardStats() {
   try {
-    const [ordersSnap, productsSnap, managersSnap] = await Promise.all([
+    const fetchPromise = Promise.all([
       getDocs(collection(db, "orders")),
       getDocs(collection(db, "products")),
       getDocs(query(collection(db, "users"), where("role", "==", "manager"))),
+    ]);
+
+    const [ordersSnap, productsSnap, managersSnap] = await Promise.race([
+      fetchPromise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Dashboard stats read timed out")), 2000)
+      ),
     ]);
 
     const orders = ordersSnap.docs.map((d) => d.data() as Order);
@@ -966,34 +1064,36 @@ export async function saveDiscountInDb(
       discount.id ||
       `disc_${discount.code.trim().toUpperCase().replace(/[^A-Z0-9]/g, "")}_${Date.now()}`;
 
-    const payload: DiscountCode = {
+    const payload: any = {
       id: docId,
       code: discount.code.trim().toUpperCase(),
       description: discount.description?.trim() || "",
       discountType: discount.discountType || "percentage",
       discountValue: Number(discount.discountValue),
-      minOrderAmount:
-        discount.minOrderAmount !== undefined && !isNaN(Number(discount.minOrderAmount))
-          ? Number(discount.minOrderAmount)
-          : undefined,
-      maxUsageLimit:
-        discount.maxUsageLimit !== undefined && !isNaN(Number(discount.maxUsageLimit))
-          ? Number(discount.maxUsageLimit)
-          : undefined,
       usageCount: Number(discount.usageCount) || 0,
       isActive: discount.isActive !== false,
-      expiryDate: discount.expiryDate || undefined,
       createdAt: discount.createdAt || new Date().toISOString(),
     };
 
+    if (discount.minOrderAmount !== undefined && discount.minOrderAmount !== null && !isNaN(Number(discount.minOrderAmount))) {
+      payload.minOrderAmount = Number(discount.minOrderAmount);
+    }
+    if (discount.maxUsageLimit !== undefined && discount.maxUsageLimit !== null && !isNaN(Number(discount.maxUsageLimit))) {
+      payload.maxUsageLimit = Number(discount.maxUsageLimit);
+    }
+    if (discount.expiryDate) {
+      payload.expiryDate = discount.expiryDate;
+    }
+
     const docRef = doc(db, "discounts", docId);
+    const cleanedPayload = cleanFirestoreData(payload);
     await withDbTimeout(
-      setDoc(docRef, payload, { merge: true }),
+      setDoc(docRef, cleanedPayload, { merge: true }),
       12000,
       "Failed to save discount: Firestore operation timed out."
     );
 
-    return { success: true, data: payload };
+    return { success: true, data: cleanedPayload as DiscountCode };
   } catch (error: any) {
     console.error("Error saving discount to Firestore:", error);
     return {
@@ -1158,10 +1258,17 @@ export async function incrementDiscountUsage(_code: string): Promise<void> {
 
 export async function getExecutiveGovernanceStats() {
   try {
-    const [ordersSnap, productsSnap, usersSnap] = await Promise.all([
+    const fetchPromise = Promise.all([
       getDocs(collection(db, "orders")),
       getDocs(collection(db, "products")),
       getDocs(collection(db, "users")),
+    ]);
+
+    const [ordersSnap, productsSnap, usersSnap] = await Promise.race([
+      fetchPromise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Executive governance stats read timed out")), 2000)
+      ),
     ]);
 
     const orders = ordersSnap.docs.map((d) => d.data() as Order);

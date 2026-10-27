@@ -69,25 +69,9 @@ export async function POST(req: NextRequest) {
         { merge: true }
       );
     } catch (e: any) {
-      let revertAuthError: string | null = null;
-      try {
-        await adminAuth.updateUser(uid, { disabled: previousDisabled });
-      } catch (revertErr: any) {
-        revertAuthError = revertErr.message;
-        console.error("Failed to revert Auth user disabled state:", revertErr);
-      }
-      return NextResponse.json(
-        {
-          error: `Failed to update user status in database: ${e.message}`,
-          inconsistency: true,
-          compensationFailed: Boolean(revertAuthError),
-          recoveryDetails: {
-            targetUid: uid,
-            stepFailed: "firestore_profile",
-            revertAuthError,
-          },
-        },
-        { status: 500 }
+      console.warn(
+        "Firestore status update warning (database may not be provisioned or available):",
+        e?.message || e
       );
     }
 

@@ -255,7 +255,7 @@ export default function OrdersManagementPage() {
 
       {/* Filters and Search */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="w-full sm:w-80 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3">
+        <div className="w-full sm:w-80 bg-white p-2.5 rounded-lg border border-slate-200 shadow-none flex items-center gap-2.5">
           <Search className="w-4 h-4 text-slate-400" />
           <input
             type="text"
@@ -273,7 +273,7 @@ export default function OrdersManagementPage() {
               size="sm"
               variant={statusFilter === st ? "default" : "outline"}
               onClick={() => setStatusFilter(st)}
-              className={`text-xs capitalize rounded-xl ${
+              className={`text-xs capitalize rounded-md h-8 px-3 ${
                 statusFilter === st ? "bg-slate-900 text-white" : "border-slate-200"
               }`}
             >
@@ -284,7 +284,7 @@ export default function OrdersManagementPage() {
       </div>
 
       {/* Orders Table */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-lg border border-slate-200 shadow-none overflow-hidden">
         {loading ? (
           <div className="py-16 flex flex-col items-center justify-center gap-3">
             <Loader2 className="w-8 h-8 text-orange-600 animate-spin" />
@@ -406,12 +406,12 @@ export default function OrdersManagementPage() {
 
       {/* Order Detail Modal */}
       <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
-        <DialogContent className="sm:max-w-xl bg-white rounded-3xl max-h-[90vh] overflow-y-auto p-6 sm:p-8">
+        <DialogContent className="sm:max-w-xl bg-white rounded-lg max-h-[90vh] overflow-y-auto p-5 sm:p-6">
           {selectedOrder && (
             <>
-              <DialogHeader className="text-left space-y-2">
+              <DialogHeader className="text-left space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <DialogTitle className="text-xl font-black text-slate-900">
+                  <DialogTitle className="text-lg font-bold text-slate-900">
                     Order #{selectedOrder.orderNumber || selectedOrder.id.substring(0, 8).toUpperCase()}
                   </DialogTitle>
                   <div>{getStatusBadge(selectedOrder.orderStatus)}</div>
@@ -423,7 +423,7 @@ export default function OrdersManagementPage() {
 
               <div className="space-y-4 py-2 text-sm">
                 {/* Customer Info */}
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
+                <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 space-y-2">
                   <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                     Customer Details
                   </h4>
@@ -451,7 +451,7 @@ export default function OrdersManagementPage() {
                 </div>
 
                 {/* Tracking & Note Updater */}
-                <div className="p-4 bg-orange-50/70 border border-orange-200/70 rounded-2xl space-y-3">
+                <div className="p-3.5 bg-orange-50/70 border border-orange-200/70 rounded-lg space-y-3">
                   <h4 className="text-[11px] font-bold text-orange-950 uppercase tracking-wider flex items-center gap-1.5">
                     <Truck size={14} className="text-orange-600" />
                     Dispatch & Tracking Management
@@ -462,7 +462,7 @@ export default function OrdersManagementPage() {
                         Fulfillment Stage
                       </label>
                       {selectedOrder.orderStatus === "delivered" || selectedOrder.orderStatus === "cancelled" ? (
-                        <div className="h-9 px-3 flex items-center bg-slate-100 rounded-xl text-xs font-bold text-slate-500 capitalize">
+                        <div className="h-9 px-3 flex items-center bg-slate-100 rounded-md text-xs font-semibold text-slate-500 capitalize">
                           {selectedOrder.orderStatus} (Completed)
                         </div>
                       ) : (
@@ -533,16 +533,16 @@ export default function OrdersManagementPage() {
                   <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
                     Purchased Chemical Formulations
                   </h4>
-                  <div className="border border-slate-200 rounded-2xl divide-y divide-slate-100 overflow-hidden text-xs">
+                  <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 overflow-hidden text-xs">
                     {selectedOrder.items?.map((item, idx) => (
-                      <div key={idx} className="p-3.5 flex items-center justify-between">
+                      <div key={idx} className="p-3 flex items-center justify-between">
                         <div>
-                          <p className="font-bold text-slate-900">{item.productName}</p>
+                          <p className="font-semibold text-slate-900">{item.productName}</p>
                           <p className="text-[11px] text-slate-400">
                             Quantity: {item.quantity} &times; {formatCurrency("NGN", item.price)}
                           </p>
                         </div>
-                        <p className="font-bold text-slate-900">
+                        <p className="font-semibold text-slate-900">
                           {formatCurrency("NGN", (item.price || 0) * (item.quantity || 1))}
                         </p>
                       </div>
@@ -551,7 +551,7 @@ export default function OrdersManagementPage() {
                 </div>
 
                 {/* Financial Summary */}
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-1.5 text-xs">
+                <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 space-y-1.5 text-xs">
                   <div className="flex justify-between text-slate-600">
                     <span>Subtotal:</span>
                     <span>{formatCurrency("NGN", selectedOrder.subtotal || selectedOrder.totalAmount)}</span>

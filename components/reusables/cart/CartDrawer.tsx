@@ -13,8 +13,10 @@ import { useCart } from "@/providers/CartProvider";
 import { CartItem } from "./CartItem";
 import { ShoppingCart } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
+
+const emptySubscribe = () => () => {};
 
 export function CartDrawer() {
   const {
@@ -26,12 +28,8 @@ export function CartDrawer() {
     isLoading,
     error,
   } = useCart();
-  const [isMounted, setIsMounted] = useState(false);
+  const isMounted = useSyncExternalStore(emptySubscribe, () => true, () => false);
   const router = useRouter();
-
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
 
   if (!isMounted) return null;
 

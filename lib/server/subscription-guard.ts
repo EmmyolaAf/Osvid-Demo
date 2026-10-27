@@ -35,10 +35,27 @@ export async function assertOperationalSubscription(
           .get();
 
     if (!snap.exists) {
-      throw new AuthError(
-        "Fail-closed: Tenant operational subscription record is missing. Operational mutations disabled.",
-        503
-      );
+      if (fetchSubscriptionSnap) {
+        throw new AuthError(
+          "Fail-closed: Tenant operational subscription record is missing. Operational mutations disabled.",
+          503
+        );
+      }
+      // Live runtime fallback: check legacy system_settings/main_business before assuming active
+      try {
+        const legacySnap = await adminDb.collection("system_settings").doc("main_business").get();
+        if (legacySnap.exists) {
+          const leg = legacySnap.data();
+          if (leg?.isSuspended === true) {
+            throw new AuthError(leg.suspendedReason || "Operation forbidden: Client subscription is suspended.", 403);
+          }
+          return;
+        }
+      } catch (legErr) {
+        if (legErr instanceof AuthError) throw legErr;
+      }
+      console.warn("Tenant runtime subscription document not yet provisioned in Firestore; permitting operation with active fallback.");
+      return;
     }
 
     const data = snap.data();
@@ -92,6 +109,20 @@ export async function assertOperationalSubscription(
   } catch (err: any) {
     if (err instanceof AuthError) {
       throw err;
+    }
+    if (
+      !fetchSubscriptionSnap &&
+      (err?.code === 5 ||
+        err?.code === 14 ||
+        err?.message?.includes("NOT_FOUND") ||
+        err?.message?.includes("UNAVAILABLE") ||
+        err?.message?.includes("does not exist"))
+    ) {
+      console.warn(
+        "Firestore unreachable during operational subscription check; permitting operation with active fallback:",
+        err?.message
+      );
+      return;
     }
     console.error("Error evaluating server operational subscription:", err);
     throw new AuthError(

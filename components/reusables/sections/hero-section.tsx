@@ -10,6 +10,7 @@ import "swiper/css";
 import "swiper/css/pagination";
 import "swiper/css/effect-fade";
 import Link from "next/link";
+import Image from "next/image";
 import { formatUniversalPhoneNumber } from "@/helpers/formatPhoneNumber";
 import companyData from "@/data/company";
 import { getSiteContent } from "@/lib/firebase/content";
@@ -32,13 +33,18 @@ export default function HeroSection() {
     return () => window.removeEventListener("osvid_content_updated", handleUpdate);
   }, []);
 
+  const primaryBtnOverride = siteContent.elements?.["hero-primary-btn"];
+  const badgeOverride = siteContent.elements?.["hero-badge"];
+  const headingOverride = siteContent.elements?.["hero-heading"];
+  const captionOverride = siteContent.elements?.["hero-caption"];
+
   const slides = [
     {
       image: "/images/bgs/new-hero-2.webp",
-      heading: `${siteContent.hero.titlePrimary} ${siteContent.hero.titleSecondary}`,
-      tagline: siteContent.hero.badge,
-      caption: siteContent.hero.description,
-      ctaText: siteContent.hero.primaryButtonText,
+      heading: headingOverride?.text || `${siteContent.hero.titlePrimary} ${siteContent.hero.titleSecondary}`,
+      tagline: badgeOverride?.text || siteContent.hero.badge,
+      caption: captionOverride?.text || siteContent.hero.description,
+      ctaText: primaryBtnOverride?.text || siteContent.hero.primaryButtonText,
       ctaLink: siteContent.hero.primaryButtonLink,
     },
     {
@@ -170,11 +176,12 @@ export default function HeroSection() {
             <div className="relative h-full w-full">
               {/* Background Image */}
               <div className="absolute inset-0 overflow-hidden">
-                <img
+                <Image
                   src={slide.image}
-                  alt=""
+                  alt={slide.heading || "Hero background image"}
+                  fill
+                  priority={index === 0}
                   className="w-full h-full object-cover"
-                  loading="eager"
                 />
                 <div className="absolute inset-0 bg-black/30" />
               </div>
@@ -208,7 +215,16 @@ export default function HeroSection() {
                       >
                         {/* Tagline */}
                         <motion.div variants={textVariants}>
-                          <span className="inline-block px-4 py-2 bg-white/10 backdrop-blur-sm rounded-full text-orange-300 font-medium text-sm tracking-wider border border-orange-300/30">
+                          <span
+                            data-editable-id="hero-badge"
+                            data-editable-name="Hero Tagline Badge"
+                            style={{
+                              color: badgeOverride?.textColor,
+                              backgroundColor: badgeOverride?.backgroundColor,
+                              borderRadius: badgeOverride?.borderRadius,
+                            }}
+                            className="inline-block px-4 py-2 bg-white/10 backdrop-blur-sm rounded-full text-orange-300 font-medium text-sm tracking-wider border border-orange-300/30 transition-all"
+                          >
                             {slides[currentRealIndex].tagline}
                           </span>
                         </motion.div>
@@ -216,6 +232,11 @@ export default function HeroSection() {
                         {/* Main Heading */}
                         <motion.h1
                           variants={textVariants}
+                          data-editable-id="hero-heading"
+                          data-editable-name="Hero Main Heading"
+                          style={{
+                            color: headingOverride?.textColor,
+                          }}
                           className="text-4xl sm:text-5xl md:text-6xl font-bold text-white leading-tight"
                         >
                           <span className="text-orange-400">
@@ -233,6 +254,11 @@ export default function HeroSection() {
                         {/* Caption */}
                         <motion.p
                           variants={textVariants}
+                          data-editable-id="hero-caption"
+                          data-editable-name="Hero Subtitle / Description"
+                          style={{
+                            color: captionOverride?.textColor,
+                          }}
                           className="text-lg md:text-xl text-white/90 leading-relaxed"
                         >
                           {slides[currentRealIndex].caption}
@@ -245,6 +271,13 @@ export default function HeroSection() {
                         >
                           <Button
                             asChild
+                            data-editable-id="hero-primary-btn"
+                            data-editable-name="Hero Primary Action Button"
+                            style={{
+                              color: primaryBtnOverride?.textColor,
+                              backgroundColor: primaryBtnOverride?.backgroundColor,
+                              borderRadius: primaryBtnOverride?.borderRadius,
+                            }}
                             className="h-14 px-8 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg text-lg hover:shadow-lg transition-all"
                           >
                             <Link href={slides[currentRealIndex].ctaLink}>
