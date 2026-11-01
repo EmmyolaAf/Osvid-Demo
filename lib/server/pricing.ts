@@ -307,7 +307,22 @@ export async function calculateAuthoritativeQuote(params: {
       Number(data.discountPrice) > 0 &&
       Number(data.discountPrice) < basePrice;
 
-    const unitPrice = hasDiscount ? Number(data.discountPrice) : basePrice;
+    let unitPrice = hasDiscount ? Number(data.discountPrice) : basePrice;
+
+    // Authoritative quantity tier evaluation
+    if (Array.isArray(data.pricingTiers) && data.pricingTiers.length > 0) {
+      const sorted = [...data.pricingTiers].sort((a: any, b: any) => a.minQuantity - b.minQuantity);
+      for (const t of sorted) {
+        if (item.quantity >= t.minQuantity && (!t.maxQuantity || item.quantity <= t.maxQuantity)) {
+          if (t.discountPercentage && Number(t.discountPercentage) > 0) {
+            const pct = Math.min(100, Math.max(0, Number(t.discountPercentage)));
+            unitPrice = Math.round(basePrice * (1 - pct / 100));
+          } else if (t.unitPrice && Number(t.unitPrice) > 0) {
+            unitPrice = Number(t.unitPrice);
+          }
+        }
+      }
+    }
     const lineTotal = unitPrice * item.quantity;
 
     productSnapshots.set(item.productId, snap);

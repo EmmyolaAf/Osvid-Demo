@@ -20,12 +20,6 @@ export const DEFAULT_MANAGER_PERMISSIONS: ManagerPermissions = {
   canManageDiscounts: false,
 };
 
-/**
- * Normalizes manager permissions with backward compatibility for documents created before canManageInventory was separated.
- * If canManageInventory is undefined:
- * If the legacy document explicitly granted canManageProducts: true, we assume they had inventory authority too (fallback to true).
- * If neither is defined, fallback to DEFAULT_MANAGER_PERMISSIONS.
- */
 export function normalizeManagerPermissions(
   perms?: Partial<ManagerPermissions> | null
 ): ManagerPermissions {
@@ -94,13 +88,13 @@ export interface UserProfile {
   uid: string;
   email: string;
   displayName: string;
-  customTitle?: string; // e.g. "Logistics Lead", "Operations Director"
+  customTitle?: string;
   phoneNumber?: string;
   photoURL?: string;
   role: UserRole;
   permissions?: ManagerPermissions;
-  isActive: boolean;
-  createdBy?: string; // UID of admin who created the account (e.g. for managers)
+  isActive?: boolean;
+  createdBy?: string;
   createdAt: string;
   lastLoginAt?: string;
 }
@@ -136,12 +130,23 @@ export interface DiscountCode {
   maxUsageLimit?: number;
   usageCount: number;
   reservedUsageCount?: number;
+  applicableProductIds?: string[];
   isActive: boolean;
   expiryDate?: string;
   createdAt: string;
 }
 
-export type OrderStatus = "pending" | "processing" | "shipped" | "delivered" | "cancelled";
+export type OrderStatus =
+  | "pending"
+  | "processing"
+  | "on-hold"
+  | "completed"
+  | "cancelled"
+  | "refunded"
+  | "failed"
+  | "shipped"
+  | "delivered";
+
 export type PaymentStatus = "pending" | "paid" | "failed" | "refunded";
 
 export interface OrderItem {
@@ -152,15 +157,21 @@ export interface OrderItem {
   quantity: number;
   imageUrl?: string;
   unit?: string;
+  variationId?: string;
+  variationAttributes?: Record<string, string>;
+  sku?: string;
+  taxAmount?: number;
 }
 
 export interface ShippingAddress {
-  fullName: string;
-  phone: string;
-  email: string;
-  address: string;
+  fullName?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  streetAddress?: string;
   city: string;
   state: string;
+  country?: string;
   postalCode?: string;
   notes?: string;
 }
@@ -183,17 +194,22 @@ export interface Order {
   userId?: string;
   customerName: string;
   customerEmail: string;
-  customerPhone: string;
+  customerPhone?: string;
   deliveryMethod: "pickup" | "delivery";
-  shippingAddress: ShippingAddress;
+  shippingAddress?: ShippingAddress;
+  billingAddress?: ShippingAddress;
   items: OrderItem[];
   subtotal: number;
   shippingFee: number;
+  taxAmount?: number;
+  taxRatePercent?: number;
   discountAmount?: number;
   couponCode?: string;
   totalAmount: number;
   paymentStatus: PaymentStatus;
+  paymentMethod?: string;
   orderStatus: OrderStatus;
+  internalNotes?: string;
   paystackReference?: string;
   trackingNumber?: string;
   notes?: string;
@@ -222,27 +238,135 @@ export interface ProductCategory {
   updatedAt: string;
 }
 
+export interface PricingTierItem {
+  minQuantity: number;
+  maxQuantity?: number;
+  discountPercentage: number;
+  unitPrice?: number;
+}
+
+export interface PricingTierGroup {
+  id: string;
+  name: string;
+  description?: string;
+  tiers: PricingTierItem[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export type ProductType = "simple" | "variable" | "grouped";
+
+export interface ProductAttribute {
+  id: string;
+  name: string;
+  values: string[];
+  visibleOnProductPage?: boolean;
+  usedForVariations?: boolean;
+}
+
+export interface ProductVariation {
+  id: string;
+  sku?: string;
+  price: number;
+  barcode?: string;
+  regularPrice?: number;
+  salePrice?: number;
+  saleStartDate?: string;
+  saleEndDate?: string;
+  stockQuantity: number;
+  stockStatus: "in_stock" | "out_of_stock" | "on_backorder" | "instock" | "outofstock";
+  manageStock?: boolean;
+  weight?: string;
+  dimensions?: string;
+  imageUrl?: string;
+  attributes: Record<string, string>;
+  isActive: boolean;
+  minPurchaseQuantity?: number;
+  maxPurchaseQuantity?: number;
+}
+
+export interface ProductReview {
+  id: string;
+  productId: string;
+  productName?: string;
+  userId?: string;
+  authorName: string;
+  authorEmail?: string;
+  rating: number;
+  title?: string;
+  comment?: string;
+  reviewText?: string;
+  status: "pending" | "approved" | "rejected";
+  isVerifiedPurchase?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface OrderNote {
+  id: string;
+  orderId: string;
+  content: string;
+  authorName: string;
+  isCustomerVisible: boolean;
+  createdAt: string;
+}
+
+export interface TaxSettings {
+  id?: string;
+  enableTax: boolean;
+  pricesIncludeTax: boolean;
+  taxRatePercent: number;
+  taxShipping: boolean;
+  displayPricesInShop: "inclusive" | "exclusive";
+  displayPricesInCart: "inclusive" | "exclusive";
+  updatedAt: string;
+}
+
 export interface Product {
   id: string;
   name: string;
   slug: string;
   description: string;
+  shortDescription?: string;
+  productType?: ProductType;
   price: number;
   discountPrice?: number;
+  saleStartDate?: string;
+  saleEndDate?: string;
   stockQuantity: number;
   reservedQuantity?: number;
+  manageStock?: boolean;
+  stockStatus?: "in_stock" | "out_of_stock" | "on_backorder";
+  allowBackorders?: "no" | "notify" | "yes";
+  lowStockThreshold?: number;
   category: string;
   categorySlug?: string;
   imageUrl: string;
   galleryImages?: string[];
   unit?: string;
   sku?: string;
+  barcode?: string;
+  weight?: string;
+  dimensions?: string;
   isFeatured?: boolean;
   features?: string[];
   specifications?: Record<string, string>;
+  tags?: string[];
   suggestedProductIds?: string[];
+  crossSellIds?: string[];
+  upsellIds?: string[];
+  groupedProductIds?: string[];
+  attributes?: ProductAttribute[];
+  variations?: ProductVariation[];
+  averageRating?: number;
+  reviewCount?: number;
+  taxStatus?: "taxable" | "shipping_only" | "none";
+  taxClass?: "standard" | "reduced" | "zero";
+  pricingTierId?: string;
+  pricingTierName?: string;
+  pricingTiers?: PricingTierItem[];
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }
-

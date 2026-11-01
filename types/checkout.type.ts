@@ -28,6 +28,8 @@ export interface CheckoutData {
   deliveryMethod: "shipping" | "pickup";
   contactInfo: ContactInfo;
   shippingAddress?: ShippingAddress;
+  billingAddress?: ShippingAddress;
+  sameAsShipping?: boolean;
   pickupLocationId?: string;
   paymentMethod?: string;
   paymentReference?: string;

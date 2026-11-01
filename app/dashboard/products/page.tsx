@@ -12,8 +12,14 @@ import {
   getCategoriesFromDb,
   saveCategoryToDb,
   deleteCategoryFromDb,
+  getPricingTiersFromDb,
+  duplicateProductInDb,
+  bulkUpdateProductsInDb,
+  bulkDeleteProductsInDb,
 } from "@/lib/firebase/firestore";
-import { Product, ProductCategory, normalizeManagerPermissions } from "@/types/auth";
+import { Product, ProductCategory, PricingTierGroup, ProductType, normalizeManagerPermissions } from "@/types/auth";
+import { ProductFormModal } from "@/components/dashboard/products/ProductFormModal";
+import { exportProductsToCSV, downloadCSV, parseCSVToProducts } from "@/lib/utils/product-csv";
 import { InventoryMovement, InventoryMovementType } from "@/types/inventory";
 import {
   Package,
@@ -40,6 +46,10 @@ import {
   FileText,
   Upload,
   Image as ImageIcon,
+  Copy,
+  Download,
+  FileSpreadsheet,
+  ListChecks,
 } from "lucide-react";
 import {
   uploadCatalogueImage,
@@ -69,6 +79,7 @@ export default function ProductsManagementPage() {
   // Data State
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [pricingTierGroups, setPricingTierGroups] = useState<PricingTierGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"products" | "categories">("products");
 
@@ -76,6 +87,10 @@ export default function ProductsManagementPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStock, setFilterStock] = useState<"all" | "low" | "out">("all");
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>("all");
+  const [productTypeFilter, setProductTypeFilter] = useState<"all" | "simple" | "variable" | "grouped">("all");
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importingCSV, setImportingCSV] = useState(false);
 
   // Product Modal State
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -94,6 +109,7 @@ export default function ProductsManagementPage() {
     description: "",
     featuresText: "",
     suggestedProductIds: [] as string[],
+    pricingTierId: "",
   });
 
   // Dedicated Adjust Stock Modal State
@@ -194,13 +210,15 @@ export default function ProductsManagementPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [fetchedProducts, fetchedCategories] = await Promise.all([
+      const [fetchedProducts, fetchedCategories, fetchedPricingTiers] = await Promise.all([
         getProductsFromDb(),
         getCategoriesFromDb(),
+        getPricingTiersFromDb(),
       ]);
 
       setProducts(fetchedProducts);
       setCategories(fetchedCategories);
+      setPricingTierGroups(fetchedPricingTiers);
     } catch (err: any) {
       console.error("Error loading products/categories:", err);
       toast.error(err?.message || "Failed to load catalog from database.");
@@ -226,6 +244,116 @@ export default function ProductsManagementPage() {
   // PRODUCT HANDLERS
   // ==========================================
 
+  // Duplicate Product
+  const handleDuplicateProduct = async (p: Product) => {
+    try {
+      toast.info(`Duplicating "${p.name}"...`);
+      const res = await duplicateProductInDb(p.id);
+      if (!res.success) {
+        toast.error(res.error || "Failed to duplicate product.");
+        return;
+      }
+      toast.success(`Product duplicated: "${res.data?.name}"`);
+      loadData();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to duplicate product.");
+    }
+  };
+
+  // Bulk Actions
+  const handleBulkAction = async (action: "active" | "draft" | "delete") => {
+    if (selectedProductIds.length === 0) return;
+
+    if (action === "delete") {
+      if (!window.confirm(`Are you sure you want to delete ${selectedProductIds.length} selected products?`)) {
+        return;
+      }
+      try {
+        toast.info("Deleting selected products...");
+        const res = await bulkDeleteProductsInDb(selectedProductIds);
+        if (!res.success) {
+          toast.error(res.error || "Failed to delete products.");
+          return;
+        }
+        toast.success(`Deleted ${selectedProductIds.length} products.`);
+        setSelectedProductIds([]);
+        loadData();
+      } catch (err: any) {
+        toast.error(err?.message || "Bulk delete failed.");
+      }
+      return;
+    }
+
+    try {
+      const isActive = action === "active";
+      const res = await bulkUpdateProductsInDb(selectedProductIds, { isActive });
+      if (!res.success) {
+        toast.error(res.error || "Failed to update products.");
+        return;
+      }
+      toast.success(`Updated ${selectedProductIds.length} products to ${isActive ? "Active" : "Draft"}.`);
+      setSelectedProductIds([]);
+      loadData();
+    } catch (err: any) {
+      toast.error(err?.message || "Bulk update failed.");
+    }
+  };
+
+  // Toggle select
+  const toggleSelectProduct = (id: string) => {
+    setSelectedProductIds((prev) =>
+      prev.includes(id) ? prev.filter((pId) => pId !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedProductIds.length === filteredProducts.length) {
+      setSelectedProductIds([]);
+    } else {
+      setSelectedProductIds(filteredProducts.map((p) => p.id));
+    }
+  };
+
+  // CSV Export & Import
+  const handleExportCSV = () => {
+    try {
+      const csv = exportProductsToCSV(products);
+      downloadCSV(csv, "merrylay-products-catalogue.csv");
+      toast.success("Products exported to CSV successfully!");
+    } catch (err: any) {
+      toast.error("Failed to export products to CSV.");
+    }
+  };
+
+  const handleImportCSVFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setImportingCSV(true);
+      const text = await file.text();
+      const parsed = parseCSVToProducts(text);
+      if (parsed.length === 0) {
+        toast.error("No valid product records found in CSV file.");
+        return;
+      }
+
+      let successCount = 0;
+      for (const item of parsed) {
+        const res = await saveProductToDb(item);
+        if (res.success) successCount++;
+      }
+
+      toast.success(`Successfully imported ${successCount} of ${parsed.length} products from CSV!`);
+      setIsImportModalOpen(false);
+      loadData();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to parse or import CSV.");
+    } finally {
+      setImportingCSV(false);
+    }
+  };
+
   const openAddProductModal = () => {
     setEditingProduct(null);
     const defaultCat = categories.length > 0 ? categories[0].name : "Industrial Chemicals";
@@ -241,6 +369,7 @@ export default function ProductsManagementPage() {
       description: "",
       featuresText: "",
       suggestedProductIds: [],
+      pricingTierId: "",
     });
     setIsProductModalOpen(true);
   };
@@ -259,8 +388,59 @@ export default function ProductsManagementPage() {
       description: p.description || "",
       featuresText: Array.isArray(p.features) ? p.features.join("\n") : "",
       suggestedProductIds: Array.isArray(p.suggestedProductIds) ? p.suggestedProductIds : [],
+      pricingTierId: p.pricingTierId || "",
     });
     setIsProductModalOpen(true);
+  };
+
+  const handleSaveProductFromModal = async (formData: any) => {
+    try {
+      setSubmittingProduct(true);
+      const isEditing = Boolean(editingProduct?.id);
+      const initialStock = canManageInventory ? (formData.stockQuantity || 0) : 0;
+
+      const result = await saveProductToDb(
+        {
+          id: editingProduct?.id,
+          ...formData,
+          stockQuantity: 0,
+          isActive: true,
+        },
+        { omitStock: isEditing }
+      );
+
+      if (!result.success) {
+        toast.error(result.error || "Failed to save product document in Firestore.");
+        return;
+      }
+
+      if (!isEditing && initialStock > 0 && canManageInventory && result.data?.id) {
+        const prodId = result.data.id;
+        const adjResult = await adjustProductStockViaApi(
+          prodId,
+          initialStock,
+          "initial_stock",
+          "Initial product stock recorded upon creation"
+        );
+        if (!adjResult.success) {
+          toast.warning(
+            `Product created with stock 0, but initial stock ledger entry failed: ${adjResult.error}.`
+          );
+        }
+      }
+
+      toast.success(
+        editingProduct
+          ? `Product "${result.data?.name}" updated successfully!`
+          : `Product "${result.data?.name}" added to live catalog!`
+      );
+      setIsProductModalOpen(false);
+      loadData();
+    } catch (err: any) {
+      toast.error(err?.message || "An unexpected database error occurred.");
+    } finally {
+      setSubmittingProduct(false);
+    }
   };
 
   const handleSaveProduct = async (e: React.FormEvent) => {
@@ -284,6 +464,9 @@ export default function ProductsManagementPage() {
 
       const isEditing = Boolean(editingProduct?.id);
       const initialStock = canManageInventory ? (parseInt(productForm.stockQuantity, 10) || 0) : 0;
+      const selectedTierGroup = pricingTierGroups.find(
+        (g) => g.id === productForm.pricingTierId
+      );
 
       const result = await saveProductToDb(
         {
@@ -299,6 +482,9 @@ export default function ProductsManagementPage() {
           description: productForm.description.trim(),
           features: featuresArray,
           suggestedProductIds: productForm.suggestedProductIds,
+          pricingTierId: selectedTierGroup ? selectedTierGroup.id : undefined,
+          pricingTierName: selectedTierGroup ? selectedTierGroup.name : undefined,
+          pricingTiers: selectedTierGroup ? selectedTierGroup.tiers : undefined,
           isActive: true,
         },
         { omitStock: isEditing }
@@ -579,6 +765,10 @@ export default function ProductsManagementPage() {
 
   // Filtered Products
   const filteredProducts = products.filter((p) => {
+    if (productTypeFilter !== "all" && (p.productType || "simple") !== productTypeFilter) {
+      return false;
+    }
+
     const matchesSearch =
       p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.category?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -810,7 +1000,24 @@ export default function ProductsManagementPage() {
                                 )}
                               </div>
                               <div>
-                                <p className="font-bold text-slate-900 text-xs sm:text-sm">{p.name}</p>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <p className="font-bold text-slate-900 text-xs sm:text-sm">{p.name}</p>
+                                  {p.productType === "variable" && (
+                                    <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-purple-100 text-purple-800">
+                                      Variable ({p.variations?.length || 0})
+                                    </span>
+                                  )}
+                                  {p.productType === "grouped" && (
+                                    <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-blue-100 text-blue-800">
+                                      Grouped
+                                    </span>
+                                  )}
+                                  {p.isActive === false && (
+                                    <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-slate-100 text-slate-600">
+                                      Draft
+                                    </span>
+                                  )}
+                                </div>
                                 <p className="text-[11px] text-slate-400 font-mono">
                                   {p.sku || "No SKU"} • {p.unit || "kg"}
                                 </p>
@@ -829,6 +1036,11 @@ export default function ProductsManagementPage() {
                             {p.discountPrice && (
                               <span className="block text-[10px] text-slate-400 line-through font-normal">
                                 {formatNaira(p.discountPrice)}
+                              </span>
+                            )}
+                            {p.pricingTierName && (
+                              <span className="block mt-1 text-[10px] font-semibold text-orange-700 bg-orange-100/80 border border-orange-200 px-1.5 py-0.5 rounded w-fit">
+                                Bulk: {p.pricingTierName}
                               </span>
                             )}
                           </td>
@@ -1055,303 +1267,53 @@ export default function ProductsManagementPage() {
       )}
 
       {/* ======================================================== */}
-      {/* PRODUCT ADD / EDIT MODAL */}
-      {/* ======================================================== */}
-      <Dialog open={isProductModalOpen} onOpenChange={setIsProductModalOpen}>
-        <DialogContent className="sm:max-w-2xl bg-white rounded-2xl max-h-[90vh] overflow-y-auto p-6">
+      {/* PRODUCT ADD / EDIT MODAL VIA MODERN COMPONENT */}
+      <ProductFormModal
+        isOpen={isProductModalOpen}
+        onClose={() => setIsProductModalOpen(false)}
+        onSave={handleSaveProductFromModal}
+        editingProduct={editingProduct}
+        categories={categories}
+        pricingTierGroups={pricingTierGroups}
+        allProducts={products}
+        canManageInventory={canManageInventory}
+        submitting={submittingProduct}
+      />
+
+      {/* CSV IMPORT MODAL */}
+      <Dialog open={isImportModalOpen} onOpenChange={setIsImportModalOpen}>
+        <DialogContent className="sm:max-w-md bg-white rounded-2xl p-6">
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold text-slate-900 flex items-center gap-2">
-              <Package className="text-orange-600 w-5 h-5" />
-              {editingProduct ? "Edit Chemical Product" : "Add New Chemical Product"}
+            <DialogTitle className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <FileSpreadsheet className="text-orange-600 w-5 h-5" />
+              Import Products from CSV
             </DialogTitle>
             <DialogDescription className="text-xs text-slate-500">
-              Directly saves to Firestore <span className="font-mono font-bold">products</span> collection.
+              Upload a structured CSV file containing product names, categories, prices, units, and SKUs.
             </DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handleSaveProduct} className="space-y-4 pt-2">
-            <div>
-              <Label className="text-xs font-bold text-slate-700">Product Name *</Label>
-              <Input
-                required
-                placeholder="e.g. Industrial Sulfuric Acid 98%"
-                value={productForm.name}
-                onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
-                className="mt-1 h-10 rounded-xl text-sm"
+          <div className="space-y-4 py-3">
+            <div className="border border-dashed border-slate-300 rounded-2xl p-6 text-center hover:bg-slate-50/50 transition-colors">
+              <Upload className="w-8 h-8 text-orange-600 mx-auto mb-2" />
+              <p className="text-xs font-semibold text-slate-800">Choose CSV File to Import</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">Supports CSV files exported from WooCommerce, Shopify, or Excel</p>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                disabled={importingCSV}
+                onChange={handleImportCSVFile}
+                className="mt-4 text-xs mx-auto block file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100"
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <Label className="text-xs font-bold text-slate-700">Category *</Label>
-                <select
-                  value={productForm.category}
-                  onChange={(e) => setProductForm({ ...productForm, category: e.target.value })}
-                  className="mt-1 w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium outline-none focus:border-orange-500"
-                  required
-                >
-                  {categories.map((cat) => (
-                    <option key={cat.id} value={cat.name}>
-                      {cat.name}
-                    </option>
-                  ))}
-                  {categories.length === 0 && (
-                    <option value="Industrial Chemicals">Industrial Chemicals</option>
-                  )}
-                </select>
+            {importingCSV && (
+              <div className="flex items-center justify-center gap-2 text-xs text-orange-700 bg-orange-50 p-3 rounded-xl">
+                <Loader2 size={14} className="animate-spin" />
+                <span>Parsing and creating product documents in Firestore...</span>
               </div>
-
-              <div>
-                <Label className="text-xs font-bold text-slate-700">Measurement Unit</Label>
-                <Input
-                  placeholder="kg, Litres, Drums, Bags"
-                  value={productForm.unit}
-                  onChange={(e) => setProductForm({ ...productForm, unit: e.target.value })}
-                  className="mt-1 h-10 rounded-xl text-sm"
-                />
-              </div>
-
-              <div>
-                <Label className="text-xs font-bold text-slate-700">SKU Code</Label>
-                <Input
-                  placeholder="SKU-88210"
-                  value={productForm.sku}
-                  onChange={(e) => setProductForm({ ...productForm, sku: e.target.value })}
-                  className="mt-1 h-10 rounded-xl text-sm font-mono uppercase"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <Label className="text-xs font-bold text-slate-700">Unit Price (NGN) *</Label>
-                <Input
-                  type="number"
-                  required
-                  min={0}
-                  placeholder="50000"
-                  value={productForm.price}
-                  onChange={(e) => setProductForm({ ...productForm, price: e.target.value })}
-                  className="mt-1 h-10 rounded-xl text-sm font-bold"
-                />
-              </div>
-
-              <div>
-                <Label className="text-xs font-bold text-slate-700">Discounted Price (NGN)</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  placeholder="Optional promo price"
-                  value={productForm.discountPrice}
-                  onChange={(e) => setProductForm({ ...productForm, discountPrice: e.target.value })}
-                  className="mt-1 h-10 rounded-xl text-sm"
-                />
-              </div>
-
-              <div>
-                <Label className="text-xs font-bold text-slate-700">
-                  {editingProduct ? "Current Stock Units (Read-only)" : "Initial Stock Units *"}
-                </Label>
-                <Input
-                  type="number"
-                  required
-                  min={0}
-                  placeholder={canManageInventory ? "50" : "0"}
-                  value={
-                    editingProduct
-                      ? (editingProduct.stockQuantity ?? 0).toString()
-                      : (canManageInventory ? productForm.stockQuantity : "0")
-                  }
-                  disabled={Boolean(editingProduct) || !canManageInventory}
-                  onChange={(e) => setProductForm({ ...productForm, stockQuantity: e.target.value })}
-                  className={`mt-1 h-10 rounded-xl text-sm ${
-                    editingProduct || !canManageInventory
-                      ? "bg-slate-100 text-slate-500 cursor-not-allowed"
-                      : ""
-                  }`}
-                />
-                {editingProduct ? (
-                  <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1 font-medium">
-                    <Lock size={12} /> Stock is read-only in product editing. Use Adjust Stock / quick controls to record ledger movements.
-                  </p>
-                ) : !canManageInventory ? (
-                  <p className="text-[11px] text-amber-600 mt-1 flex items-center gap-1 font-medium">
-                    <Lock size={12} /> Stock initialization requires Inventory authority. Product will be created with stock 0.
-                  </p>
-                ) : (
-                  <p className="text-[11px] text-emerald-600 mt-1 flex items-center gap-1 font-medium">
-                    Initial stock will be recorded in the immutable inventory ledger upon creation.
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div>
-              <Label className="text-xs font-bold text-slate-700">Product Image</Label>
-              <div className="mt-1 space-y-2">
-                {productForm.imageUrl && (
-                  <div className="flex items-center gap-3 p-2 bg-slate-50 border border-slate-200 rounded-xl">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={productForm.imageUrl}
-                      alt="Product Preview"
-                      className="w-14 h-14 object-cover rounded-lg border border-slate-200 bg-white"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = "/images/placeholder.webp";
-                      }}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-slate-800 truncate">
-                        {productForm.imageUrl}
-                      </p>
-                      <p className="text-[10px] text-slate-500">
-                        {isOwnedStorageUrl(productForm.imageUrl)
-                          ? "Managed Firebase Storage Object"
-                          : "External or catalogue URL"}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex items-center gap-2">
-                  <label className="flex-1 cursor-pointer">
-                    <div className="flex items-center justify-center gap-2 px-3 py-2 border border-dashed border-slate-300 rounded-xl hover:border-orange-500 hover:bg-orange-50/50 transition text-xs font-medium text-slate-600">
-                      {productImageUploading ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin text-orange-600" />
-                          <span>Uploading to Firebase Storage ({productImageProgress}%)...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Upload className="w-4 h-4 text-orange-600" />
-                          <span>Upload Local Image (JPEG, PNG, WebP &le; 5 MB)</span>
-                        </>
-                      )}
-                    </div>
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      disabled={productImageUploading}
-                      onChange={handleProductImageUpload}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-
-                <div>
-                  <Label className="text-[11px] text-slate-500">Or use an existing image URL:</Label>
-                  <Input
-                    placeholder="https://..."
-                    value={productForm.imageUrl}
-                    onChange={(e) => setProductForm({ ...productForm, imageUrl: e.target.value })}
-                    className="mt-0.5 h-9 rounded-xl text-xs font-mono"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <Label className="text-xs font-bold text-slate-700">Product Description</Label>
-              <textarea
-                rows={3}
-                placeholder="Industrial chemical specifications, grade, and handling instructions..."
-                value={productForm.description}
-                onChange={(e) => setProductForm({ ...productForm, description: e.target.value })}
-                className="mt-1 w-full rounded-xl border border-slate-200 p-3 text-xs text-slate-800 outline-none focus:border-orange-500"
-              />
-            </div>
-
-            <div>
-              <Label className="text-xs font-bold text-slate-700">Key Features (1 per line)</Label>
-              <textarea
-                rows={2}
-                placeholder="99.5% Purity Grade&#10;Corrosion Resistant Formulation&#10;ISO 9001 Certified Quality"
-                value={productForm.featuresText}
-                onChange={(e) => setProductForm({ ...productForm, featuresText: e.target.value })}
-                className="mt-1 w-full rounded-xl border border-slate-200 p-3 text-xs text-slate-800 outline-none focus:border-orange-500"
-              />
-            </div>
-
-            {/* Suggested / Cross-Sell Products Multi-Selector */}
-            <div className="border-t border-slate-100 pt-3">
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <Label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                    <LinkIcon size={14} className="text-orange-600" />
-                    Suggested &amp; Cross-Sell Products
-                  </Label>
-                  <p className="text-[11px] text-slate-400">
-                    Select related chemical items to recommend on this product&apos;s detail page
-                  </p>
-                </div>
-                <span className="text-[11px] font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-md">
-                  {productForm.suggestedProductIds.length} selected
-                </span>
-              </div>
-
-              <div className="max-h-36 overflow-y-auto border border-slate-200 rounded-xl p-2 space-y-1.5 bg-slate-50/50">
-                {products
-                  .filter((p) => p.id !== editingProduct?.id)
-                  .map((p) => {
-                    const isSelected = productForm.suggestedProductIds.includes(p.id);
-                    return (
-                      <div
-                        key={p.id}
-                        onClick={() => toggleSuggestedProduct(p.id)}
-                        className={`flex items-center justify-between p-2 rounded-lg cursor-pointer text-xs transition-all ${
-                          isSelected
-                            ? "bg-orange-50 border border-orange-200 text-orange-950 font-bold"
-                            : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-100"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => {}} // handled by parent onClick
-                            className="rounded text-orange-600 focus:ring-0"
-                          />
-                          <span>{p.name}</span>
-                        </div>
-                        <span className="text-[10px] text-slate-500 font-mono">
-                          {formatNaira(p.price)}
-                        </span>
-                      </div>
-                    );
-                  })}
-                {products.filter((p) => p.id !== editingProduct?.id).length === 0 && (
-                  <p className="text-xs text-slate-400 text-center py-2">
-                    No other products available in catalog to link.
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setIsProductModalOpen(false)}
-                disabled={submittingProduct}
-                className="rounded-xl text-xs"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={submittingProduct}
-                className="bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs rounded-xl shadow-md shadow-orange-600/20 px-5"
-              >
-                {submittingProduct ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : editingProduct ? (
-                  "Update Product"
-                ) : (
-                  "Create Product"
-                )}
-              </Button>
-            </div>
-          </form>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 

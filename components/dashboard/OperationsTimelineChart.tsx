@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from "react";
 import { Order } from "@/types/auth";
 import formatCurrency from "@/helpers/formatCurrency";
+import { TrendingUp, ShoppingBag, Calendar, BarChart2 } from "lucide-react";
 
 interface OperationsTimelineChartProps {
   orders: Order[];
@@ -10,10 +11,10 @@ interface OperationsTimelineChartProps {
 
 export default function OperationsTimelineChart({ orders }: OperationsTimelineChartProps) {
   const [metric, setMetric] = useState<"revenue" | "orders">("revenue");
-  const [rangeDays, setRangeDays] = useState<7 | 14>(7);
+  const [rangeDays, setRangeDays] = useState<7 | 14 | 30>(14);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
-  // Group orders into daily buckets
+  // Group orders into daily buckets based on selected range
   const chartData = useMemo(() => {
     const days: { date: string; label: string; revenue: number; orders: number }[] = [];
     const now = new Date();
@@ -24,7 +25,6 @@ export default function OperationsTimelineChart({ orders }: OperationsTimelineCh
       const dateKey = d.toISOString().split("T")[0];
       const label = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
-      // Match orders placed on this day
       const dayOrders = orders.filter((o) => {
         if (!o.createdAt) return false;
         const oDate = new Date(o.createdAt).toISOString().split("T")[0];
@@ -44,14 +44,34 @@ export default function OperationsTimelineChart({ orders }: OperationsTimelineCh
     return days;
   }, [orders, rangeDays]);
 
-  // Determine scale
+  // Aggregate metrics for summary header
+  const totalInWindow = useMemo(() => {
+    return chartData.reduce(
+      (acc, d) => ({
+        revenue: acc.revenue + d.revenue,
+        orders: acc.orders + d.orders,
+      }),
+      { revenue: 0, orders: 0 }
+    );
+  }, [chartData]);
+
+  const peakInWindow = useMemo(() => {
+    const values = chartData.map((d) => (metric === "revenue" ? d.revenue : d.orders));
+    return Math.max(...values, 0);
+  }, [chartData, metric]);
+
+  const dailyAvg = useMemo(() => {
+    const total = metric === "revenue" ? totalInWindow.revenue : totalInWindow.orders;
+    return Math.round(total / (rangeDays || 1));
+  }, [totalInWindow, metric, rangeDays]);
+
+  // SVG Dimension Calculations
   const values = chartData.map((d) => (metric === "revenue" ? d.revenue : d.orders));
   const rawMax = Math.max(...values, metric === "revenue" ? 100000 : 5);
-  // Round max value up for nice ceiling
   const maxVal = metric === "revenue" ? Math.ceil(rawMax / 50000) * 50000 : Math.ceil(rawMax / 5) * 5;
 
-  const width = 640;
-  const height = 210;
+  const width = 800;
+  const height = 240;
   const padLeft = 60;
   const padRight = 20;
   const padTop = 25;
@@ -67,7 +87,7 @@ export default function OperationsTimelineChart({ orders }: OperationsTimelineCh
     return { x, y, ...d, value: val };
   });
 
-  // Build SVG path
+  // Smooth bezier curve generator
   const pathD = points.reduce((acc, p, i) => {
     if (i === 0) return `M ${p.x} ${p.y}`;
     const prev = points[i - 1];
@@ -94,87 +114,116 @@ export default function OperationsTimelineChart({ orders }: OperationsTimelineCh
     return `₦${val}`;
   };
 
-  const strokeColor = metric === "revenue" ? "#ea580c" : "#2563eb";
+  const primaryColor = metric === "revenue" ? "#ea580c" : "#2563eb";
+  const lightFillColor = metric === "revenue" ? "#fff7ed" : "#eff6ff";
 
   return (
-    <div className="bg-white rounded-lg border border-slate-200 p-5">
+    <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-xs">
       {/* Chart Top Header & Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
         <div>
           <div className="flex items-center gap-2">
-            <span
-              className="w-2.5 h-2.5 rounded-full"
-              style={{ backgroundColor: strokeColor }}
-            />
-            <h3 className="text-sm font-semibold text-slate-900">
-              {metric === "revenue" ? "Sales & Revenue Trajectory" : "Order Volume Velocity"}
-            </h3>
+            <span className="text-xs font-black uppercase tracking-wider text-slate-400">
+              Performance Analytics
+            </span>
+            <span className="text-[10px] font-bold text-orange-700 bg-orange-50 px-2 py-0.5 rounded-full">
+              Live Verified
+            </span>
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Operational trend line based on verified store checkouts
-          </p>
+          <h2 className="text-lg font-black text-slate-900 tracking-tight mt-0.5">
+            {metric === "revenue" ? "Store Sales Velocity" : "Order Volume Trajectory"}
+          </h2>
         </div>
 
-        {/* Flat Buttons Controls */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <div className="bg-slate-100 p-0.5 rounded-md flex items-center border border-slate-200 text-xs font-medium">
+        {/* Metric Selector & Date Range Tabs */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Metric Pill Toggle */}
+          <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold text-slate-600">
             <button
               onClick={() => setMetric("revenue")}
-              className={`px-2.5 py-1 rounded text-xs transition-colors cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg transition-all ${
                 metric === "revenue"
-                  ? "bg-white text-slate-900 shadow-xs font-semibold"
-                  : "text-slate-600 hover:text-slate-900"
+                  ? "bg-white text-slate-900 shadow-xs"
+                  : "hover:text-slate-900"
               }`}
             >
               Revenue (₦)
             </button>
             <button
               onClick={() => setMetric("orders")}
-              className={`px-2.5 py-1 rounded text-xs transition-colors cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg transition-all ${
                 metric === "orders"
-                  ? "bg-white text-slate-900 shadow-xs font-semibold"
-                  : "text-slate-600 hover:text-slate-900"
+                  ? "bg-white text-slate-900 shadow-xs"
+                  : "hover:text-slate-900"
               }`}
             >
-              Orders
+              Order Count
             </button>
           </div>
 
-          <div className="bg-slate-100 p-0.5 rounded-md flex items-center border border-slate-200 text-xs font-medium">
-            <button
-              onClick={() => setRangeDays(7)}
-              className={`px-2 py-1 rounded text-xs transition-colors cursor-pointer ${
-                rangeDays === 7
-                  ? "bg-white text-slate-900 shadow-xs font-semibold"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              7D
-            </button>
-            <button
-              onClick={() => setRangeDays(14)}
-              className={`px-2 py-1 rounded text-xs transition-colors cursor-pointer ${
-                rangeDays === 14
-                  ? "bg-white text-slate-900 shadow-xs font-semibold"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              14D
-            </button>
+          {/* Date Range Tabs */}
+          <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold text-slate-600">
+            {[7, 14, 30].map((days) => (
+              <button
+                key={days}
+                onClick={() => setRangeDays(days as any)}
+                className={`px-2.5 py-1.5 rounded-lg transition-all ${
+                  rangeDays === days
+                    ? "bg-slate-900 text-white shadow-xs"
+                    : "hover:text-slate-900"
+                }`}
+              >
+                {days}D
+              </button>
+            ))}
           </div>
         </div>
       </div>
 
-      {/* SVG Chart Area */}
-      <div className="relative w-full overflow-hidden select-none">
+      {/* Snapshot Summary Cards */}
+      <div className="grid grid-cols-3 gap-3 py-4 border-b border-slate-100 text-xs">
+        <div>
+          <span className="text-[11px] font-semibold text-slate-400">Period Total</span>
+          <p className="text-sm font-black text-slate-900 mt-0.5">
+            {metric === "revenue"
+              ? formatCurrency("NGN", totalInWindow.revenue)
+              : `${totalInWindow.orders} orders`}
+          </p>
+        </div>
+        <div>
+          <span className="text-[11px] font-semibold text-slate-400">Daily Average</span>
+          <p className="text-sm font-black text-slate-900 mt-0.5">
+            {metric === "revenue"
+              ? formatCurrency("NGN", dailyAvg)
+              : `${dailyAvg} orders/day`}
+          </p>
+        </div>
+        <div>
+          <span className="text-[11px] font-semibold text-slate-400">Peak Single Day</span>
+          <p className="text-sm font-black text-slate-900 mt-0.5">
+            {metric === "revenue"
+              ? formatCurrency("NGN", peakInWindow)
+              : `${peakInWindow} orders`}
+          </p>
+        </div>
+      </div>
+
+      {/* SVG Responsive Chart Viewport */}
+      <div className="relative pt-4">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="w-full h-48 sm:h-56 overflow-visible"
-          preserveAspectRatio="none"
+          className="w-full h-auto overflow-visible select-none"
         >
-          {/* Horizontal Grid lines */}
-          {gridLevels.map((g, idx) => {
-            const y = padTop + chartH * (1 - g.ratio);
+          <defs>
+            <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={primaryColor} stopOpacity="0.18" />
+              <stop offset="100%" stopColor={primaryColor} stopOpacity="0.0" />
+            </linearGradient>
+          </defs>
+
+          {/* Grid lines and Y-axis labels */}
+          {gridLevels.map((lvl, idx) => {
+            const y = padTop + chartH * (1 - lvl.ratio);
             return (
               <g key={idx}>
                 <line
@@ -182,90 +231,121 @@ export default function OperationsTimelineChart({ orders }: OperationsTimelineCh
                   y1={y}
                   x2={width - padRight}
                   y2={y}
-                  stroke="#e2e8f0"
-                  strokeDasharray="3 3"
+                  stroke="#f1f5f9"
                   strokeWidth="1"
+                  strokeDasharray={idx === 2 ? "" : "4 4"}
                 />
                 <text
-                  x={padLeft - 8}
+                  x={padLeft - 10}
                   y={y + 4}
                   textAnchor="end"
-                  className="text-[10px] fill-slate-400 font-sans"
+                  fill="#94a3b8"
+                  fontSize="11"
+                  fontFamily="sans-serif"
+                  fontWeight="600"
                 >
-                  {formatYAxis(g.val)}
+                  {formatYAxis(lvl.val)}
                 </text>
               </g>
             );
           })}
 
           {/* Area Fill */}
-          <path d={areaD} fill={strokeColor} fillOpacity="0.08" />
+          <path d={areaD} fill="url(#areaGradient)" />
 
           {/* Line Stroke */}
           <path
             d={pathD}
             fill="none"
-            stroke={strokeColor}
+            stroke={primaryColor}
             strokeWidth="2.5"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
 
-          {/* Data Points and Interaction Circles */}
-          {points.map((p, idx) => {
-            const isHovered = hoveredIdx === idx;
-            return (
-              <g
-                key={idx}
-                onMouseEnter={() => setHoveredIdx(idx)}
-                onMouseLeave={() => setHoveredIdx(null)}
-                className="cursor-pointer"
-              >
-                {/* Target hover area */}
-                <circle cx={p.x} cy={p.y} r="16" fill="transparent" />
+          {/* Interactive Data Points and X-Axis Labels */}
+          {points.map((p, i) => {
+            const isHovered = hoveredIdx === i;
+            const showLabel =
+              rangeDays === 7 ||
+              (rangeDays === 14 && i % 2 === 0) ||
+              (rangeDays === 30 && i % 4 === 0) ||
+              i === points.length - 1;
 
-                {/* Point dot */}
+            return (
+              <g key={i}>
+                {/* X Axis Label */}
+                {showLabel && (
+                  <text
+                    x={p.x}
+                    y={height - 8}
+                    textAnchor="middle"
+                    fill="#94a3b8"
+                    fontSize="10"
+                    fontFamily="sans-serif"
+                    fontWeight="600"
+                  >
+                    {p.label}
+                  </text>
+                )}
+
+                {/* Vertical hover guide */}
+                {isHovered && (
+                  <line
+                    x1={p.x}
+                    y1={padTop}
+                    x2={p.x}
+                    y2={padTop + chartH}
+                    stroke="#cbd5e1"
+                    strokeWidth="1"
+                    strokeDasharray="3 3"
+                  />
+                )}
+
+                {/* Point circle */}
                 <circle
                   cx={p.x}
                   cy={p.y}
-                  r={isHovered ? 5.5 : 3.5}
-                  fill="#ffffff"
-                  stroke={strokeColor}
-                  strokeWidth={isHovered ? "3" : "2"}
-                  className="transition-all duration-150"
+                  r={isHovered ? 6 : 3.5}
+                  fill={isHovered ? primaryColor : "#ffffff"}
+                  stroke={primaryColor}
+                  strokeWidth={isHovered ? 3 : 2}
+                  className="transition-all duration-150 cursor-pointer"
                 />
 
-                {/* X-axis date label */}
-                <text
-                  x={p.x}
-                  y={height - 8}
-                  textAnchor="middle"
-                  className={`text-[10px] font-sans ${
-                    isHovered ? "fill-slate-900 font-bold" : "fill-slate-400"
-                  }`}
-                >
-                  {p.label}
-                </text>
+                {/* Transparent hit area for easy hover */}
+                <rect
+                  x={p.x - 12}
+                  y={padTop}
+                  width="24"
+                  height={chartH + 20}
+                  fill="transparent"
+                  onMouseEnter={() => setHoveredIdx(i)}
+                  onMouseLeave={() => setHoveredIdx(null)}
+                  className="cursor-pointer"
+                />
               </g>
             );
           })}
         </svg>
 
-        {/* Hover Tooltip Popup */}
+        {/* Hover Tooltip Card */}
         {hoveredIdx !== null && points[hoveredIdx] && (
           <div
-            className="absolute pointer-events-none z-20 bg-slate-900 text-white px-3 py-2 rounded-md shadow-md text-xs border border-slate-700 whitespace-nowrap -translate-x-1/2 -translate-y-full transition-all"
+            className="absolute z-10 pointer-events-none transform -translate-x-1/2 -translate-y-full mb-3 bg-slate-900 text-white p-3 rounded-xl shadow-xl text-xs space-y-1 animate-in fade-in zoom-in-95 duration-100"
             style={{
               left: `${(points[hoveredIdx].x / width) * 100}%`,
-              top: `${(points[hoveredIdx].y / height) * 100 - 10}%`,
+              top: `${(points[hoveredIdx].y / height) * 100}%`,
             }}
           >
-            <p className="text-[10px] text-slate-400 font-medium">{points[hoveredIdx].label}</p>
-            <p className="font-bold text-white text-xs mt-0.5">
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+              {points[hoveredIdx].label}
+            </p>
+            <p className="font-extrabold text-sm text-orange-400">
               {formatCurrency("NGN", points[hoveredIdx].revenue)}
             </p>
-            <p className="text-[10px] text-slate-300">
-              {points[hoveredIdx].orders} {points[hoveredIdx].orders === 1 ? "order" : "orders"}
+            <p className="text-[11px] text-slate-300">
+              {points[hoveredIdx].orders} completed {points[hoveredIdx].orders === 1 ? "order" : "orders"}
             </p>
           </div>
         )}

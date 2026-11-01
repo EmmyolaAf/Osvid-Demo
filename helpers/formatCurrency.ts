@@ -1,8 +1,23 @@
-const formatCurrency = (currency: string = "NGN", amount: number) =>
-  new Intl.NumberFormat(currency === "NGN" ? "en-NG" : undefined, {
+export function formatCurrency(
+  currencyOrAmount: string | number = "NGN",
+  maybeAmount?: number
+): string {
+  let currency = "NGN";
+  let amount = 0;
+
+  if (typeof currencyOrAmount === "number") {
+    amount = currencyOrAmount;
+    currency = "NGN";
+  } else {
+    currency = currencyOrAmount || "NGN";
+    amount = maybeAmount !== undefined ? maybeAmount : 0;
+  }
+
+  return new Intl.NumberFormat(currency === "NGN" ? "en-NG" : undefined, {
     style: "currency",
     currency,
-    maximumFractionDigits: 0, // Ensures no decimal places
-  }).format(amount);
+    maximumFractionDigits: 0,
+  }).format(amount || 0);
+}
 
 export default formatCurrency;

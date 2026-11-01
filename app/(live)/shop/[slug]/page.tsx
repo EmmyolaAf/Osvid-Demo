@@ -2,6 +2,7 @@
 import { Metadata } from "next";
 import { getProductBySlug } from "@/lib/server/storefront";
 import ProductDetailsClient from "./client";
+import ProductReviewsSection from "@/components/reusables/reviews/ProductReviewsSection";
 import TrustBuildingSection from "@/components/reusables/sections/TrustBuildingSection";
 import CTASection from "@/components/reusables/sections/cta";
 import PageHeader from "@/components/reusables/PageHeader";
@@ -99,6 +100,7 @@ export default async function ProductDetailsPage({
 
       <section className="container mx-auto py-10 px-4 sm:px-6">
         <ProductDetailsClient product={product} />
+        <ProductReviewsSection productId={product.id} productName={product.name} />
       </section>
 
       <TrustBuildingSection />

@@ -1,4 +1,3 @@
-// providers/CartProvider.tsx
 "use client";
 
 import {
@@ -9,6 +8,7 @@ import {
   useCallback,
   useMemo,
 } from "react";
+import { PricingTierItem } from "@/types/auth";
 
 // Standardized type definitions
 type PriceData = {
@@ -28,8 +28,68 @@ export type CartItem = {
   quantity: number;
   imageUrl: string;
   variant?: string;
+  variationId?: string;
+  variationAttributes?: Record<string, string>;
+  sku?: string;
   priceData: PriceData;
+  pricingTierId?: string;
+  pricingTierName?: string;
+  pricingTiers?: PricingTierItem[];
 };
+
+export function getEffectiveCartItemPrice(item: CartItem): {
+  unitPrice: number;
+  baseUnitPrice: number;
+  appliedTier?: PricingTierItem;
+  discountPercentage: number;
+} {
+  const basePrice = item.priceData.discountedPrice ?? item.priceData.price;
+  const tiers = Array.isArray(item.pricingTiers) ? item.pricingTiers : [];
+
+  if (tiers.length === 0) {
+    return {
+      unitPrice: basePrice,
+      baseUnitPrice: basePrice,
+      discountPercentage: 0,
+    };
+  }
+
+  const eligibleTiers = tiers.filter((t) => {
+    if (typeof t.minQuantity === "number" && item.quantity < t.minQuantity) {
+      return false;
+    }
+    if (typeof t.maxQuantity === "number" && t.maxQuantity > 0 && item.quantity > t.maxQuantity) {
+      return false;
+    }
+    return true;
+  });
+
+  if (eligibleTiers.length === 0) {
+    return {
+      unitPrice: basePrice,
+      baseUnitPrice: basePrice,
+      discountPercentage: 0,
+    };
+  }
+
+  const sorted = [...eligibleTiers].sort((a, b) => (b.discountPercentage || 0) - (a.discountPercentage || 0));
+  const bestTier = sorted[0];
+
+  let unitPrice = basePrice;
+  if (bestTier.discountPercentage && Number(bestTier.discountPercentage) > 0) {
+    const pct = Math.min(100, Math.max(0, Number(bestTier.discountPercentage)));
+    unitPrice = Math.round(basePrice * (1 - pct / 100));
+  } else if (bestTier.unitPrice && Number(bestTier.unitPrice) > 0) {
+    unitPrice = Number(bestTier.unitPrice);
+  }
+
+  return {
+    unitPrice,
+    baseUnitPrice: basePrice,
+    appliedTier: bestTier,
+    discountPercentage: bestTier.discountPercentage || 0,
+  };
+}
 
 interface CartContextType {
   cart: CartItem[];
@@ -96,12 +156,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     ) => {
       setCart((prevCart) => {
         const existingItem = prevCart.find(
-          (item) => item.id === product.id && item.variant === product.variant
+          (item) => item.id === product.id && (product.variationId ? item.variationId === product.variationId : item.variant === product.variant)
         );
 
         if (existingItem) {
           return prevCart.map((item) =>
-            item.id === product.id && item.variant === product.variant
+            item.id === product.id && (product.variationId ? item.variationId === product.variationId : item.variant === product.variant)
               ? { ...item, quantity: item.quantity + quantity }
               : item
           );
@@ -155,13 +215,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   // Memoized calculations
   const { totalItems, subtotal } = useMemo(() => {
     const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
-    const subtotal = cart.reduce(
-      (sum, item) =>
-        sum +
-        (item.priceData.discountedPrice || item.priceData.price) *
-          item.quantity,
-      0
-    );
+    const subtotal = cart.reduce((sum, item) => {
+      const { unitPrice } = getEffectiveCartItemPrice(item);
+      return sum + unitPrice * item.quantity;
+    }, 0);
     return { totalItems, subtotal };
   }, [cart]);
 

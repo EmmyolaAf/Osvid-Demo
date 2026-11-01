@@ -18,6 +18,8 @@ export interface ShippingAddress {
 export interface CartInputItem {
   productId: string;
   quantity: number;
+  variationId?: string;
+  variationAttributes?: Record<string, string>;
 }
 
 export interface AuthoritativeQuoteItem {
@@ -29,6 +31,9 @@ export interface AuthoritativeQuoteItem {
   quantity: number;
   unitPrice: number;
   lineTotal: number;
+  variationId?: string;
+  variationAttributes?: Record<string, string>;
+  taxAmount?: number;
 }
 
 export interface CheckoutQuoteRequest {
@@ -44,6 +49,8 @@ export interface CheckoutQuoteResponse {
   items: AuthoritativeQuoteItem[];
   subtotal: number;
   shippingFee: number;
+  taxAmount?: number;
+  taxRatePercent?: number;
   discountAmount: number;
   totalAmount: number;
   totalAmountKobo: number;
@@ -87,6 +94,8 @@ export interface CheckoutSession {
   items: AuthoritativeQuoteItem[];
   subtotal: number;
   shippingFee: number;
+  taxAmount?: number;
+  taxRatePercent?: number;
   discountAmount: number;
   totalAmount: number;
   totalAmountKobo: number;
@@ -97,7 +106,7 @@ export interface CheckoutSession {
   paymentInitializationStatus?: PaymentInitializationStatus;
   paymentInitializationAttempt?: number;
   paymentInitializationClaimedAt?: any;
-  reservationExpiresAt: any; // Firestore Timestamp
+  reservationExpiresAt: any;
   reservationExpiresAtIso: string;
   reservationActive: boolean;
   releaseTokenHash?: string;
@@ -135,6 +144,8 @@ export interface PaymentInitializeResponse {
   totals?: {
     subtotal: number;
     shippingFee: number;
+    taxAmount?: number;
+    taxRatePercent?: number;
     discountAmount: number;
     totalAmount: number;
     totalAmountKobo: number;
@@ -157,11 +168,11 @@ export type RefundStatus =
   | "failed";
 
 export interface PaymentTransactionRecord {
-  id: string; // paystackReference
+  id: string;
   reference: string;
   checkoutSessionId: string;
   status: "finalized" | "anomaly_unfulfillable" | "failed" | "refunded";
-  amount: number; // in Naira
+  amount: number;
   amountKobo: number;
   currency: "NGN";
   orderId?: string;

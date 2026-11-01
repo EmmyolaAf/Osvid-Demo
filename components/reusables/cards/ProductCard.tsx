@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import Image from "next/image";
+import type { PricingTierItem } from "@/types/auth";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Star, ShoppingCart, Loader2, Check } from "lucide-react";
 import Link from "next/link";
@@ -20,6 +21,9 @@ interface ProductCardProps {
     discountPrice?: number;
     image?: string;
     variant?: string;
+    pricingTierId?: string;
+    pricingTierName?: string;
+    pricingTiers?: PricingTierItem[];
   };
   index: number;
   currency?: string;
@@ -86,6 +90,9 @@ export default function ProductCard({
         },
         imageUrl: mainImage,
         variant: product.variant,
+        pricingTierId: product.pricingTierId,
+        pricingTierName: product.pricingTierName,
+        pricingTiers: product.pricingTiers,
       };
 
       await addToCart(cartItem, 1);
@@ -204,6 +211,11 @@ export default function ProductCard({
             )}
           </div>
 
+          {product.pricingTierName && (
+            <span className="text-[10px] font-bold text-orange-700 bg-orange-100/80 px-2 py-0.5 rounded-full">
+              Bulk Savings
+            </span>
+          )}
           <div className="flex items-center gap-1">
             <Star
               size={16}

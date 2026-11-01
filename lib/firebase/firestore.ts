@@ -13,6 +13,7 @@ import {
   limit,
   serverTimestamp,
   Timestamp,
+  writeBatch,
 } from "firebase/firestore";
 import { auth, db } from "./client";
 import {
@@ -25,6 +26,13 @@ import {
   CustomerProfile,
   DiscountCode,
   ManagerPermissions,
+  PricingTierGroup,
+  PricingTierItem,
+  ProductAttribute,
+  ProductReview,
+  TaxSettings,
+  OrderNote,
+  ProductVariation,
 } from "@/types/auth";
 
 /**
@@ -1122,6 +1130,102 @@ export async function deleteDiscountFromDb(id: string): Promise<MutationResult> 
   }
 }
 
+
+// ==========================================
+// PRICING TIERS SERVICES
+// ==========================================
+
+export async function getPricingTiersFromDb(): Promise<PricingTierGroup[]> {
+  try {
+    const q = query(collection(db, "pricing_tiers"), orderBy("createdAt", "desc"));
+    const snap = await withDbTimeout(getDocs(q), 8000, "Fetch pricing tiers timed out");
+    return snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        name: data.name || "Bulk Tier",
+        description: data.description || "",
+        tiers: Array.isArray(data.tiers) ? data.tiers : [],
+        isActive: data.isActive !== false,
+        createdAt: data.createdAt || new Date().toISOString(),
+        updatedAt: data.updatedAt,
+      } as PricingTierGroup;
+    });
+  } catch (error) {
+    console.warn("Could not fetch pricing tiers from Firestore:", error);
+    return [];
+  }
+}
+
+export async function savePricingTierInDb(
+  tier: Partial<PricingTierGroup> & { name: string; tiers: PricingTierItem[] }
+): Promise<MutationResult<PricingTierGroup>> {
+  try {
+    if (!tier.name || !tier.name.trim()) {
+      return { success: false, error: "Pricing tier group name is required." };
+    }
+    if (!Array.isArray(tier.tiers) || tier.tiers.length === 0) {
+      return { success: false, error: "At least one quantity bracket is required." };
+    }
+
+    const docId = tier.id || `ptier_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const payload: PricingTierGroup = {
+      id: docId,
+      name: tier.name.trim(),
+      description: tier.description?.trim() || "",
+      tiers: tier.tiers.map((t) => ({
+        minQuantity: Number(t.minQuantity) || 1,
+        maxQuantity: t.maxQuantity !== undefined && t.maxQuantity !== null && !isNaN(Number(t.maxQuantity)) ? Number(t.maxQuantity) : undefined,
+        discountPercentage: Number(t.discountPercentage) || 0,
+        unitPrice: t.unitPrice !== undefined ? Number(t.unitPrice) : undefined,
+      })),
+      isActive: tier.isActive !== false,
+      createdAt: tier.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const docRef = doc(db, "pricing_tiers", docId);
+    await withDbTimeout(
+      setDoc(docRef, cleanFirestoreData(payload), { merge: true }),
+      10000,
+      "Failed to save pricing tier: Firestore operation timed out."
+    );
+
+    return { success: true, data: payload };
+  } catch (error: any) {
+    console.error("Error saving pricing tier to Firestore:", error);
+    return { success: false, error: error?.message || "Failed to commit pricing tier." };
+  }
+}
+
+export async function deletePricingTierFromDb(id: string): Promise<MutationResult> {
+  try {
+    if (!id) return { success: false, error: "ID is required for deletion." };
+    const docRef = doc(db, "pricing_tiers", id);
+    await withDbTimeout(deleteDoc(docRef), 10000, "Failed to delete pricing tier: Timeout");
+    return { success: true };
+  } catch (error: any) {
+    console.error("Error deleting pricing tier:", error);
+    return { success: false, error: error?.message || "Failed to remove pricing tier." };
+  }
+}
+
+export async function toggleDiscountStatusInDb(id: string, isActive: boolean): Promise<MutationResult> {
+  try {
+    if (!id) return { success: false, error: "Discount ID is required." };
+    const docRef = doc(db, "discounts", id);
+    await withDbTimeout(
+      updateDoc(docRef, { isActive }),
+      8000,
+      "Failed to update discount status: Timeout"
+    );
+    return { success: true };
+  } catch (error: any) {
+    console.error("Error toggling discount status:", error);
+    return { success: false, error: error?.message || "Failed to toggle discount." };
+  }
+}
+
 export interface DiscountValidationResult {
   success: boolean;
   valid: boolean;
@@ -1308,5 +1412,311 @@ export async function getExecutiveGovernanceStats() {
       databaseStatus: "Error connecting to Firestore",
       clientId: "osvid",
     };
+  }
+}
+
+// ==========================================
+// WOOCOMMERCE-STYLE ADVANCED PRODUCT OPERATIONS
+// ==========================================
+
+export async function duplicateProductInDb(productId: string): Promise<MutationResult<Product>> {
+  try {
+    const origRef = doc(db, "products", productId);
+    const snap = await getDoc(origRef);
+    if (!snap.exists()) {
+      return { success: false, error: "Original product not found." };
+    }
+    const orig = snap.data() as Product;
+    const newId = doc(collection(db, "products")).id;
+    const now = new Date().toISOString();
+    const newSlug = `${orig.slug}-copy-${Date.now().toString().slice(-4)}`;
+    const newSku = orig.sku ? `${orig.sku}-COPY` : `SKU-${Date.now().toString().slice(-6)}`;
+
+    const duplicateData: Product = {
+      ...orig,
+      id: newId,
+      name: `${orig.name} (Copy)`,
+      slug: newSlug,
+      sku: newSku,
+      stockQuantity: 0, // Duplicate starts with 0 stock per safe ledger rules
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await setDoc(doc(db, "products", newId), cleanFirestoreData(duplicateData));
+    return { success: true, data: duplicateData };
+  } catch (err: any) {
+    console.error("Duplicate product error:", err);
+    return { success: false, error: err?.message || "Failed to duplicate product." };
+  }
+}
+
+export async function bulkUpdateProductsInDb(
+  productIds: string[],
+  updates: Partial<Product>
+): Promise<MutationResult> {
+  try {
+    const batch = writeBatch(db);
+    const now = new Date().toISOString();
+    for (const id of productIds) {
+      const pRef = doc(db, "products", id);
+      batch.update(pRef, cleanFirestoreData({ ...updates, updatedAt: now }));
+    }
+    await batch.commit();
+    return { success: true };
+  } catch (err: any) {
+    console.error("Bulk update products error:", err);
+    return { success: false, error: err?.message || "Failed to bulk update products." };
+  }
+}
+
+export async function bulkDeleteProductsInDb(productIds: string[]): Promise<MutationResult> {
+  try {
+    const batch = writeBatch(db);
+    for (const id of productIds) {
+      const pRef = doc(db, "products", id);
+      batch.delete(pRef);
+    }
+    await batch.commit();
+    return { success: true };
+  } catch (err: any) {
+    console.error("Bulk delete products error:", err);
+    return { success: false, error: err?.message || "Failed to bulk delete products." };
+  }
+}
+
+// ==========================================
+// PRODUCT ATTRIBUTES
+// ==========================================
+
+export async function getProductAttributesFromDb(): Promise<ProductAttribute[]> {
+  try {
+    const snap = await getDocs(collection(db, "product_attributes"));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductAttribute));
+  } catch (err) {
+    console.warn("Could not fetch product attributes:", err);
+    return [];
+  }
+}
+
+export async function saveProductAttributeInDb(
+  attr: Partial<ProductAttribute>
+): Promise<MutationResult<ProductAttribute>> {
+  try {
+    const id = attr.id || doc(collection(db, "product_attributes")).id;
+    const docRef = doc(db, "product_attributes", id);
+    const payload = cleanFirestoreData({
+      id,
+      name: attr.name?.trim() || "",
+      values: Array.isArray(attr.values) ? attr.values.map((v: string) => v.trim()).filter(Boolean) : [],
+      visibleOnProductPage: attr.visibleOnProductPage !== false,
+      usedForVariations: attr.usedForVariations !== false,
+    });
+    await setDoc(docRef, payload, { merge: true });
+    return { success: true, data: payload as ProductAttribute };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to save product attribute." };
+  }
+}
+
+export async function deleteProductAttributeInDb(id: string): Promise<MutationResult> {
+  try {
+    await deleteDoc(doc(db, "product_attributes", id));
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to delete attribute." };
+  }
+}
+
+// ==========================================
+// PRODUCT REVIEWS & RATINGS
+// ==========================================
+
+export async function getProductReviewsFromDb(
+  productId?: string,
+  statusFilter?: string
+): Promise<ProductReview[]> {
+  try {
+    let q: any = collection(db, "product_reviews");
+    if (productId && statusFilter && statusFilter !== "all") {
+      q = query(q, where("productId", "==", productId), where("status", "==", statusFilter));
+    } else if (productId) {
+      q = query(q, where("productId", "==", productId));
+    } else if (statusFilter && statusFilter !== "all") {
+      q = query(q, where("status", "==", statusFilter));
+    }
+    const snap = await getDocs(q);
+    const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Record<string, any>) } as ProductReview));
+    list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return list;
+  } catch (err) {
+    console.warn("Error fetching reviews:", err);
+    return [];
+  }
+}
+
+export async function submitProductReviewInDb(
+  reviewData: Omit<ProductReview, "id" | "createdAt" | "status">
+): Promise<MutationResult<ProductReview>> {
+  try {
+    const reviewId = doc(collection(db, "product_reviews")).id;
+    const now = new Date().toISOString();
+    const payload: ProductReview = {
+      ...reviewData,
+      id: reviewId,
+      status: "pending",
+      createdAt: now,
+    };
+    await setDoc(doc(db, "product_reviews", reviewId), cleanFirestoreData(payload));
+    return { success: true, data: payload };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to submit review." };
+  }
+}
+
+export async function updateReviewStatusInDb(
+  reviewId: string,
+  status: "pending" | "approved" | "rejected",
+  productId?: string
+): Promise<MutationResult> {
+  try {
+    const ref = doc(db, "product_reviews", reviewId);
+    await updateDoc(ref, { status, updatedAt: new Date().toISOString() });
+
+    // If approved and productId provided, recalculate product rating average
+    if (status === "approved" && productId) {
+      const approvedReviews = await getProductReviewsFromDb(productId, "approved");
+      if (approvedReviews.length > 0) {
+        const sum = approvedReviews.reduce((acc, r) => acc + (r.rating || 5), 0);
+        const avg = parseFloat((sum / approvedReviews.length).toFixed(1));
+        const pRef = doc(db, "products", productId);
+        await updateDoc(pRef, { averageRating: avg, reviewCount: approvedReviews.length });
+      }
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to update review status." };
+  }
+}
+
+export async function deleteReviewFromDb(reviewId: string): Promise<MutationResult> {
+  try {
+    await deleteDoc(doc(db, "product_reviews", reviewId));
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to delete review." };
+  }
+}
+
+// ==========================================
+// TAX SETTINGS
+// ==========================================
+
+export const DEFAULT_TAX_SETTINGS: TaxSettings = {
+  enableTax: true,
+  pricesIncludeTax: false,
+  taxRatePercent: 7.5, // Nigeria Standard VAT
+  taxShipping: false,
+  displayPricesInShop: "exclusive",
+  displayPricesInCart: "exclusive",
+  updatedAt: new Date().toISOString(),
+};
+
+export async function getTaxSettingsFromDb(): Promise<TaxSettings> {
+  try {
+    const snap = await getDoc(doc(db, "tax_settings", "general"));
+    if (snap.exists()) {
+      return { ...DEFAULT_TAX_SETTINGS, ...snap.data() } as TaxSettings;
+    }
+  } catch (err) {
+    console.warn("Could not load tax settings from database, using defaults:", err);
+  }
+  return DEFAULT_TAX_SETTINGS;
+}
+
+export async function saveTaxSettingsInDb(settings: Partial<TaxSettings>): Promise<MutationResult<TaxSettings>> {
+  try {
+    const now = new Date().toISOString();
+    const payload: TaxSettings = {
+      ...DEFAULT_TAX_SETTINGS,
+      ...settings,
+      updatedAt: now,
+    };
+    await setDoc(doc(db, "tax_settings", "general"), cleanFirestoreData(payload), { merge: true });
+    return { success: true, data: payload };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to save tax settings." };
+  }
+}
+
+// ==========================================
+// ORDER NOTES & MANUAL ORDER CREATION
+// ==========================================
+
+export async function getOrderNotesFromDb(orderId: string): Promise<OrderNote[]> {
+  try {
+    const q = query(collection(db, "order_notes"), where("orderId", "==", orderId));
+    const snap = await getDocs(q);
+    const notes = snap.docs.map((d) => ({ id: d.id, ...d.data() } as OrderNote));
+    notes.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return notes;
+  } catch (err) {
+    console.warn("Could not fetch order notes:", err);
+    return [];
+  }
+}
+
+export async function addOrderNoteInDb(
+  orderId: string,
+  content: string,
+  isCustomerVisible: boolean,
+  authorName: string = "Staff Administrator"
+): Promise<MutationResult<OrderNote>> {
+  try {
+    const noteId = doc(collection(db, "order_notes")).id;
+    const now = new Date().toISOString();
+    const noteData: OrderNote = {
+      id: noteId,
+      orderId,
+      content: content.trim(),
+      authorName,
+      isCustomerVisible,
+      createdAt: now,
+    };
+    await setDoc(doc(db, "order_notes", noteId), cleanFirestoreData(noteData));
+    return { success: true, data: noteData };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to add order note." };
+  }
+}
+
+export async function createManualOrderInDb(
+  orderInput: Omit<Order, "id" | "createdAt" | "updatedAt">
+): Promise<MutationResult<Order>> {
+  try {
+    const orderId = doc(collection(db, "orders")).id;
+    const now = new Date().toISOString();
+    const orderNumber = `OSV-ORD-${Date.now().toString().slice(-6)}`;
+
+    const fullOrder: Order = {
+      ...orderInput,
+      id: orderId,
+      orderNumber: orderInput.orderNumber || orderNumber,
+      createdAt: now,
+      updatedAt: now,
+      statusHistory: [
+        {
+          status: orderInput.orderStatus || "processing",
+          updatedAt: now,
+          note: "Order created manually by administrator.",
+        },
+      ],
+    };
+
+    await setDoc(doc(db, "orders", orderId), cleanFirestoreData(fullOrder));
+    return { success: true, data: fullOrder };
+  } catch (err: any) {
+    console.error("Create manual order error:", err);
+    return { success: false, error: err?.message || "Failed to create manual order." };
   }
 }

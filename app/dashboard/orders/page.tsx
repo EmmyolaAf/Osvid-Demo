@@ -19,6 +19,11 @@ import {
   RefreshCw,
   Save,
   Tag,
+  Plus,
+  Printer,
+  PauseCircle,
+  RotateCcw,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,28 +36,19 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import formatCurrency from "@/helpers/formatCurrency";
+import OrderNotesDrawer from "@/components/dashboard/orders/OrderNotesDrawer";
+import OrderInvoiceModal from "@/components/dashboard/orders/OrderInvoiceModal";
+import ManualOrderModal from "@/components/dashboard/orders/ManualOrderModal";
 
-function getAllowedTransitions(
-  currentStatus: OrderStatus,
-  deliveryMethod?: "pickup" | "delivery"
-): OrderStatus[] {
-  if (currentStatus === "delivered" || currentStatus === "cancelled") {
-    return [currentStatus];
-  }
-
-  const method = deliveryMethod === "pickup" ? "pickup" : "delivery";
-
-  if (method === "pickup") {
-    if (currentStatus === "pending") return ["pending", "processing", "cancelled"];
-    if (currentStatus === "processing") return ["processing", "delivered", "cancelled"];
-  } else {
-    if (currentStatus === "pending") return ["pending", "processing", "cancelled"];
-    if (currentStatus === "processing") return ["processing", "shipped", "cancelled"];
-    if (currentStatus === "shipped") return ["shipped", "delivered"];
-  }
-
-  return [currentStatus];
-}
+const WOO_ORDER_STATUSES: OrderStatus[] = [
+  "pending",
+  "processing",
+  "on-hold",
+  "completed",
+  "cancelled",
+  "refunded",
+  "failed",
+];
 
 export default function OrdersManagementPage() {
   const { userProfile } = useAuth();
@@ -63,6 +59,10 @@ export default function OrdersManagementPage() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+
+  // Modals
+  const [isManualOrderOpen, setIsManualOrderOpen] = useState(false);
+  const [invoiceOrder, setInvoiceOrder] = useState<Order | null>(null);
 
   // Tracking, Note, and Stage Edit State in Modal
   const [modalStatus, setModalStatus] = useState<OrderStatus>("pending");
@@ -143,17 +143,6 @@ export default function OrdersManagementPage() {
       const trackingTrimmed = modalTrackingNumber.trim() || undefined;
       const noteTrimmed = modalNote.trim() || undefined;
 
-      if (
-        modalStatus === "shipped" &&
-        !trackingTrimmed &&
-        !selectedOrder.trackingNumber &&
-        selectedOrder.deliveryMethod !== "pickup"
-      ) {
-        toast.error("Courier tracking reference is required to transition delivery order to Shipped.");
-        setIsSavingModal(false);
-        return;
-      }
-
       await handleStatusChange(
         selectedOrder.id,
         modalStatus,
@@ -191,10 +180,23 @@ export default function OrdersManagementPage() {
 
   const getStatusBadge = (status: OrderStatus) => {
     switch (status) {
+      case "completed":
       case "delivered":
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800">
-            <CheckCircle2 size={12} /> Delivered
+            <CheckCircle2 size={12} /> Completed
+          </span>
+        );
+      case "processing":
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full bg-amber-100 text-amber-800">
+            <Clock size={12} /> Processing
+          </span>
+        );
+      case "on-hold":
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full bg-orange-100 text-orange-800">
+            <PauseCircle size={12} /> On Hold
           </span>
         );
       case "shipped":
@@ -203,10 +205,16 @@ export default function OrdersManagementPage() {
             <Truck size={12} /> Shipped
           </span>
         );
-      case "processing":
+      case "refunded":
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full bg-amber-100 text-amber-800">
-            <Clock size={12} /> Processing
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full bg-purple-100 text-purple-800">
+            <RotateCcw size={12} /> Refunded
+          </span>
+        );
+      case "failed":
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full bg-rose-100 text-rose-800">
+            <AlertTriangle size={12} /> Failed
           </span>
         );
       case "cancelled":
@@ -218,7 +226,7 @@ export default function OrdersManagementPage() {
       default:
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full bg-slate-100 text-slate-800">
-            <Clock size={12} /> Pending
+            <Clock size={12} /> Pending Payment
           </span>
         );
     }
@@ -230,171 +238,204 @@ export default function OrdersManagementPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center shadow-xs">
               <ShoppingBag size={20} />
             </div>
-            <h1 className="text-2xl font-black text-slate-900">
-              Order Fulfillment & Dispatch Pipeline
-            </h1>
+            <div>
+              <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+                WooCommerce Order Administration
+              </h1>
+              <p className="text-xs text-slate-500">
+                Manage fulfillment pipelines, order notes, manual invoices, and dispatched goods
+              </p>
+            </div>
           </div>
-          <p className="text-sm text-slate-500 mt-1">
-            Track customer orders, manage live fulfillment stages & dispatch updates
-          </p>
         </div>
 
-        <Button
-          onClick={loadOrders}
-          variant="outline"
-          size="sm"
-          className="rounded-xl text-xs font-bold border-slate-200 text-slate-700 hover:bg-slate-50 gap-2 self-start sm:self-auto"
-        >
-          <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
-          Refresh Pipeline
-        </Button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <Button
+            onClick={() => setIsManualOrderOpen(true)}
+            size="sm"
+            className="bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold gap-1.5 h-9 px-4 shadow-sm shadow-orange-600/20"
+          >
+            <Plus size={14} />
+            New Manual Order
+          </Button>
+
+          <Button
+            onClick={loadOrders}
+            variant="outline"
+            size="sm"
+            className="rounded-xl text-xs font-bold border-slate-200 text-slate-700 hover:bg-slate-50 gap-2 h-9 px-3"
+          >
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Filters and Search */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="w-full sm:w-80 bg-white p-2.5 rounded-lg border border-slate-200 shadow-none flex items-center gap-2.5">
+      <div className="flex flex-col lg:flex-row items-center justify-between gap-3">
+        <div className="w-full lg:w-80 bg-white p-2.5 rounded-2xl border border-slate-200/80 shadow-xs flex items-center gap-2.5">
           <Search className="w-4 h-4 text-slate-400" />
           <input
             type="text"
-            placeholder="Search customer, order ID, email, Paystack ref..."
+            placeholder="Search customer, order ID, email..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full text-xs bg-transparent outline-none text-slate-800 placeholder:text-slate-400"
           />
         </div>
 
-        <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-          {["all", "pending", "processing", "shipped", "delivered", "cancelled"].map((st) => (
-            <Button
-              key={st}
-              size="sm"
-              variant={statusFilter === st ? "default" : "outline"}
-              onClick={() => setStatusFilter(st)}
-              className={`text-xs capitalize rounded-md h-8 px-3 ${
-                statusFilter === st ? "bg-slate-900 text-white" : "border-slate-200"
-              }`}
-            >
-              {st}
-            </Button>
-          ))}
+        {/* Status Filter Tabs */}
+        <div className="flex items-center gap-1.5 w-full lg:w-auto overflow-x-auto pb-1 lg:pb-0 scrollbar-hide">
+          {["all", ...WOO_ORDER_STATUSES].map((st) => {
+            const count =
+              st === "all"
+                ? orders.length
+                : orders.filter((o) => o.orderStatus === st).length;
+
+            return (
+              <button
+                key={st}
+                onClick={() => setStatusFilter(st)}
+                className={`text-xs font-bold capitalize rounded-xl h-8 px-3 whitespace-nowrap transition-all border ${
+                  statusFilter === st
+                    ? "bg-slate-900 text-white border-slate-900 shadow-xs"
+                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+                }`}
+              >
+                {st}
+                <span
+                  className={`ml-1.5 text-[10px] font-normal px-1.5 py-0.2 rounded-full ${
+                    statusFilter === st ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* Orders Table */}
-      <div className="bg-white rounded-lg border border-slate-200 shadow-none overflow-hidden">
+      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
         {loading ? (
-          <div className="py-16 flex flex-col items-center justify-center gap-3">
+          <div className="py-20 flex flex-col items-center justify-center gap-3">
             <Loader2 className="w-8 h-8 text-orange-600 animate-spin" />
             <p className="text-xs text-slate-500 font-medium">Loading orders from Firestore...</p>
           </div>
         ) : filteredOrders.length === 0 ? (
-          <div className="py-16 text-center px-4">
+          <div className="py-20 text-center px-4">
             <ShoppingBag className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-            <h3 className="text-base font-bold text-slate-800">No orders found</h3>
+            <h3 className="text-base font-bold text-slate-800">No matching orders</h3>
             <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
-              There are no orders matching your current search or filter criteria.
+              There are no orders matching your current search or status filter.
             </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider font-bold text-slate-500">
+              <thead className="bg-slate-50/70 border-b border-slate-200 text-[10px] uppercase tracking-wider font-extrabold text-slate-500">
                 <tr>
-                  <th className="py-3.5 px-6">Order ID / Date</th>
+                  <th className="py-3.5 px-6">Order Reference</th>
                   <th className="py-3.5 px-6">Customer</th>
-                  <th className="py-3.5 px-6">Amount</th>
+                  <th className="py-3.5 px-6">Grand Total</th>
                   <th className="py-3.5 px-6">Payment</th>
-                  <th className="py-3.5 px-6">Fulfillment Status</th>
-                  <th className="py-3.5 px-6">Update Stage (Manager)</th>
-                  <th className="py-3.5 px-6 text-right">Details</th>
+                  <th className="py-3.5 px-6">Order Status</th>
+                  <th className="py-3.5 px-6">Change Stage</th>
+                  <th className="py-3.5 px-6 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 text-xs">
                 {filteredOrders.map((o) => (
                   <tr key={o.id} className="hover:bg-slate-50/60 transition-colors">
                     <td className="py-4 px-6">
-                      <p className="font-mono font-bold text-xs text-slate-900">
+                      <p className="font-mono font-bold text-slate-900">
                         #{o.orderNumber || o.id.substring(0, 8).toUpperCase()}
                       </p>
-                      <p className="text-[11px] text-slate-400">
-                        {new Date(o.createdAt).toLocaleDateString()}
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        {new Date(o.createdAt).toLocaleDateString("en-NG", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
                       </p>
                     </td>
 
                     <td className="py-4 px-6">
                       <p className="font-bold text-slate-900">{o.customerName}</p>
-                      <p className="text-xs text-slate-500">{o.customerEmail}</p>
+                      <p className="text-[11px] text-slate-400">{o.customerEmail}</p>
                     </td>
 
-                    <td className="py-4 px-6 font-bold text-slate-900">
-                      {formatCurrency("NGN", o.totalAmount)}
+                    <td className="py-4 px-6">
+                      <p className="font-bold text-slate-900">
+                        {formatCurrency("NGN", o.totalAmount)}
+                      </p>
+                      <p className="text-[10px] text-slate-400">
+                        {o.items?.length || 0} item(s)
+                      </p>
                     </td>
 
                     <td className="py-4 px-6">
                       <span
-                        className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                        className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                           o.paymentStatus === "paid"
-                            ? "bg-emerald-50 text-emerald-700"
-                            : "bg-amber-50 text-amber-700"
+                            ? "bg-emerald-100 text-emerald-800"
+                            : "bg-amber-100 text-amber-800"
                         }`}
                       >
-                        {o.paymentStatus?.toUpperCase() || "PENDING"}
+                        {o.paymentStatus || "pending"}
                       </span>
+                      {o.paymentMethod && (
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          {o.paymentMethod}
+                        </p>
+                      )}
                     </td>
 
                     <td className="py-4 px-6">{getStatusBadge(o.orderStatus)}</td>
 
                     <td className="py-4 px-6">
-                      <div className="flex items-center gap-1.5">
-                        {updatingId === o.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin text-orange-600" />
-                        ) : o.orderStatus === "delivered" || o.orderStatus === "cancelled" ? (
-                          <span className="text-xs font-semibold text-slate-400 italic">
-                            Completed
-                          </span>
-                        ) : (
-                          <select
-                            value={o.orderStatus}
-                            onChange={(e) => {
-                              const targetStatus = e.target.value as OrderStatus;
-                              if (targetStatus === o.orderStatus) return;
-                              if (
-                                targetStatus === "shipped" &&
-                                !o.trackingNumber &&
-                                o.deliveryMethod !== "pickup"
-                              ) {
-                                toast.error(
-                                  "Tracking reference required before setting status to Shipped. Please enter details."
-                                );
-                                openDetailModal(o);
-                                return;
-                              }
-                              handleStatusChange(o.id, targetStatus);
-                            }}
-                            className="text-xs font-semibold bg-slate-100 border border-slate-300 rounded-xl px-2.5 py-1.5 text-slate-700 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                          >
-                            {getAllowedTransitions(o.orderStatus, o.deliveryMethod).map((st) => (
-                              <option key={st} value={st}>
-                                {st.charAt(0).toUpperCase() + st.slice(1)}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      </div>
+                      <select
+                        value={o.orderStatus}
+                        disabled={updatingId === o.id}
+                        onChange={(e) =>
+                          handleStatusChange(o.id, e.target.value as OrderStatus)
+                        }
+                        className="h-8 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 outline-none focus:border-orange-500"
+                      >
+                        {WOO_ORDER_STATUSES.map((st) => (
+                          <option key={st} value={st}>
+                            {st.charAt(0).toUpperCase() + st.slice(1)}
+                          </option>
+                        ))}
+                      </select>
                     </td>
 
                     <td className="py-4 px-6 text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openDetailModal(o)}
-                        className="text-xs h-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50 font-semibold rounded-xl"
-                      >
-                        <Eye size={14} className="mr-1" /> View Details
-                      </Button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setInvoiceOrder(o)}
+                          title="Print Invoice / Packing Slip"
+                          className="h-8 w-8 text-slate-500 hover:text-slate-900 rounded-xl"
+                        >
+                          <Printer size={15} />
+                        </Button>
+
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => openDetailModal(o)}
+                          title="View Order Details & Notes"
+                          className="h-8 w-8 text-slate-500 hover:text-orange-600 rounded-xl"
+                        >
+                          <Eye size={15} />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -406,43 +447,43 @@ export default function OrdersManagementPage() {
 
       {/* Order Detail Modal */}
       <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
-        <DialogContent className="sm:max-w-xl bg-white rounded-lg max-h-[90vh] overflow-y-auto p-5 sm:p-6">
+        <DialogContent className="sm:max-w-2xl bg-white rounded-3xl max-h-[92vh] overflow-y-auto p-6 sm:p-8">
           {selectedOrder && (
             <>
-              <DialogHeader className="text-left space-y-1.5">
+              <DialogHeader className="text-left space-y-1 border-b border-slate-100 pb-4">
                 <div className="flex items-center justify-between">
-                  <DialogTitle className="text-lg font-bold text-slate-900">
+                  <DialogTitle className="text-xl font-black text-slate-900">
                     Order #{selectedOrder.orderNumber || selectedOrder.id.substring(0, 8).toUpperCase()}
                   </DialogTitle>
                   <div>{getStatusBadge(selectedOrder.orderStatus)}</div>
                 </div>
                 <DialogDescription className="text-xs text-slate-500">
-                  Placed on {new Date(selectedOrder.createdAt).toLocaleString()}
+                  Placed on {new Date(selectedOrder.createdAt).toLocaleString()} &bull; Payment Channel: {selectedOrder.paymentMethod || "Paystack Gateway"}
                 </DialogDescription>
               </DialogHeader>
 
-              <div className="space-y-4 py-2 text-sm">
-                {/* Customer Info */}
-                <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 space-y-2">
-                  <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                    Customer Details
+              <div className="space-y-6 py-2 text-xs">
+                {/* Customer Details */}
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                    Customer Information
                   </h4>
-                  <p className="font-bold text-slate-900">{selectedOrder.customerName}</p>
-                  <div className="flex items-center gap-4 text-xs text-slate-600">
-                    <span className="flex items-center gap-1">
+                  <p className="font-bold text-slate-900 text-sm">{selectedOrder.customerName}</p>
+                  <div className="flex flex-wrap items-center gap-4 text-slate-600">
+                    <span className="flex items-center gap-1.5">
                       <Mail size={13} className="text-orange-600" /> {selectedOrder.customerEmail}
                     </span>
                     {selectedOrder.customerPhone && (
-                      <span className="flex items-center gap-1">
+                      <span className="flex items-center gap-1.5">
                         <Phone size={13} className="text-orange-600" /> {selectedOrder.customerPhone}
                       </span>
                     )}
                   </div>
                   {selectedOrder.shippingAddress && (
-                    <div className="mt-2 pt-2 border-t border-slate-200/80 text-xs text-slate-600 flex items-start gap-1">
+                    <div className="mt-2 pt-2 border-t border-slate-200/80 text-slate-600 flex items-start gap-1.5">
                       <MapPin size={13} className="shrink-0 mt-0.5 text-orange-600" />
                       <span>
-                        {selectedOrder.shippingAddress.address},{" "}
+                        {selectedOrder.shippingAddress.address || selectedOrder.shippingAddress.streetAddress},{" "}
                         {selectedOrder.shippingAddress.city},{" "}
                         {selectedOrder.shippingAddress.state}
                       </span>
@@ -450,99 +491,94 @@ export default function OrdersManagementPage() {
                   )}
                 </div>
 
-                {/* Tracking & Note Updater */}
-                <div className="p-3.5 bg-orange-50/70 border border-orange-200/70 rounded-lg space-y-3">
-                  <h4 className="text-[11px] font-bold text-orange-950 uppercase tracking-wider flex items-center gap-1.5">
+                {/* Tracking & Stage Management */}
+                <div className="p-4 bg-orange-50/70 border border-orange-200/70 rounded-2xl space-y-3">
+                  <h4 className="text-[10px] font-black text-orange-950 uppercase tracking-wider flex items-center gap-1.5">
                     <Truck size={14} className="text-orange-600" />
-                    Dispatch & Tracking Management
+                    Dispatch &amp; Order Status Stage
                   </h4>
-                  <div className="space-y-3">
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Fulfillment Stage
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        Change Order Status
                       </label>
-                      {selectedOrder.orderStatus === "delivered" || selectedOrder.orderStatus === "cancelled" ? (
-                        <div className="h-9 px-3 flex items-center bg-slate-100 rounded-md text-xs font-semibold text-slate-500 capitalize">
-                          {selectedOrder.orderStatus} (Completed)
-                        </div>
-                      ) : (
-                        <select
-                          value={modalStatus}
-                          onChange={(e) => setModalStatus(e.target.value as OrderStatus)}
-                          className="w-full h-9 rounded-xl border border-slate-300 text-xs bg-white px-2.5 font-medium text-slate-800 outline-none focus:border-orange-500"
-                        >
-                          {getAllowedTransitions(selectedOrder.orderStatus, selectedOrder.deliveryMethod).map((st) => (
-                            <option key={st} value={st}>
-                              {st.charAt(0).toUpperCase() + st.slice(1)}
-                            </option>
-                          ))}
-                        </select>
-                      )}
+                      <select
+                        value={modalStatus}
+                        onChange={(e) => setModalStatus(e.target.value as OrderStatus)}
+                        className="w-full h-10 rounded-xl border border-slate-300 text-xs bg-white px-3 font-bold text-slate-800 outline-none"
+                      >
+                        {WOO_ORDER_STATUSES.map((st) => (
+                          <option key={st} value={st}>
+                            {st.charAt(0).toUpperCase() + st.slice(1)}
+                          </option>
+                        ))}
+                      </select>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1">
-                          Courier Tracking Number
-                        </label>
-                        <Input
-                          placeholder="e.g. GIG-998242-NG"
-                          value={modalTrackingNumber}
-                          onChange={(e) => setModalTrackingNumber(e.target.value)}
-                          disabled={selectedOrder.orderStatus === "delivered" || selectedOrder.orderStatus === "cancelled"}
-                          className="rounded-xl border-slate-300 text-xs bg-white disabled:bg-slate-100 disabled:text-slate-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1">
-                          Internal Status Note
-                        </label>
-                        <Input
-                          placeholder="e.g. Dispatched via Lagos hub"
-                          value={modalNote}
-                          onChange={(e) => setModalNote(e.target.value)}
-                          disabled={selectedOrder.orderStatus === "delivered" || selectedOrder.orderStatus === "cancelled"}
-                          className="rounded-xl border-slate-300 text-xs bg-white disabled:bg-slate-100 disabled:text-slate-500"
-                        />
-                      </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        Courier Tracking Number
+                      </label>
+                      <Input
+                        placeholder="e.g. GIG-998242-NG"
+                        value={modalTrackingNumber}
+                        onChange={(e) => setModalTrackingNumber(e.target.value)}
+                        className="h-10 rounded-xl border-slate-300 text-xs bg-white font-mono"
+                      />
                     </div>
                   </div>
-                  {selectedOrder.orderStatus === "delivered" || selectedOrder.orderStatus === "cancelled" ? (
-                    <div className="w-full p-2.5 bg-slate-100 border border-slate-200 rounded-xl text-xs text-slate-500 font-medium text-center mt-2">
-                      Order is in terminal state ({selectedOrder.orderStatus}). Fulfillment details and tracking are locked.
-                    </div>
-                  ) : (
+
+                  <div className="flex items-center justify-between pt-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setInvoiceOrder(selectedOrder)}
+                      className="rounded-xl text-xs font-bold border-slate-300 text-slate-700 hover:bg-slate-100 gap-1.5 h-9"
+                    >
+                      <Printer size={13} />
+                      Print Packing Slip
+                    </Button>
+
                     <Button
                       size="sm"
                       onClick={handleSaveModalDetails}
                       disabled={isSavingModal}
-                      className="w-full bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold gap-2 mt-2"
+                      className="bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold gap-2 h-9 px-5 shadow-xs"
                     >
                       {isSavingModal ? (
                         <Loader2 size={13} className="animate-spin" />
                       ) : (
                         <Save size={13} />
                       )}
-                      Save Shipment Updates
+                      Save Status &amp; Tracking
                     </Button>
-                  )}
+                  </div>
                 </div>
 
                 {/* Items in order */}
                 <div>
-                  <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
-                    Purchased Chemical Formulations
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">
+                    Ordered Formulations &amp; Variations
                   </h4>
-                  <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 overflow-hidden text-xs">
+                  <div className="border border-slate-200 rounded-2xl divide-y divide-slate-100 overflow-hidden bg-white">
                     {selectedOrder.items?.map((item, idx) => (
-                      <div key={idx} className="p-3 flex items-center justify-between">
+                      <div key={idx} className="p-3.5 flex items-center justify-between">
                         <div>
-                          <p className="font-semibold text-slate-900">{item.productName}</p>
-                          <p className="text-[11px] text-slate-400">
-                            Quantity: {item.quantity} &times; {formatCurrency("NGN", item.price)}
+                          <p className="font-bold text-slate-900">{item.productName}</p>
+                          {item.variationAttributes && (
+                            <p className="text-[11px] text-orange-600 font-semibold mt-0.5">
+                              {Object.entries(item.variationAttributes)
+                                .map(([k, v]) => `${k}: ${v}`)
+                                .join(", ")}
+                            </p>
+                          )}
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                            {item.quantity} &times; {formatCurrency("NGN", item.price)}
+                            {item.sku && <span className="ml-2 font-mono">SKU: {item.sku}</span>}
                           </p>
                         </div>
-                        <p className="font-semibold text-slate-900">
+                        <p className="font-bold text-slate-900">
                           {formatCurrency("NGN", (item.price || 0) * (item.quantity || 1))}
                         </p>
                       </div>
@@ -551,25 +587,59 @@ export default function OrdersManagementPage() {
                 </div>
 
                 {/* Financial Summary */}
-                <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 space-y-1.5 text-xs">
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2 text-xs">
                   <div className="flex justify-between text-slate-600">
                     <span>Subtotal:</span>
                     <span>{formatCurrency("NGN", selectedOrder.subtotal || selectedOrder.totalAmount)}</span>
                   </div>
+                  {selectedOrder.discountAmount ? (
+                    <div className="flex justify-between text-emerald-600 font-medium">
+                      <span>Discount Savings:</span>
+                      <span>-{formatCurrency("NGN", selectedOrder.discountAmount)}</span>
+                    </div>
+                  ) : null}
+                  {selectedOrder.taxAmount ? (
+                    <div className="flex justify-between text-slate-600">
+                      <span>VAT (7.5%):</span>
+                      <span>{formatCurrency("NGN", selectedOrder.taxAmount)}</span>
+                    </div>
+                  ) : null}
                   <div className="flex justify-between text-slate-600">
-                    <span>Shipping:</span>
+                    <span>Shipping Fee:</span>
                     <span>{formatCurrency("NGN", selectedOrder.shippingFee || 0)}</span>
                   </div>
-                  <div className="flex justify-between text-slate-900 font-extrabold text-sm pt-2 border-t border-slate-200">
+                  <div className="flex justify-between text-slate-900 font-black text-sm pt-2 border-t border-slate-200">
                     <span>Grand Total:</span>
                     <span className="text-orange-600">{formatCurrency("NGN", selectedOrder.totalAmount)}</span>
                   </div>
                 </div>
+
+                {/* Interactive Order Notes Timeline */}
+                <OrderNotesDrawer
+                  orderId={selectedOrder.id}
+                  authorName={userProfile?.displayName || "Staff Administrator"}
+                />
               </div>
             </>
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Manual Order Modal */}
+      <ManualOrderModal
+        isOpen={isManualOrderOpen}
+        onClose={() => setIsManualOrderOpen(false)}
+        onOrderCreated={(newOrder) => {
+          setOrders([newOrder, ...orders]);
+        }}
+      />
+
+      {/* Printable Invoice Modal */}
+      <OrderInvoiceModal
+        order={invoiceOrder}
+        isOpen={Boolean(invoiceOrder)}
+        onClose={() => setInvoiceOrder(null)}
+      />
     </div>
   );
 }

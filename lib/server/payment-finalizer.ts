@@ -193,7 +193,7 @@ export async function finalizeSuccessfulPayment(
               items: (ord.items || []).map((it) => ({
                 name: it.productName,
                 quantity: it.quantity,
-                price: it.price,
+                price: it.price || 0,
                 variant: it.unit,
                 imageUrl: it.imageUrl,
               })),
@@ -206,7 +206,7 @@ export async function finalizeSuccessfulPayment(
               customerInfo: {
                 name: ord.customerName,
                 email: ord.customerEmail,
-                phone: ord.customerPhone,
+                phone: ord.customerPhone || "",
               },
             },
             existingTx.paystackData

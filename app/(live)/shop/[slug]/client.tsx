@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Product } from "@/types/auth";
+import { Product, ProductVariation } from "@/types/auth";
 import {
   ShoppingCart,
   CheckCircle2,
@@ -15,6 +15,8 @@ import {
   Truck,
   Sparkles,
   PhoneCall,
+  Tag,
+  Layers,
 } from "lucide-react";
 import formatCurrency from "@/helpers/formatCurrency";
 import { useCart } from "@/providers/CartProvider";
@@ -27,34 +29,84 @@ interface ProductDetailsClientProps {
   product: Product;
 }
 
-export default function ProductDetailsClient({
-  product,
-}: ProductDetailsClientProps) {
+export default function ProductDetailsClient({ product }: ProductDetailsClientProps) {
   const { addToCart, openCart } = useCart();
+  const isVariable = product.productType === "variable" && (product.variations?.length || 0) > 0;
+  const isGrouped = product.productType === "grouped";
+
+  // Attributes state for variable products
+  const [selectedAttributes, setSelectedAttributes] = useState<Record<string, string>>(() => {
+    if (isVariable && product.attributes && product.attributes.length > 0) {
+      const initial: Record<string, string> = {};
+      product.attributes.forEach((attr) => {
+        if (attr.values && attr.values.length > 0) {
+          initial[attr.name] = attr.values[0];
+        }
+      });
+      return initial;
+    }
+    return {};
+  });
+
+  // Find matching variation based on selectedAttributes
+  const selectedVariation: ProductVariation | undefined = useMemo(() => {
+    if (!isVariable || !product.variations || product.variations.length === 0) {
+      return undefined;
+    }
+    return product.variations.find((v) => {
+      const attrs = v.attributes || {};
+      return Object.entries(selectedAttributes).every(
+        ([key, val]) => !attrs[key] || attrs[key] === val
+      );
+    }) || product.variations[0];
+  }, [isVariable, product.variations, selectedAttributes]);
+
   const [quantity, setQuantity] = useState(1);
   const [activeImage, setActiveImage] = useState(
-    product.imageUrl || "/images/placeholder.webp"
+    selectedVariation?.imageUrl || product.imageUrl || "/images/placeholder.webp"
   );
   const [isAddingToCart, setIsAddingToCart] = useState(false);
 
-  const inStock = product.stockQuantity > 0 && product.isActive;
-  const isLowStock = inStock && product.stockQuantity <= 10;
-  const hasDiscount =
-    product.discountPrice !== undefined &&
-    product.discountPrice > 0 &&
-    product.discountPrice < product.price;
-
-  const currentPrice = hasDiscount ? product.discountPrice! : product.price;
+  // Dynamic values depending on variable vs simple product
+  const basePrice = selectedVariation ? selectedVariation.price : product.price;
+  const salePrice = selectedVariation ? selectedVariation.salePrice : product.discountPrice;
+  const hasDiscount = salePrice !== undefined && salePrice > 0 && salePrice < basePrice;
+  const currentPrice = hasDiscount ? salePrice! : basePrice;
   const discountPercent = hasDiscount
-    ? Math.round(((product.price - product.discountPrice!) / product.price) * 100)
+    ? Math.round(((basePrice - salePrice!) / basePrice) * 100)
     : 0;
+
+  const currentSku = selectedVariation?.sku || product.sku;
+  const currentStock = selectedVariation ? selectedVariation.stockQuantity : product.stockQuantity;
+  const currentStockStatus = selectedVariation ? selectedVariation.stockStatus : "instock";
+
+  const inStock = currentStock > 0 && currentStockStatus !== "outofstock" && currentStockStatus !== "out_of_stock" && product.isActive !== false;
+  const isLowStock = inStock && currentStock <= 10;
+
+  const handleAttributeSelect = (attrName: string, value: string) => {
+    const updated = { ...selectedAttributes, [attrName]: value };
+    setSelectedAttributes(updated);
+
+    // Look up variation to switch image if available
+    if (product.variations) {
+      const matching = product.variations.find((v) => {
+        const attrs = v.attributes || {};
+        return Object.entries(updated).every(
+          ([key, val]) => !attrs[key] || attrs[key] === val
+        );
+      });
+      if (matching?.imageUrl) {
+        setActiveImage(matching.imageUrl);
+      }
+    }
+  };
 
   const handleQuantityChange = (delta: number) => {
     setQuantity((prev) => {
       const next = prev + delta;
       if (next < 1) return 1;
-      if (inStock && next > product.stockQuantity) {
-        return product.stockQuantity;
+      if (inStock && next > currentStock) {
+        return currentStock;
       }
       return next;
     });
@@ -62,28 +114,41 @@ export default function ProductDetailsClient({
 
   const handleAddToCart = () => {
     if (!inStock) {
-      toast.warning("This item is currently out of stock.");
+      toast.warning("This item or variation is currently out of stock.");
       return;
     }
 
     setIsAddingToCart(true);
 
     try {
+      const variantLabel =
+        isVariable && Object.keys(selectedAttributes).length > 0
+          ? Object.entries(selectedAttributes)
+              .map(([k, v]) => `${k}: ${v}`)
+              .join(", ")
+          : product.unit
+          ? `Unit: ${product.unit}`
+          : undefined;
+
       addToCart(
         {
           id: product.id,
           name: product.name,
-          imageUrl: product.imageUrl || "/images/placeholder.webp",
-          variant: product.unit ? `Unit: ${product.unit}` : undefined,
+          imageUrl: activeImage,
+          variant: variantLabel,
+          variationId: selectedVariation?.id,
+          variationAttributes: selectedVariation ? selectedAttributes : undefined,
+          sku: currentSku,
+          pricingTierId: product.pricingTierId,
+          pricingTierName: product.pricingTierName,
+          pricingTiers: product.pricingTiers,
           priceData: {
-            price: product.price,
-            discountedPrice: product.discountPrice,
+            price: basePrice,
+            discountedPrice: salePrice,
             currency: "NGN",
             formatted: {
-              price: formatCurrency("NGN", product.price),
-              discountedPrice: product.discountPrice
-                ? formatCurrency("NGN", product.discountPrice)
-                : undefined,
+              price: formatCurrency("NGN", basePrice),
+              discountedPrice: salePrice ? formatCurrency("NGN", salePrice) : undefined,
             },
           },
         },
@@ -91,7 +156,11 @@ export default function ProductDetailsClient({
       );
 
       openCart();
-      toast.success(`Added ${quantity}x ${product.name} to cart.`);
+      toast.success(
+        `Added ${quantity}x ${product.name}${
+          variantLabel ? ` (${variantLabel})` : ""
+        } to cart.`
+      );
     } catch (err) {
       console.error("Cart addition error:", err);
       toast.error("Failed to add product to cart. Please try again.");
@@ -101,18 +170,20 @@ export default function ProductDetailsClient({
   };
 
   // WhatsApp Sales Inquiry link
-  const cleanPhone = companyData.whatsapp.replace(/\D/g, "");
+  const cleanPhone = (companyData.whatsapp || "2348000000000").replace(/\D/g, "");
   const waUrl = `https://wa.me/234${cleanPhone}?text=${encodeURIComponent(
-    `Hello OSVID Sales, I would like to inquire about ${product.name} (Price: ${formatCurrency(
-      "NGN",
-      currentPrice
-    )}, Quantity: ${quantity} ${product.unit || "units"}).`
+    `Hello OSVID Sales, I would like to inquire about ${product.name}${
+      selectedVariation ? ` (${Object.entries(selectedAttributes).map(([k, v]) => `${k}: ${v}`).join(", ")})` : ""
+    } (Price: ${formatCurrency("NGN", currentPrice)}, Quantity: ${quantity} ${
+      product.unit || "units"
+    }).`
   )}`;
 
   const allImages = [
     product.imageUrl || "/images/placeholder.webp",
     ...(product.galleryImages || []),
-  ].filter(Boolean);
+    ...(product.variations?.map((v) => v.imageUrl).filter(Boolean) as string[] || []),
+  ].filter((v, i, a) => v && a.indexOf(v) === i);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-start">
@@ -171,16 +242,25 @@ export default function ProductDetailsClient({
       {/* Product Information & Purchase - Right Column */}
       <div className="lg:col-span-6 space-y-6">
         <div>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-100 text-orange-800 text-xs font-bold uppercase tracking-wider mb-3">
-            <Package size={13} />
-            {product.category || "Industrial Chemicals"}
+          <div className="flex items-center gap-2 mb-3">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-100 text-orange-800 text-xs font-bold uppercase tracking-wider">
+              <Package size={13} />
+              {product.category || "Industrial Chemicals"}
+            </span>
+            {isVariable && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[11px] font-bold">
+                <Layers size={11} />
+                Variable Product
+              </span>
+            )}
           </div>
+
           <h1 className="text-2xl sm:text-4xl font-black text-slate-900 tracking-tight leading-tight">
             {product.name}
           </h1>
-          {product.sku && (
+          {currentSku && (
             <p className="text-xs text-slate-400 font-mono mt-1">
-              SKU: {product.sku}
+              SKU: {currentSku}
             </p>
           )}
         </div>
@@ -192,7 +272,7 @@ export default function ProductDetailsClient({
           </span>
           {hasDiscount && (
             <span className="text-lg text-slate-400 line-through font-semibold">
-              {formatCurrency("NGN", product.price)}
+              {formatCurrency("NGN", basePrice)}
             </span>
           )}
           {product.unit && (
@@ -202,12 +282,116 @@ export default function ProductDetailsClient({
           )}
         </div>
 
+        {/* Dynamic Variation Options Picker (for Variable Products) */}
+        {isVariable && product.attributes && product.attributes.length > 0 && (
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
+            <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+              Select Product Specifications
+            </h4>
+            <div className="space-y-3">
+              {product.attributes.map((attr) => (
+                <div key={attr.id} className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-700">{attr.name}:</span>
+                    <span className="font-semibold text-orange-600">
+                      {selectedAttributes[attr.name] || "None selected"}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {attr.values.map((val) => {
+                      const isSelected = selectedAttributes[attr.name] === val;
+                      return (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => handleAttributeSelect(attr.name, val)}
+                          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                            isSelected
+                              ? "bg-orange-600 text-white border-orange-600 shadow-sm shadow-orange-600/30 scale-105"
+                              : "bg-white text-slate-700 border-slate-200 hover:border-slate-400"
+                          }`}
+                        >
+                          {val}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Grouped Product Notice */}
+        {isGrouped && (
+          <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200 text-xs text-blue-900 space-y-2">
+            <div className="font-bold flex items-center gap-1.5">
+              <Layers size={14} className="text-blue-600" />
+              Grouped Product Bundle
+            </div>
+            <p>
+              This is a grouped catalog package. Choose your desired child items or contact customer service for bulk packaging options.
+            </p>
+          </div>
+        )}
+
+        {/* Volume & Wholesale Pricing Tiers */}
+        {product.pricingTiers && product.pricingTiers.length > 0 && (
+          <div className="p-4 rounded-2xl bg-orange-50/70 border border-orange-200 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black uppercase tracking-wider text-orange-950 flex items-center gap-1.5">
+                <Tag size={13} className="text-orange-600" />
+                Wholesale &amp; Volume Discounts
+              </span>
+              <span className="text-[11px] font-bold text-orange-700 bg-orange-100/90 px-2 py-0.5 rounded-full">
+                Auto-Applied at Cart
+              </span>
+            </div>
+            <p className="text-xs text-orange-900/80">
+              Bulk pricing unlocks automatically when your cart reaches the minimum units below:
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+              {product.pricingTiers.map((tier, idx) => {
+                const isReached =
+                  quantity >= tier.minQuantity &&
+                  (!tier.maxQuantity || quantity <= tier.maxQuantity);
+                const tierPrice =
+                  tier.unitPrice ||
+                  Math.round(currentPrice * (1 - tier.discountPercentage / 100));
+                return (
+                  <div
+                    key={idx}
+                    className={`p-2.5 rounded-xl border transition-all text-xs ${
+                      isReached
+                        ? "bg-white border-orange-500 ring-2 ring-orange-500/20 shadow-sm"
+                        : "bg-white/80 border-orange-200/60 text-slate-700"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between font-bold text-slate-900">
+                      <span>{tier.minQuantity}+ {product.unit || "units"}</span>
+                      <span className="text-orange-600 font-black">-{tier.discountPercentage}%</span>
+                    </div>
+                    <div className="text-[11px] text-slate-600 font-medium mt-0.5">
+                      {formatCurrency("NGN", tierPrice)} / {product.unit || "unit"}
+                    </div>
+                    {isReached && (
+                      <span className="inline-block mt-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
+                        Active for qty {quantity}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Stock Status Badge */}
         <div className="flex items-center gap-2 text-xs font-semibold">
           {inStock ? (
             <div className="flex items-center gap-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-full">
               <CheckCircle2 size={15} />
-              <span>In Stock ({product.stockQuantity} available)</span>
+              <span>In Stock ({currentStock} available)</span>
             </div>
           ) : (
             <div className="flex items-center gap-1.5 text-rose-700 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-full">
@@ -253,18 +437,18 @@ export default function ProductDetailsClient({
                     onChange={(e) => {
                       const val = parseInt(e.target.value, 10);
                       if (!isNaN(val) && val >= 1) {
-                        setQuantity(Math.min(val, product.stockQuantity));
+                        setQuantity(Math.min(val, currentStock));
                       }
                     }}
                     min={1}
-                    max={product.stockQuantity}
+                    max={currentStock}
                     className="w-16 text-center font-bold text-base border-0 focus-visible:ring-0 shadow-none"
                   />
                   <Button
                     variant="ghost"
                     size="icon"
                     onClick={() => handleQuantityChange(1)}
-                    disabled={quantity >= product.stockQuantity}
+                    disabled={quantity >= currentStock}
                     className="h-10 w-10 rounded-xl text-slate-700 font-bold"
                   >
                     +

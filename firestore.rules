@@ -136,14 +136,7 @@ service cloud.firestore {
       // Helper validating product creation schema and core field types (Packet 3C)
       function isValidProductCreateData() {
         let data = request.resource.data;
-        return data.keys().hasOnly([
-          'id', 'name', 'slug', 'description', 'price', 'discountPrice',
-          'stockQuantity', 'category', 'categorySlug', 'categoryName',
-          'imageUrl', 'images', 'galleryImages', 'unit', 'sku',
-          'isFeatured', 'isActive', 'features', 'specifications',
-          'suggestedProductIds', 'crossSells', 'tags',
-          'createdAt', 'updatedAt'
-        ]) &&
+        return data.keys().hasOnly([ 'id', 'name', 'slug', 'description', 'shortDescription', 'productType', 'price', 'discountPrice', 'saleStartDate', 'saleEndDate', 'stockQuantity', 'reservedQuantity', 'manageStock', 'stockStatus', 'allowBackorders', 'lowStockThreshold', 'category', 'categorySlug', 'categoryName', 'imageUrl', 'images', 'galleryImages', 'unit', 'sku', 'barcode', 'weight', 'dimensions', 'isFeatured', 'isActive', 'features', 'specifications', 'suggestedProductIds', 'crossSells', 'crossSellIds', 'upsellIds', 'groupedProductIds', 'tags', 'attributes', 'variations', 'averageRating', 'reviewCount', 'taxStatus', 'taxClass', 'pricingTierId', 'pricingTierName', 'pricingTiers', 'createdAt', 'updatedAt' ]) &&
         ('name' in data && data.name is string && data.name.size() > 0) &&
         ('price' in data && data.price is number && data.price >= 0) &&
         (!('stockQuantity' in data) || (data.stockQuantity is number && data.stockQuantity == 0)) &&
@@ -166,18 +159,39 @@ service cloud.firestore {
       // Uses explicit catalogue field allowlist to protect future server-owned product fields.
       allow update: if hasManagerPermission('canManageProducts') &&
         (isSuperAdmin() || isSubscriptionOperational()) &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'name', 'slug', 'description', 'price', 'discountPrice',
-          'category', 'categorySlug', 'categoryName',
-          'imageUrl', 'images', 'galleryImages',
-          'unit', 'sku', 'isFeatured', 'isActive',
-          'features', 'specifications', 'suggestedProductIds', 'crossSells', 'tags',
-          'updatedAt'
-        ]);
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([ 'name', 'slug', 'description', 'shortDescription', 'productType', 'price', 'discountPrice', 'saleStartDate', 'saleEndDate', 'stockQuantity', 'reservedQuantity', 'manageStock', 'stockStatus', 'allowBackorders', 'lowStockThreshold', 'category', 'categorySlug', 'categoryName', 'imageUrl', 'images', 'galleryImages', 'unit', 'sku', 'barcode', 'weight', 'dimensions', 'isFeatured', 'isActive', 'features', 'specifications', 'suggestedProductIds', 'crossSells', 'crossSellIds', 'upsellIds', 'groupedProductIds', 'tags', 'attributes', 'variations', 'averageRating', 'reviewCount', 'taxStatus', 'taxClass', 'pricingTierId', 'pricingTierName', 'pricingTiers', 'updatedAt' ]);
 
       // Catalogue deletion strictly requires catalogue authority and operational subscription (or Super Admin recovery)
       allow delete: if hasManagerPermission('canManageProducts') &&
         (isSuperAdmin() || isSubscriptionOperational());
+    }
+
+    
+    match /product_reviews/{reviewId} {
+      allow read: if resource.data.status == 'approved' || isStaff();
+      allow create: if (
+        request.resource.data.status == 'pending' &&
+        request.resource.data.rating >= 1 &&
+        request.resource.data.rating <= 5
+      );
+      allow update, delete: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageProducts'));
+    }
+
+    match /product_attributes/{attributeId} {
+      allow read: if true;
+      allow write: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageProducts'));
+    }
+
+    match /tax_settings/{settingId} {
+      allow read: if true;
+      allow write: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageProducts'));
+    }
+
+    match /order_notes/{noteId} {
+      allow read: if hasManagerPermission('canManageOrders') || (
+        isAuthenticated() && resource.data.isCustomerVisible == true
+      );
+      allow create, update, delete: if hasManagerPermission('canManageOrders');
     }
 
     match /categories/{categoryId} {
@@ -217,6 +231,12 @@ service cloud.firestore {
     // ===============================================================
     // 4. DISCOUNTS & PROMOTIONS
     // ===============================================================
+    
+    match /pricing_tiers/{tierId} {
+      allow read: if true;
+      allow write: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageDiscounts'));
+    }
+
     match /discounts/{discountId} {
       // Direct coupon evaluation is now server-authoritative via /api/checkout/quote.
       // Customer read access is no longer needed; read access is restricted to staff with discount authority.

@@ -284,7 +284,23 @@ export async function createCheckoutSession(
         );
       }
 
-      const basePrice = Number(pData.price);
+      let sku = pData.sku || "";
+      let imageUrl = pData.imageUrl || "";
+      let variationAttributes: Record<string, string> | undefined = undefined;
+
+      let basePrice = Number(pData.price);
+      if (item.variationId && Array.isArray(pData.variations)) {
+        const v = pData.variations.find((varItem: any) => varItem.id === item.variationId);
+        if (v) {
+          if (v.price !== undefined) basePrice = Number(v.price);
+          if (v.sku) sku = v.sku;
+          if (v.imageUrl) imageUrl = v.imageUrl;
+          variationAttributes = v.attributes;
+          if (v.salePrice !== undefined && Number(v.salePrice) > 0 && Number(v.salePrice) < basePrice) {
+            pData.discountPrice = Number(v.salePrice);
+          }
+        }
+      }
       if (isNaN(basePrice) || basePrice < 0) {
         throw new CommerceValidationError(
           `Product "${pData.name || item.productId}" has an invalid price configuration.`,
@@ -297,7 +313,23 @@ export async function createCheckoutSession(
         Number(pData.discountPrice) > 0 &&
         Number(pData.discountPrice) < basePrice;
 
-      const unitPrice = hasDiscount ? Number(pData.discountPrice) : basePrice;
+      let unitPrice = hasDiscount ? Number(pData.discountPrice) : basePrice;
+
+      // Authoritative quantity tier evaluation
+      if (Array.isArray(pData.pricingTiers) && pData.pricingTiers.length > 0) {
+        const sorted = [...pData.pricingTiers].sort((a, b) => a.minQuantity - b.minQuantity);
+        for (const t of sorted) {
+          if (item.quantity >= t.minQuantity && (!t.maxQuantity || item.quantity <= t.maxQuantity)) {
+            if (t.discountPercentage && Number(t.discountPercentage) > 0) {
+              const pct = Math.min(100, Math.max(0, Number(t.discountPercentage)));
+              unitPrice = Math.round((hasDiscount ? Number(pData.discountPrice) : basePrice) * (1 - pct / 100));
+            } else if (t.unitPrice && Number(t.unitPrice) > 0) {
+              unitPrice = Number(t.unitPrice);
+            }
+          }
+        }
+      }
+
       const lineTotal = unitPrice * item.quantity;
 
       // Available stock invariant check
@@ -316,12 +348,14 @@ export async function createCheckoutSession(
       pricedItems.push({
         productId: item.productId,
         name: pData.name || "Product",
-        sku: pData.sku || "",
+        sku,
         unit: pData.unit || "unit",
-        imageUrl: pData.imageUrl || "",
+        imageUrl,
         quantity: item.quantity,
         unitPrice,
         lineTotal,
+        variationId: item.variationId,
+        variationAttributes,
       });
     }
 

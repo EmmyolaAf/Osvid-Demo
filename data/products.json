@@ -1,5 +1,30 @@
 [
   {
+    "id": "prod_1793117298555_52arq",
+    "name": "Test",
+    "slug": "test",
+    "description": "Test 123",
+    "price": 50000,
+    "discountPrice": 4500,
+    "stockQuantity": 0,
+    "reservedQuantity": 0,
+    "category": "Industrial Chemicals",
+    "categorySlug": "industrial-chemicals",
+    "imageUrl": "/images/placeholder.webp",
+    "galleryImages": [
+      "/images/placeholder.webp"
+    ],
+    "unit": "kg12",
+    "sku": "SKU-237102",
+    "isFeatured": false,
+    "features": [],
+    "specifications": {},
+    "suggestedProductIds": [],
+    "isActive": true,
+    "createdAt": "2026-10-27T16:08:18.555Z",
+    "updatedAt": "2026-10-27T16:08:18.555Z"
+  },
+  {
     "id": "prod_osvid_bond_glue",
     "name": "OSVID Bond Glue Heavy-Duty",
     "slug": "osvid-bond-glue-heavy-duty",
@@ -29,7 +54,9 @@
       "Coverage": "1.5 - 2.0 kg/m²",
       "Application Temperature": "10°C - 45°C"
     },
-    "suggestedProductIds": ["prod_osvid_tile_master"],
+    "suggestedProductIds": [
+      "prod_osvid_tile_master"
+    ],
     "isActive": true,
     "createdAt": "2026-01-15T08:00:00.000Z",
     "updatedAt": "2026-10-27T12:00:00.000Z"
@@ -64,7 +91,9 @@
       "Open Time": "30 minutes",
       "Classification": "C2TE compliant"
     },
-    "suggestedProductIds": ["prod_osvid_bond_glue"],
+    "suggestedProductIds": [
+      "prod_osvid_bond_glue"
+    ],
     "isActive": true,
     "createdAt": "2026-01-20T09:30:00.000Z",
     "updatedAt": "2026-10-27T12:00:00.000Z"
@@ -99,7 +128,9 @@
       "Pot Life": "40 minutes at 25°C",
       "Full Cure": "7 days"
     },
-    "suggestedProductIds": ["prod_osvid_aquablock"],
+    "suggestedProductIds": [
+      "prod_osvid_aquablock"
+    ],
     "isActive": true,
     "createdAt": "2026-02-10T11:00:00.000Z",
     "updatedAt": "2026-10-27T12:00:00.000Z"
@@ -134,7 +165,9 @@
       "Number of Coats": "2 coats recommended",
       "Drying Time": "4 hours between coats"
     },
-    "suggestedProductIds": ["prod_osvid_tile_master"],
+    "suggestedProductIds": [
+      "prod_osvid_tile_master"
+    ],
     "isActive": true,
     "createdAt": "2026-02-18T14:20:00.000Z",
     "updatedAt": "2026-10-27T12:00:00.000Z"
@@ -168,7 +201,9 @@
       "pH Value": "6.0 - 7.5",
       "Compliance": "ASTM C494 Type F & G"
     },
-    "suggestedProductIds": ["prod_osvid_aquablock"],
+    "suggestedProductIds": [
+      "prod_osvid_aquablock"
+    ],
     "isActive": true,
     "createdAt": "2026-03-01T10:15:00.000Z",
     "updatedAt": "2026-10-27T12:00:00.000Z"
@@ -203,7 +238,9 @@
       "Flexural Strength": "> 3.5 N/mm²",
       "Pot Life": "1 hour"
     },
-    "suggestedProductIds": ["prod_osvid_tile_master"],
+    "suggestedProductIds": [
+      "prod_osvid_tile_master"
+    ],
     "isActive": true,
     "createdAt": "2026-03-10T12:00:00.000Z",
     "updatedAt": "2026-10-27T12:00:00.000Z"

@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useCheckout } from "@/providers/CheckoutProvider";
-import { useCart } from "@/providers/CartProvider";
+import { useCart, getEffectiveCartItemPrice } from "@/providers/CartProvider";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,6 +47,7 @@ export function OrderSummaryStep() {
     subtotal: number;
     shippingFee: number;
     discountAmount: number;
+    taxAmount?: number;
     total: number;
   }>(() => {
     const fallbackSubtotal = cart.reduce(
@@ -107,6 +108,7 @@ export function OrderSummaryStep() {
           items: cart.map((it) => ({
             productId: it.id,
             quantity: it.quantity,
+            variationId: it.variationId,
           })),
           deliveryMethod: checkoutData.deliveryMethod,
           shippingAddress: checkoutData.shippingAddress,
@@ -121,6 +123,7 @@ export function OrderSummaryStep() {
           subtotal: data.subtotal,
           shippingFee: data.shippingFee,
           discountAmount: data.discountAmount,
+          taxAmount: data.taxAmount || 0,
           total: data.totalAmount,
         });
 
@@ -187,6 +190,7 @@ export function OrderSummaryStep() {
           items: cart.map((it) => ({
             productId: it.id,
             quantity: it.quantity,
+            variationId: it.variationId,
           })),
           deliveryMethod: checkoutData.deliveryMethod,
           shippingAddress: checkoutData.shippingAddress,
@@ -549,6 +553,14 @@ export function OrderSummaryStep() {
                 </div>
               )}
 
+              {quoteTotals.taxAmount !== undefined && quoteTotals.taxAmount > 0 && (
+                <div className="flex items-center justify-between text-slate-600">
+                  <span className="font-medium text-xs">VAT (7.5%):</span>
+                  <span className="font-bold text-xs">
+                    {formatCurrency("NGN", quoteTotals.taxAmount)}
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span className="text-slate-500 font-medium text-xs">Delivery:</span>
                 <span className="font-medium text-[11px] text-orange-600">
