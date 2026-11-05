@@ -49,39 +49,51 @@ export async function getServerProducts(
   categorySlug?: string
 ): Promise<StorefrontResult<Product[]>> {
   try {
-    let query = adminDb
+    const snapshot = await adminDb
       .collection("products")
-      .where("isActive", "==", true);
-
-    if (categorySlug && categorySlug !== "all") {
-      query = query.where("category", "==", categorySlug);
-    }
-
-    const snapshot = await query.get();
+      .where("isActive", "==", true)
+      .get();
     let products: Product[] = [];
 
     if (snapshot.docs.length > 0) {
-      products = snapshot.docs.map((d: QueryDocumentSnapshot<DocumentData>) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          name: data.name || "",
-          slug: data.slug || d.id,
-          description: data.description || "",
-          price: Number(data.price) || 0,
-          discountPrice: data.discountPrice ? Number(data.discountPrice) : undefined,
-          stockQuantity: Number(data.stockQuantity) || 0,
-          category: data.category || "General",
-          imageUrl: data.imageUrl || "/images/placeholder.webp",
-          galleryImages: Array.isArray(data.galleryImages) ? data.galleryImages : [],
-          unit: data.unit || "kg",
-          sku: data.sku || "",
-          isFeatured: Boolean(data.isFeatured),
-          isActive: true,
-          createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
-          updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : new Date().toISOString(),
-        };
-      });
+      products = snapshot.docs
+        .map((d: QueryDocumentSnapshot<DocumentData>) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            name: data.name || "",
+            slug: data.slug || d.id,
+            description: data.description || "",
+            shortDescription: data.shortDescription || "",
+            productType: data.productType || "simple",
+            price: Number(data.price) || 0,
+            discountPrice: data.discountPrice ? Number(data.discountPrice) : undefined,
+            stockQuantity: Number(data.stockQuantity) || 0,
+            category: data.category || "General",
+            categorySlug: data.categorySlug || data.category?.toLowerCase().replace(/\s+/g, "-"),
+            imageUrl: data.imageUrl || "/images/placeholder.webp",
+            galleryImages: Array.isArray(data.galleryImages) ? data.galleryImages : [],
+            unit: data.unit || "kg",
+            sku: data.sku || "",
+            isFeatured: Boolean(data.isFeatured),
+            isActive: true,
+            pricingTierId: data.pricingTierId,
+            pricingTierName: data.pricingTierName,
+            pricingTiers: data.pricingTiers,
+            createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
+            updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : new Date().toISOString(),
+          };
+        })
+        .filter((p) => {
+          if (!categorySlug || categorySlug === "all") return true;
+          const lower = categorySlug.toLowerCase();
+          return (
+            p.category?.toLowerCase() === lower ||
+            p.categorySlug?.toLowerCase() === lower
+          );
+        });
+
+      products.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     } else {
       // Resilient fallback to local catalog when Firestore has no active documents
       const local = await getLocalProducts();

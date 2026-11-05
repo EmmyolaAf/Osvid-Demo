@@ -9,29 +9,90 @@ export const dynamic = "force-dynamic";
 
 const PRODUCTS_FILE_PATH = path.join(process.cwd(), "data", "products.json");
 
+function cleanObject<T extends Record<string, any>>(obj: T): T {
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      result[key] = value;
+    }
+  }
+  return result as T;
+}
+
 async function readProductsFile(): Promise<Product[]> {
   try {
     const data = await fs.readFile(PRODUCTS_FILE_PATH, "utf8");
     return JSON.parse(data) as Product[];
   } catch (err) {
-    console.warn("Could not read data/products.json, returning empty list:", err);
     return [];
   }
 }
 
 async function writeProductsFile(products: Product[]): Promise<void> {
-  const dir = path.dirname(PRODUCTS_FILE_PATH);
-  await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(PRODUCTS_FILE_PATH, JSON.stringify(products, null, 2), "utf8");
+  try {
+    const dir = path.dirname(PRODUCTS_FILE_PATH);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(PRODUCTS_FILE_PATH, JSON.stringify(products, null, 2), "utf8");
+  } catch (err) {
+    console.warn("Could not write backup data/products.json:", err);
+  }
 }
 
 export async function GET(req: NextRequest) {
   try {
+    // 1. Authoritative: Fetch from Firestore
+    const snap = await adminDb.collection("products").orderBy("createdAt", "desc").get();
+    if (!snap.empty) {
+      const firestoreProducts: Product[] = snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          name: data.name || "",
+          slug: data.slug || d.id,
+          description: data.description || "",
+          shortDescription: data.shortDescription || "",
+          productType: data.productType || "simple",
+          price: Number(data.price) || 0,
+          discountPrice: data.discountPrice ? Number(data.discountPrice) : undefined,
+          stockQuantity: Number(data.stockQuantity) || 0,
+          reservedQuantity: Number(data.reservedQuantity) || 0,
+          manageStock: data.manageStock !== false,
+          stockStatus: data.stockStatus || "in_stock",
+          category: data.category || "General",
+          categorySlug: data.categorySlug || data.category?.toLowerCase().replace(/\s+/g, "-"),
+          imageUrl: data.imageUrl || "/images/placeholder.webp",
+          galleryImages: Array.isArray(data.galleryImages) ? data.galleryImages : [],
+          unit: data.unit || "kg",
+          sku: data.sku || "",
+          isFeatured: Boolean(data.isFeatured),
+          isActive: data.isActive !== false,
+          features: Array.isArray(data.features) ? data.features : [],
+          specifications: data.specifications || {},
+          tags: Array.isArray(data.tags) ? data.tags : [],
+          suggestedProductIds: Array.isArray(data.suggestedProductIds) ? data.suggestedProductIds : [],
+          crossSellIds: Array.isArray(data.crossSellIds) ? data.crossSellIds : [],
+          upsellIds: Array.isArray(data.upsellIds) ? data.upsellIds : [],
+          pricingTierId: data.pricingTierId || undefined,
+          pricingTierName: data.pricingTierName || undefined,
+          pricingTiers: Array.isArray(data.pricingTiers) ? data.pricingTiers : undefined,
+          createdAt: data.createdAt || new Date().toISOString(),
+          updatedAt: data.updatedAt || new Date().toISOString(),
+        } as Product;
+      });
+
+      // Passive backup sync to local file
+      writeProductsFile(firestoreProducts).catch(() => {});
+      return NextResponse.json({ success: true, products: firestoreProducts });
+    }
+
+    // Fallback to local file if Firestore returned 0 docs
     const products = await readProductsFile();
     return NextResponse.json({ success: true, products });
   } catch (err: any) {
     console.error("GET /api/admin/products error:", err);
-    return NextResponse.json({ success: false, error: err?.message || "Failed to fetch products" }, { status: 500 });
+    // Fallback to local file on transport error
+    const products = await readProductsFile();
+    return NextResponse.json({ success: true, products });
   }
 }
 
@@ -58,7 +119,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Valid non-negative price is required" }, { status: 400 });
     }
 
-    const products = await readProductsFile();
     const now = new Date().toISOString();
     const id = product.id || `prod_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const slug =
@@ -68,7 +128,7 @@ export async function POST(req: NextRequest) {
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/(^-|-$)/g, "");
 
-    const newProduct: Product = {
+    const newProduct: Product = cleanObject({
       id,
       name: product.name.trim(),
       slug,
@@ -123,8 +183,13 @@ export async function POST(req: NextRequest) {
       isActive: product.isActive !== false,
       createdAt: product.createdAt || now,
       updatedAt: now,
-    };
+    });
 
+    // Authoritative write to Firestore - must succeed!
+    await adminDb.collection("products").doc(id).set(newProduct, { merge: true });
+
+    // Sync local backup file
+    const products = await readProductsFile();
     const existingIndex = products.findIndex((p) => p.id === id);
     if (existingIndex >= 0) {
       products[existingIndex] = {
@@ -137,18 +202,7 @@ export async function POST(req: NextRequest) {
     } else {
       products.unshift(newProduct);
     }
-
-    // Persist to disk
     await writeProductsFile(products);
-
-    // Dual-write to Firestore in background
-    adminDb
-      .collection("products")
-      .doc(id)
-      .set(newProduct, { merge: true })
-      .catch((fsErr) => {
-        console.warn("Firestore background product sync warning:", fsErr?.message || fsErr);
-      });
 
     return NextResponse.json({
       success: true,
@@ -183,18 +237,13 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "Product ID is required" }, { status: 400 });
     }
 
+    // Authoritative deletion from Firestore
+    await adminDb.collection("products").doc(id).delete();
+
+    // Sync local backup file
     const products = await readProductsFile();
     const filtered = products.filter((p) => p.id !== id);
     await writeProductsFile(filtered);
-
-    // Background Firestore deletion
-    adminDb
-      .collection("products")
-      .doc(id)
-      .delete()
-      .catch((err) => {
-        console.warn("Firestore product deletion warning:", err);
-      });
 
     return NextResponse.json({ success: true, message: "Product deleted successfully" });
   } catch (err: any) {

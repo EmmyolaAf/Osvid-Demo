@@ -101,5 +101,11 @@ function initAdminApp() {
 export const adminApp = initAdminApp();
 
 export const adminAuth = getAuth(adminApp);
-export const adminDb: Firestore = getFirestore(adminApp);
+export const adminDb: Firestore = (() => {
+  const db = getFirestore(adminApp);
+  try {
+    db.settings({ ignoreUndefinedProperties: true });
+  } catch {}
+  return db;
+})();
 

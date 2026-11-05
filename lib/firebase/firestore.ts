@@ -550,40 +550,52 @@ export async function deleteCategoryFromDb(categoryId: string): Promise<Mutation
 
 export async function getProductsFromDb(): Promise<Product[]> {
   try {
-    const q = query(collection(db, "products"), orderBy("createdAt", "desc"));
+    const q = query(collection(db, "products"));
     const snap = await Promise.race([
       getDocs(q),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Products query timed out")), 2000)
+        setTimeout(() => reject(new Error("Products query timed out")), 8000)
       ),
     ]);
-    if (snap.docs.length > 0) {
-      return snap.docs.map((d) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          name: data.name || "",
-          slug: data.slug || data.name?.toLowerCase().replace(/\s+/g, "-") || d.id,
-          description: data.description || "",
-          price: Number(data.price) || 0,
-          discountPrice: data.discountPrice ? Number(data.discountPrice) : undefined,
-          stockQuantity: Number(data.stockQuantity) || 0,
-          category: data.category || "General",
-          categorySlug: data.categorySlug || data.category?.toLowerCase().replace(/\s+/g, "-"),
-          imageUrl: data.imageUrl || "/images/placeholder.webp",
-          galleryImages: Array.isArray(data.galleryImages) ? data.galleryImages : [],
-          unit: data.unit || "kg",
-          sku: data.sku || "",
-          isFeatured: Boolean(data.isFeatured),
-          features: Array.isArray(data.features) ? data.features : [],
-          specifications: data.specifications || {},
-          suggestedProductIds: Array.isArray(data.suggestedProductIds) ? data.suggestedProductIds : [],
-          isActive: data.isActive !== false,
-          createdAt: data.createdAt || new Date().toISOString(),
-          updatedAt: data.updatedAt || new Date().toISOString(),
-        } as Product;
-      });
-    }
+    const products = snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        name: data.name || "",
+        slug: data.slug || data.name?.toLowerCase().replace(/\s+/g, "-") || d.id,
+        description: data.description || "",
+        shortDescription: data.shortDescription || "",
+        productType: data.productType || "simple",
+        price: Number(data.price) || 0,
+        discountPrice: data.discountPrice !== undefined && data.discountPrice !== null ? Number(data.discountPrice) : undefined,
+        stockQuantity: Number(data.stockQuantity) || 0,
+        reservedQuantity: Number(data.reservedQuantity) || 0,
+        manageStock: data.manageStock !== false,
+        stockStatus: data.stockStatus || "in_stock",
+        category: data.category || "General",
+        categorySlug: data.categorySlug || data.category?.toLowerCase().replace(/\s+/g, "-"),
+        imageUrl: data.imageUrl || "/images/placeholder.webp",
+        galleryImages: Array.isArray(data.galleryImages) ? data.galleryImages : [],
+        unit: data.unit || "kg",
+        sku: data.sku || "",
+        isFeatured: Boolean(data.isFeatured),
+        features: Array.isArray(data.features) ? data.features : [],
+        specifications: data.specifications || {},
+        tags: Array.isArray(data.tags) ? data.tags : [],
+        suggestedProductIds: Array.isArray(data.suggestedProductIds) ? data.suggestedProductIds : [],
+        crossSellIds: Array.isArray(data.crossSellIds) ? data.crossSellIds : [],
+        upsellIds: Array.isArray(data.upsellIds) ? data.upsellIds : [],
+        pricingTierId: data.pricingTierId,
+        pricingTierName: data.pricingTierName,
+        pricingTiers: data.pricingTiers,
+        isActive: data.isActive !== false,
+        createdAt: data.createdAt || new Date().toISOString(),
+        updatedAt: data.updatedAt || new Date().toISOString(),
+      } as Product;
+    });
+
+    products.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return products;
   } catch (error) {
     console.warn("Direct Firestore products read failed/timed out, checking server products API:", error);
   }

@@ -2,7 +2,7 @@ import React from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { getFeaturedProducts, getProducts } from "@/lib/server/storefront";
-import ProductCard from "../cards/ProductCard";
+import FeaturedProductsClient from "./FeaturedProductsClient";
 
 export default async function FeaturedProducts() {
   const result = await getFeaturedProducts(6);
@@ -16,8 +16,6 @@ export default async function FeaturedProducts() {
     }
   }
 
-  if (!products.length) return null;
-
   return (
     <section className="py-16 md:pt-24 bg-white">
       <div className="container mx-auto px-4 text-center">
@@ -29,23 +27,8 @@ export default async function FeaturedProducts() {
           chemicals designed to meet your toughest challenges.
         </p>
 
-        {/* Product Grid */}
-        <div className="grid justify-between py-6 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-8">
-          {products.map((product, index) => (
-            <ProductCard
-              key={product.id || index}
-              index={index}
-              product={{
-                id: product.id,
-                name: product.name,
-                slug: product.slug,
-                price: product.price,
-                discountPrice: product.discountPrice,
-                image: product.imageUrl,
-              }}
-            />
-          ))}
-        </div>
+        {/* Live-Synchronized Product Grid */}
+        <FeaturedProductsClient initialProducts={products} />
 
         <div className="mt-8">
           <Link href="/shop">

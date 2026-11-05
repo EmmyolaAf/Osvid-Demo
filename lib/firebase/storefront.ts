@@ -45,25 +45,10 @@ export async function getProducts(
 ): Promise<StorefrontResult<Product[]>> {
   try {
     const productsRef = collection(db, "products");
-    let q;
-
-    if (categorySlug && categorySlug !== "all") {
-      q = query(
-        productsRef,
-        where("isActive", "==", true),
-        where("category", "==", categorySlug),
-        orderBy("createdAt", "desc")
-      );
-    } else {
-      q = query(
-        productsRef,
-        where("isActive", "==", true),
-        orderBy("createdAt", "desc")
-      );
-    }
-
+    const q = query(productsRef, where("isActive", "==", true));
     const snapshot = await getDocs(q);
-    const products: Product[] = snapshot.docs.map((d) => {
+
+    let products: Product[] = snapshot.docs.map((d) => {
       const data = d.data();
       return {
         id: d.id,
@@ -71,19 +56,34 @@ export async function getProducts(
         slug: data.slug || d.id,
         description: data.description || "",
         price: Number(data.price) || 0,
-        discountPrice: data.discountPrice ? Number(data.discountPrice) : undefined,
+        discountPrice: data.discountPrice !== undefined && data.discountPrice !== null ? Number(data.discountPrice) : undefined,
         stockQuantity: Number(data.stockQuantity) || 0,
         category: data.category || "General",
+        categorySlug: data.categorySlug || data.category?.toLowerCase().replace(/\s+/g, "-"),
         imageUrl: data.imageUrl || "/images/placeholder.webp",
-        galleryImages: data.galleryImages || [],
+        galleryImages: Array.isArray(data.galleryImages) ? data.galleryImages : [],
         unit: data.unit || "kg",
         sku: data.sku || "",
         isFeatured: Boolean(data.isFeatured),
         isActive: data.isActive !== false,
-        createdAt: data.createdAt || new Date().toISOString(),
-        updatedAt: data.updatedAt || new Date().toISOString(),
+        pricingTierId: data.pricingTierId,
+        pricingTierName: data.pricingTierName,
+        pricingTiers: data.pricingTiers,
+        createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
+        updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : new Date().toISOString(),
       };
     });
+
+    if (categorySlug && categorySlug !== "all") {
+      const lower = categorySlug.toLowerCase();
+      products = products.filter(
+        (p) =>
+          p.category?.toLowerCase() === lower ||
+          p.categorySlug?.toLowerCase() === lower
+      );
+    }
+
+    products.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     return { success: true, data: products };
   } catch (error: any) {

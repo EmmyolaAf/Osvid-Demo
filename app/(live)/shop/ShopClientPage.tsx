@@ -1,14 +1,15 @@
-// src/components/shop/ShopClientPage.tsx
 "use client";
 
-import React, { useState, useEffect, useTransition } from "react";
+import React, { useState, useEffect, useMemo, useTransition } from "react";
 import ProductCard from "@/components/reusables/cards/ProductCard";
-import { Button } from "@/components/ui/button"; // Assuming Button component is available
+import { Button } from "@/components/ui/button";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import ProductCardSkeleton from "@/components/reusables/skeletons/ProductCardSkeleton";
 import { BulkDiscount } from "@/components/reusables/CompactBulkOrder";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { db } from "@/lib/firebase/client";
 
 interface ProductItem {
   _id: string;
@@ -17,6 +18,12 @@ interface ProductItem {
   discountPrice?: number;
   image?: string;
   slug?: string;
+  category?: string;
+  categorySlug?: string;
+  createdAt?: string;
+  pricingTierId?: string;
+  pricingTierName?: string;
+  pricingTiers?: any[];
 }
 
 interface ShopClientPageProps {
@@ -30,7 +37,7 @@ interface ShopClientPageProps {
 
 export default function ShopClientPage({
   initialProducts,
-  totalProducts,
+  totalProducts: initialTotalProducts,
   productsPerPage,
   currentPage,
   currentSort,
@@ -38,16 +45,60 @@ export default function ShopClientPage({
 }: ShopClientPageProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [products, setProducts] = useState<ProductItem[]>(initialProducts);
+  const [allProducts, setAllProducts] = useState<ProductItem[]>(initialProducts);
   const [searchQuery, setSearchQuery] = useState(currentSearch);
   const [isPending, startTransition] = useTransition();
 
-  // Calculate total pages
-  const totalPages = Math.ceil(totalProducts / productsPerPage);
-
-  // Update products state when initialProducts from server changes (due to URL update)
+  // Real-time synchronization with Firestore products collection
   useEffect(() => {
-    setProducts(initialProducts);
+    try {
+      const q = query(collection(db, "products"), where("isActive", "==", true));
+      const unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          if (!snapshot.empty) {
+            const liveItems: ProductItem[] = snapshot.docs.map((d) => {
+              const data = d.data();
+              return {
+                _id: d.id,
+                name: data.name || "",
+                price: Number(data.price) || 0,
+                discountPrice:
+                  data.discountPrice !== undefined && data.discountPrice !== null
+                    ? Number(data.discountPrice)
+                    : undefined,
+                image: data.imageUrl || "/images/placeholder.webp",
+                slug: data.slug || d.id,
+                category: data.category || "General",
+                categorySlug:
+                  data.categorySlug || data.category?.toLowerCase().replace(/\s+/g, "-"),
+                createdAt: data.createdAt,
+                pricingTierId: data.pricingTierId,
+                pricingTierName: data.pricingTierName,
+                pricingTiers: data.pricingTiers,
+              };
+            });
+            setAllProducts(liveItems);
+          }
+        },
+        (err) => {
+          console.warn("Firestore real-time products listener error:", err);
+        }
+      );
+      return () => unsubscribe();
+    } catch (e) {
+      console.warn("Could not attach real-time products listener:", e);
+    }
+  }, []);
+
+  // Update when initialProducts changes
+  useEffect(() => {
+    if (initialProducts && initialProducts.length > 0) {
+      setAllProducts((prev) => {
+        // Keep live updates if already received
+        return prev.length >= initialProducts.length ? prev : initialProducts;
+      });
+    }
   }, [initialProducts]);
 
   // Debounce for search input
@@ -61,7 +112,7 @@ export default function ShopClientPage({
           } else {
             params.delete("search");
           }
-          params.set("page", "1"); // Reset to page 1 on search change
+          params.set("page", "1");
           router.push(`?${params.toString()}`);
         });
       }
@@ -75,15 +126,14 @@ export default function ShopClientPage({
     startTransition(() => {
       const params = new URLSearchParams(searchParams.toString());
       params.set("sort", newSort);
-      params.set("page", "1"); // Reset to page 1 on sort change
+      params.set("page", "1");
       router.push(`?${params.toString()}`);
     });
   };
 
-  // New: Handle page change
   const handlePageChange = (newPage: number) => {
     if (newPage < 1 || newPage > totalPages || newPage === currentPage) {
-      return; // Prevent navigating to invalid or current page
+      return;
     }
     startTransition(() => {
       const params = new URLSearchParams(searchParams.toString());
@@ -92,62 +142,87 @@ export default function ShopClientPage({
     });
   };
 
-  const startIndex = (currentPage - 1) * productsPerPage + 1;
+  // Filtered and sorted products derived from live allProducts
+  const filteredProducts = useMemo(() => {
+    let list = [...allProducts];
+
+    const categoryParam = searchParams.get("category");
+    if (categoryParam && categoryParam !== "all") {
+      const lowerCat = categoryParam.toLowerCase();
+      list = list.filter(
+        (p) =>
+          p.category?.toLowerCase() === lowerCat ||
+          p.categorySlug?.toLowerCase() === lowerCat
+      );
+    }
+
+    const term = (searchQuery || "").toLowerCase().trim();
+    if (term) {
+      list = list.filter(
+        (p) =>
+          p.name.toLowerCase().includes(term) ||
+          p.category?.toLowerCase().includes(term)
+      );
+    }
+
+    switch (currentSort) {
+      case "price":
+        list.sort((a, b) => (a.price || 0) - (b.price || 0));
+        break;
+      case "price-desc":
+        list.sort((a, b) => (b.price || 0) - (a.price || 0));
+        break;
+      case "name-asc":
+        list.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      case "name-desc":
+        list.sort((a, b) => b.name.localeCompare(a.name));
+        break;
+      case "date":
+      default:
+        list.sort((a, b) => {
+          const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return tB - tA;
+        });
+        break;
+    }
+
+    return list;
+  }, [allProducts, searchParams, searchQuery, currentSort]);
+
+  const totalProducts = filteredProducts.length;
+  const totalPages = Math.max(1, Math.ceil(totalProducts / productsPerPage));
+
+  const paginatedProducts = useMemo(() => {
+    const skip = (currentPage - 1) * productsPerPage;
+    return filteredProducts.slice(skip, skip + productsPerPage);
+  }, [filteredProducts, currentPage, productsPerPage]);
+
+  const startIndex = totalProducts === 0 ? 0 : (currentPage - 1) * productsPerPage + 1;
   const endIndex = Math.min(currentPage * productsPerPage, totalProducts);
 
-  // Determine which page numbers to display
   const renderPaginationNumbers = () => {
-    const pageNumbers = [];
-    // Always show first page
+    const pageNumbers: (number | string)[] = [];
     pageNumbers.push(1);
-
-    // Determine a range around the current page
     const start = Math.max(2, currentPage - 2);
     const end = Math.min(totalPages - 1, currentPage + 2);
 
     if (currentPage > 4 && totalPages > 5) {
-      // Show ellipsis if current page is far from start
       pageNumbers.push("...");
     }
-
     for (let i = start; i <= end; i++) {
       pageNumbers.push(i);
     }
-
     if (currentPage < totalPages - 3 && totalPages > 5) {
-      // Show ellipsis if current page is far from end
       if (!pageNumbers.includes("...")) {
-        // Avoid duplicate ellipses
         pageNumbers.push("...");
       }
     }
-
-    // Always show last page if not already in range and total pages > 1
     if (totalPages > 1 && !pageNumbers.includes(totalPages)) {
       pageNumbers.push(totalPages);
     }
-
-    // Filter out duplicates and ensure correct order for ellipses
-    const uniquePageNumbers = Array.from(new Set(pageNumbers)); // Removes duplicates if e.g. 1 and ... overlap
-    uniquePageNumbers.sort((a, b) => {
-      if (a === "...") return 1; // Send "..." to end for sorting
-      if (b === "...") return -1;
-      return (a as number) - (b as number);
-    });
-
-    // Simple filter to ensure no adjacent ellipses
-    const finalPageNumbers: (number | string)[] = [];
-    for (let i = 0; i < uniquePageNumbers.length; i++) {
-      if (
-        uniquePageNumbers[i] === "..." &&
-        uniquePageNumbers[i - 1] === "..."
-      ) {
-        continue;
-      }
-      finalPageNumbers.push(uniquePageNumbers[i]);
-    }
-
-    return finalPageNumbers;
+    return Array.from(new Set(pageNumbers));
   };
 
   return (
@@ -199,17 +274,13 @@ export default function ShopClientPage({
               value={currentSort}
               disabled={isPending}
             >
+              <option value="date">Latest (Newest First)</option>
               <option value="price">Price: Low to High</option>
               <option value="price-desc">Price: High to Low</option>
-              <option value="date">Latest (by Last Updated)</option>
               <option value="name-asc">Name (A-Z)</option>
               <option value="name-desc">Name (Z-A)</option>
-              <option value="popularity">Popularity (Placeholder)</option>
-              <option value="rating">Average Rating (Placeholder)</option>
             </select>
           </div>
-
-          {/* Other filters can go here */}
 
           <BulkDiscount percentage={10} minItems={5} />
         </aside>
@@ -224,37 +295,29 @@ export default function ShopClientPage({
           </div>
 
           {/* Product Grid */}
-          {isPending && initialProducts.length === 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-6 gap-y-10">
-              {Array.from({ length: productsPerPage }).map((_, i) => (
-                <ProductCardSkeleton key={i} />
-              ))}
-            </div>
-          ) : products.length === 0 && !isPending ? (
+          {paginatedProducts.length === 0 ? (
             <p className="text-center text-gray-600 text-lg py-10">
               No products available at the moment for your selected criteria.
             </p>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-10">
-              {products.map((product, i) => (
+              {paginatedProducts.map((product, i) => (
                 <ProductCard
-                  key={i}
+                  key={product._id || i}
                   product={{
-                    ...product,
-                    id: product._id, // Map _id to id for ProductCard
-                    price: product.price ?? 0, // Ensure price is always a number
-                    slug: product.slug ?? "", // Ensure slug is always a string
-                    image: product.image ?? "", // Ensure image is always a string
+                    id: product._id,
+                    name: product.name,
+                    price: product.price ?? 0,
+                    discountPrice: product.discountPrice,
+                    slug: product.slug ?? "",
+                    image: product.image ?? "",
+                    pricingTierId: product.pricingTierId,
+                    pricingTierName: product.pricingTierName,
+                    pricingTiers: product.pricingTiers,
                   }}
                   index={i}
                 />
               ))}
-              {/* Skeletons for pending state when new products are loading on same page (e.g. from search/sort) */}
-              {isPending &&
-                initialProducts.length > 0 &&
-                Array.from({ length: productsPerPage }).map((_, i) => (
-                  <ProductCardSkeleton key={`skeleton-${i}`} />
-                ))}
             </div>
           )}
 
