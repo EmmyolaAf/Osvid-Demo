@@ -17,7 +17,7 @@ interface ProductsPageProps {
 
 const PRODUCTS_PER_PAGE = 12;
 
-export const dynamic = "force-dynamic";
+export const dynamic = "force-static";
 
 export default async function ProductsPage({
   searchParams,

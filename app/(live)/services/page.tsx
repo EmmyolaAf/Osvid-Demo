@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import PageHeader from "@/components/reusables/PageHeader";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 export default async function ServicesPage() {
   const result = await getServices();

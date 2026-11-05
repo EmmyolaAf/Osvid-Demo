@@ -19,7 +19,7 @@ import CTASection from "@/components/reusables/sections/cta";
 import TestimonialsSection from "@/components/reusables/sections/TestimonialsSection";
 import BlogSection from "@/components/reusables/sections/BlogSection.server";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 export default async function Home() {
   const [servicesRes, testimonialsRes] = await Promise.all([
