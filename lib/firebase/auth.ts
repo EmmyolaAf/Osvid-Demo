@@ -11,6 +11,17 @@ import { UserProfile, UserRole } from "@/types/auth";
 
 export const PRIMARY_SUPER_ADMIN_EMAIL = "abolarinwaemmanuelfree@gmail.com";
 
+export const ADMIN_EMAILS = [
+  "osvidbusinesses@gmail.com",
+  "hon.davidson61@gmail.com",
+];
+
+export function isAdminEmail(email?: string | null): boolean {
+  if (!email) return false;
+  const clean = email.trim().toLowerCase();
+  return ADMIN_EMAILS.some((e) => e.toLowerCase() === clean);
+}
+
 export interface AuthActionResult<T = any> {
   success: boolean;
   data?: T;
@@ -58,6 +69,8 @@ export async function fetchUserProfile(uid: string): Promise<UserProfile | null>
       // Enforce single super admin rule at the data retrieval layer
       if (isSuperAdminEmail(data.email)) {
         data.role = "super_admin";
+      } else if (isAdminEmail(data.email)) {
+        data.role = "admin";
       } else if (data.role === "super_admin") {
         data.role = "admin";
       }
@@ -136,10 +149,17 @@ export async function authenticateAndVerifyUser(
         };
       }
 
-      // Live Firestore profile role governs. Stale token claims cannot escalate role or permissions.
-      // Super admin role additionally requires verified provider identity.
+      // Live Firestore profile role governs, with authoritative promotion for designated admin credentials & claims
       if (isSuperAdminEmail(profile.email) || isSuperAdminEmail(cleanEmail)) {
         profile.role = "super_admin";
+      } else if (isAdminEmail(cleanEmail) || isAdminEmail(profile.email) || tokenClaims.role === "admin") {
+        profile.role = "admin";
+        if (tokenClaims.permissions) profile.permissions = tokenClaims.permissions;
+        if (tokenClaims.customTitle) profile.customTitle = tokenClaims.customTitle;
+      } else if (tokenClaims.role === "manager") {
+        profile.role = "manager";
+        if (tokenClaims.permissions) profile.permissions = tokenClaims.permissions;
+        if (tokenClaims.customTitle) profile.customTitle = tokenClaims.customTitle;
       } else if (profile.role === "super_admin") {
         const isVerifiedProvider = isVerifiedProviderClientUser(cred.user, profile, tokenClaims);
         if (!isVerifiedProvider && process.env.NODE_ENV !== "test") {
@@ -147,10 +167,17 @@ export async function authenticateAndVerifyUser(
         }
       }
 
-      // Update last login timestamp asynchronously
+      // Update last login timestamp & synchronized role asynchronously
+      const updatePayload: Record<string, any> = {
+        lastLoginAt: new Date().toISOString(),
+        role: profile.role,
+      };
+      if (profile.permissions) updatePayload.permissions = profile.permissions;
+      if (profile.customTitle) updatePayload.customTitle = profile.customTitle;
+
       setDoc(
         doc(db, "users", cred.user.uid),
-        { lastLoginAt: new Date().toISOString() },
+        updatePayload,
         { merge: true }
       ).catch(() => {});
 
@@ -197,10 +224,10 @@ export async function authenticateAndVerifyUser(
       };
     }
 
-    // If the token claims indicate staff (admin, manager, super_admin):
-    if (tokenClaims.role === "admin" || tokenClaims.role === "manager" || tokenClaims.role === "super_admin") {
+    // If the token claims or designated admin list indicate staff (admin, manager, super_admin):
+    if (tokenClaims.role === "admin" || tokenClaims.role === "manager" || tokenClaims.role === "super_admin" || isAdminEmail(cleanEmail)) {
       const isSuper = isSuperAdminEmail(cleanEmail);
-      const staffRole: UserRole = isSuper ? "super_admin" : (tokenClaims.role as UserRole);
+      const staffRole: UserRole = isSuper ? "super_admin" : (isAdminEmail(cleanEmail) ? "admin" : (tokenClaims.role as UserRole));
 
       profile = {
         uid: cred.user.uid,

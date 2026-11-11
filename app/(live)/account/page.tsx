@@ -23,31 +23,41 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { saveUserProfile } from "@/lib/firebase/firestore";
+import { isSuperAdminEmail, isAdminEmail } from "@/lib/firebase/auth";
 
 export default function AccountPage() {
   const router = useRouter();
-  const { user, userProfile, role, logout, isStaff, isSuperAdmin, refreshProfile } = useAuth();
+  const { user, userProfile, role, logout, isStaff, isAdmin, isSuperAdmin, refreshProfile } = useAuth();
   const [displayName, setDisplayName] = useState(userProfile?.displayName || "");
   const [phoneNumber, setPhoneNumber] = useState(userProfile?.phoneNumber || "");
   const [saving, setSaving] = useState(false);
 
+  const isSuper = Boolean(
+    isSuperAdmin ||
+    role === "super_admin" ||
+    userProfile?.role === "super_admin" ||
+    isSuperAdminEmail(user?.email)
+  );
+
+  const isAdminUser = Boolean(
+    isAdmin ||
+    role === "admin" ||
+    userProfile?.role === "admin" ||
+    isAdminEmail(user?.email) ||
+    isAdminEmail(userProfile?.email)
+  );
+
+  const isStaffUser = isSuper || isAdminUser || role === "manager" || userProfile?.role === "manager";
+
   React.useEffect(() => {
-    const isSuper =
-      isSuperAdmin ||
-      role === "super_admin" ||
-      userProfile?.role === "super_admin" ||
-      user?.email?.toLowerCase() === "abolarinwaemmanuelfree@gmail.com";
-
-    const isAdminUser =
-      role === "admin" ||
-      userProfile?.role === "admin";
-
     if (isSuper) {
       router.replace("/dashboard/super-admin");
     } else if (isAdminUser) {
       router.replace("/dashboard");
+    } else if (role === "manager" || userProfile?.role === "manager") {
+      router.replace("/dashboard");
     }
-  }, [isSuperAdmin, role, userProfile, user, router]);
+  }, [isSuper, isAdminUser, role, userProfile, router]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Lock, Mail, Loader2, ArrowRight, Eye, EyeOff } from "lucide-react";
 
-import { isSuperAdminEmail } from "@/lib/firebase/auth";
+import { isSuperAdminEmail, isAdminEmail } from "@/lib/firebase/auth";
 
 function LoginForm() {
   const [email, setEmail] = useState("");
@@ -24,7 +24,7 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const redirectUrl = searchParams.get("redirect");
 
-  // If already authenticated as Super Admin or Admin, send straight to their respective Dashboard
+  // If already authenticated as Super Admin, Admin, or Staff, send straight to their respective Dashboard
   React.useEffect(() => {
     const isSuper =
       isSuperAdmin ||
@@ -35,12 +35,16 @@ function LoginForm() {
     const isAdminUser =
       isAdmin ||
       role === "admin" ||
-      userProfile?.role === "admin";
+      userProfile?.role === "admin" ||
+      isAdminEmail(user?.email) ||
+      isAdminEmail(userProfile?.email);
 
     if (user) {
       if (isSuper) {
         router.replace("/dashboard/super-admin");
       } else if (isAdminUser) {
+        router.replace("/dashboard");
+      } else if (role === "manager" || userProfile?.role === "manager") {
         router.replace("/dashboard");
       }
     }
@@ -65,8 +69,14 @@ function LoginForm() {
       return;
     }
 
-    // 2. Tenant Store Administrator -> Admin Store Management Dashboard
-    if (userRole === "admin" || targetProfile?.role === "admin") {
+    // 2. Tenant Store Administrator -> Admin Store Management Dashboard (/dashboard)
+    if (
+      userRole === "admin" ||
+      targetProfile?.role === "admin" ||
+      isAdmin ||
+      isAdminEmail(userEmail) ||
+      isAdminEmail(user?.email)
+    ) {
       if (
         redirectUrl &&
         redirectUrl.startsWith("/dashboard") &&
@@ -79,12 +89,12 @@ function LoginForm() {
       return;
     }
 
-    // 3. Operations Manager -> Manager Staff & Operations Hub
+    // 3. Operations Manager -> Operations Management Dashboard (/dashboard)
     if (userRole === "manager" || targetProfile?.role === "manager") {
       if (redirectUrl && redirectUrl.startsWith("/dashboard")) {
         router.push(redirectUrl);
       } else {
-        router.push("/dashboard/managers");
+        router.push("/dashboard");
       }
       return;
     }

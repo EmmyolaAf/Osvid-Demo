@@ -19,11 +19,13 @@ import {
 import {
   PRIMARY_SUPER_ADMIN_EMAIL,
   isSuperAdminEmail,
+  ADMIN_EMAILS,
+  isAdminEmail,
   fetchUserProfile,
   authenticateAndVerifyUser,
 } from "@/lib/firebase/auth";
 
-export { PRIMARY_SUPER_ADMIN_EMAIL, isSuperAdminEmail };
+export { PRIMARY_SUPER_ADMIN_EMAIL, isSuperAdminEmail, ADMIN_EMAILS, isAdminEmail };
 
 interface AuthContextType {
   user: User | null;
@@ -70,9 +72,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           async (docSnap) => {
             if (docSnap.exists()) {
               const data = docSnap.data() as UserProfile;
-              // Enforce Single Super Admin Rule:
+              let tokenClaims: Record<string, any> = {};
+              try {
+                const tokenResult = await currentUser.getIdTokenResult();
+                tokenClaims = (tokenResult?.claims as any) || {};
+              } catch (_) {}
+
+              // Enforce Single Super Admin & Role Privilege Hierarchy:
               if (isSuperAdminEmail(data.email) || isSuperAdminEmail(currentUser.email)) {
                 data.role = "super_admin";
+              } else if (
+                tokenClaims.role === "admin" ||
+                isAdminEmail(data.email) ||
+                isAdminEmail(currentUser.email)
+              ) {
+                data.role = "admin";
+                if (tokenClaims.permissions && !data.permissions) {
+                  data.permissions = tokenClaims.permissions;
+                }
+                if (tokenClaims.customTitle && !data.customTitle) {
+                  data.customTitle = tokenClaims.customTitle;
+                }
+              } else if (tokenClaims.role === "manager") {
+                data.role = "manager";
+                if (tokenClaims.permissions && !data.permissions) {
+                  data.permissions = tokenClaims.permissions;
+                }
+                if (tokenClaims.customTitle && !data.customTitle) {
+                  data.customTitle = tokenClaims.customTitle;
+                }
               } else if (data.role === "super_admin") {
                 data.role = "admin";
               }
@@ -396,10 +424,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isSuperAdminEmail(userProfile?.email) ||
     (userProfile?.role === "super_admin" && (isSuperAdminEmail(userProfile?.email) || isSuperAdminEmail(user?.email)))
   );
-  const role: UserRole = isSuper ? "super_admin" : (userProfile?.role || "user");
+  const isAdminUser = Boolean(
+    isSuper ||
+    userProfile?.role === "admin" ||
+    isAdminEmail(user?.email) ||
+    isAdminEmail(userProfile?.email)
+  );
+  const isManagerUser = Boolean(!isAdminUser && userProfile?.role === "manager");
+  const role: UserRole = isSuper ? "super_admin" : (isAdminUser ? "admin" : (isManagerUser ? "manager" : (userProfile?.role || "user")));
   const isSuperAdmin = isSuper;
-  const isAdmin = isSuperAdmin || role === "admin";
-  const isManager = role === "manager";
+  const isAdmin = isAdminUser;
+  const isManager = isManagerUser;
   const isStaff = isSuperAdmin || isAdmin || isManager;
   const isCustomer = role === "user" && !isStaff;
 

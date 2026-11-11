@@ -8,7 +8,7 @@ import { Loader2, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 
-import { isSuperAdminEmail } from "@/lib/firebase/auth";
+import { isSuperAdminEmail, isAdminEmail } from "@/lib/firebase/auth";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -55,7 +55,17 @@ export default function ProtectedRoute({
     isSuperAdminEmail(user?.email) ||
     isSuperAdminEmail(userProfile?.email)
   );
-  const effectiveRole: UserRole = isSuper ? "super_admin" : role;
+  const isAdminUser = Boolean(
+    isAdmin ||
+    role === "admin" ||
+    isAdminEmail(user?.email) ||
+    isAdminEmail(userProfile?.email)
+  );
+  const effectiveRole: UserRole = isSuper
+    ? "super_admin"
+    : isAdminUser
+    ? "admin"
+    : role;
 
   const roleAllowed =
     !allowedRoles ||
