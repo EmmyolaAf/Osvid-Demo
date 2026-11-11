@@ -832,6 +832,21 @@ export default function DiscountsPage() {
                         </div>
                       </div>
 
+                      <div className="flex-1">
+                        <Label className="text-[10px] text-slate-400">Volume Equivalent (Optional):</Label>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <Input
+                            type="number"
+                            min="1"
+                            placeholder="e.g. 120"
+                            value={b.minVolumeEquivalent || ""}
+                            onChange={(e) => handleUpdateBracket(idx, "minVolumeEquivalent", e.target.value)}
+                            className="h-7 text-xs font-semibold"
+                          />
+                          <span className="text-slate-500 text-[10px]">L/kg</span>
+                        </div>
+                      </div>
+
                       <button
                         type="button"
                         onClick={() => handleRemoveBracket(idx)}

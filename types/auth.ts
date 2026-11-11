@@ -243,6 +243,8 @@ export interface PricingTierItem {
   maxQuantity?: number;
   discountPercentage: number;
   unitPrice?: number;
+  minVolumeEquivalent?: number;
+  variationId?: string;
 }
 
 export interface PricingTierGroup {
@@ -284,6 +286,11 @@ export interface ProductVariation {
   isActive: boolean;
   minPurchaseQuantity?: number;
   maxPurchaseQuantity?: number;
+  capacity?: number;
+  capacityUnit?: string;
+  pricingTierId?: string;
+  pricingTierName?: string;
+  pricingTiers?: PricingTierItem[];
 }
 
 export interface ProductReview {
@@ -366,6 +373,9 @@ export interface Product {
   pricingTierId?: string;
   pricingTierName?: string;
   pricingTiers?: PricingTierItem[];
+  volumeDiscountThreshold?: number;
+  volumeDiscountPercentage?: number;
+  volumeUnit?: string;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

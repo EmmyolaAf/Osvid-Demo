@@ -39,7 +39,7 @@ export function canonicalizeCartItems(rawItems: any): CartInputItem[] {
     throw new CommerceValidationError("Exceeded maximum allowable cart items limit.", 400);
   }
 
-  const aggregated = new Map<string, number>();
+  const aggregated = new Map<string, CartInputItem>();
 
   for (let i = 0; i < rawItems.length; i++) {
     const item = rawItems[i];
@@ -70,7 +70,14 @@ export function canonicalizeCartItems(rawItems: any): CartInputItem[] {
       );
     }
 
-    const current = aggregated.get(productId) || 0;
+    const variationId =
+      typeof item.variationId === "string" && item.variationId.trim()
+        ? item.variationId.trim()
+        : undefined;
+    const aggKey = variationId ? `${productId}::${variationId}` : productId;
+
+    const existing = aggregated.get(aggKey);
+    const current = existing?.quantity || 0;
     const nextTotal = current + qty;
     if (nextTotal > 1000) {
       throw new CommerceValidationError(
@@ -78,13 +85,15 @@ export function canonicalizeCartItems(rawItems: any): CartInputItem[] {
         400
       );
     }
-    aggregated.set(productId, nextTotal);
+    aggregated.set(aggKey, {
+      productId,
+      quantity: nextTotal,
+      variationId,
+      variationAttributes: item.variationAttributes || undefined,
+    });
   }
 
-  return Array.from(aggregated.entries()).map(([productId, quantity]) => ({
-    productId,
-    quantity,
-  }));
+  return Array.from(aggregated.values());
 }
 
 /**
@@ -270,20 +279,42 @@ export async function calculateAuthoritativeQuote(params: {
   const productSnapshots = new Map<string, DocumentSnapshot<DocumentData>>();
   const pricedItems: AuthoritativeQuoteItem[] = [];
 
-  // 1. Fetch authoritative product snapshots
-  for (const item of canonicalItems) {
-    const productRef = adminDb.collection("products").doc(item.productId);
+  // 1. Fetch authoritative product snapshots for all unique products
+  const uniqueProductIds = Array.from(new Set(canonicalItems.map((i) => i.productId)));
+  for (const pid of uniqueProductIds) {
+    const productRef = adminDb.collection("products").doc(pid);
     const snap = params.transaction
       ? await params.transaction.get(productRef)
       : await productRef.get();
 
     if (!snap.exists) {
       throw new CommerceValidationError(
-        `Product with ID "${item.productId}" does not exist in store catalogue.`,
+        `Product with ID "${pid}" does not exist in store catalogue.`,
         404
       );
     }
+    productSnapshots.set(pid, snap);
+  }
 
+  // 2. Compute cumulative volume per product across all variations in order
+  const productVolumeMap = new Map<string, number>();
+  for (const item of canonicalItems) {
+    const snap = productSnapshots.get(item.productId)!;
+    const data = snap.data() || {};
+    let itemCapacity = 0;
+    if (item.variationId && Array.isArray(data.variations)) {
+      const v = data.variations.find((v: any) => v.id === item.variationId);
+      if (v?.capacity) itemCapacity = Number(v.capacity);
+    } else {
+      itemCapacity = 1;
+    }
+    const currentVol = productVolumeMap.get(item.productId) || 0;
+    productVolumeMap.set(item.productId, currentVol + item.quantity * itemCapacity);
+  }
+
+  // 3. Authoritative unit price and discount calculation
+  for (const item of canonicalItems) {
+    const snap = productSnapshots.get(item.productId)!;
     const data = snap.data() || {};
 
     if (data.isActive === false) {
@@ -293,7 +324,15 @@ export async function calculateAuthoritativeQuote(params: {
       );
     }
 
-    const basePrice = Number(data.price);
+    let variation: any = undefined;
+    if (item.variationId && Array.isArray(data.variations)) {
+      variation = data.variations.find((v: any) => v.id === item.variationId);
+    }
+
+    const basePrice = variation
+      ? Number(variation.regularPrice || variation.price || data.price)
+      : Number(data.price);
+
     if (isNaN(basePrice) || basePrice < 0) {
       throw new CommerceValidationError(
         `Authoritative product "${data.name || item.productId}" has an invalid price configuration.`,
@@ -301,40 +340,73 @@ export async function calculateAuthoritativeQuote(params: {
       );
     }
 
-    // Authoritative discounted price semantics
     const hasDiscount =
-      data.discountPrice !== undefined &&
-      Number(data.discountPrice) > 0 &&
-      Number(data.discountPrice) < basePrice;
+      variation?.salePrice !== undefined && Number(variation.salePrice) > 0
+        ? Number(variation.salePrice) < basePrice
+        : data.discountPrice !== undefined &&
+          Number(data.discountPrice) > 0 &&
+          Number(data.discountPrice) < basePrice;
 
-    let unitPrice = hasDiscount ? Number(data.discountPrice) : basePrice;
+    const startingPrice = hasDiscount
+      ? Number(variation?.salePrice || data.discountPrice)
+      : basePrice;
 
-    // Authoritative quantity tier evaluation
-    if (Array.isArray(data.pricingTiers) && data.pricingTiers.length > 0) {
-      const sorted = [...data.pricingTiers].sort((a: any, b: any) => a.minQuantity - b.minQuantity);
+    // Evaluate quantity tiers (variation tiers take precedence if defined)
+    const tiers =
+      Array.isArray(variation?.pricingTiers) && variation.pricingTiers.length > 0
+        ? variation.pricingTiers
+        : Array.isArray(data.pricingTiers)
+        ? data.pricingTiers
+        : [];
+
+    let tierDiscountPct = 0;
+    let overrideUnitPrice: number | undefined = undefined;
+
+    if (tiers.length > 0) {
+      const sorted = [...tiers].sort((a: any, b: any) => a.minQuantity - b.minQuantity);
       for (const t of sorted) {
         if (item.quantity >= t.minQuantity && (!t.maxQuantity || item.quantity <= t.maxQuantity)) {
           if (t.discountPercentage && Number(t.discountPercentage) > 0) {
-            const pct = Math.min(100, Math.max(0, Number(t.discountPercentage)));
-            unitPrice = Math.round(basePrice * (1 - pct / 100));
+            tierDiscountPct = Math.min(100, Math.max(0, Number(t.discountPercentage)));
           } else if (t.unitPrice && Number(t.unitPrice) > 0) {
-            unitPrice = Number(t.unitPrice);
+            overrideUnitPrice = Number(t.unitPrice);
           }
         }
       }
     }
+
+    // Evaluate volume wholesale threshold (cross-variant)
+    const cumVolume = productVolumeMap.get(item.productId) || 0;
+    const vThreshold = Number(data.volumeDiscountThreshold || 0);
+    const vPct = Number(data.volumeDiscountPercentage || 0);
+    const volumeDiscountPct = vThreshold > 0 && cumVolume >= vThreshold && vPct > 0 ? vPct : 0;
+
+    const effectivePct = Math.max(tierDiscountPct, volumeDiscountPct);
+    let unitPrice = startingPrice;
+
+    if (effectivePct > 0) {
+      unitPrice = Math.round(basePrice * (1 - effectivePct / 100));
+    } else if (overrideUnitPrice !== undefined) {
+      unitPrice = overrideUnitPrice;
+    }
+
     const lineTotal = unitPrice * item.quantity;
 
-    productSnapshots.set(item.productId, snap);
+    const variantLabel = variation
+      ? Object.values(variation.attributes || {}).join(", ") || variation.sku || "Variation"
+      : undefined;
+
     pricedItems.push({
       productId: item.productId,
-      name: data.name || "Product",
-      sku: data.sku || "",
-      unit: data.unit || "unit",
-      imageUrl: data.imageUrl || "",
+      name: variantLabel ? `${data.name || "Product"} (${variantLabel})` : data.name || "Product",
+      sku: variation?.sku || data.sku || "",
+      unit: variation?.capacityUnit || data.unit || "unit",
+      imageUrl: variation?.imageUrl || data.imageUrl || "",
       quantity: item.quantity,
       unitPrice,
       lineTotal,
+      variationId: item.variationId,
+      variationAttributes: item.variationAttributes || variation?.attributes,
     });
   }
 

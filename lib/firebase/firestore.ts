@@ -679,6 +679,8 @@ export async function saveProductToDb(
         name: productData.name.trim(),
         slug,
         description: productData.description?.trim() || "",
+        shortDescription: productData.shortDescription?.trim() || "",
+        productType: productData.productType || "simple",
         price: Number(productData.price),
         category: productData.category?.trim() || "Industrial Chemicals",
         categorySlug:
@@ -692,12 +694,46 @@ export async function saveProductToDb(
         galleryImages: Array.isArray(productData.galleryImages) ? productData.galleryImages : [],
         unit: productData.unit?.trim() || "kg",
         sku: productData.sku?.trim() || "",
+        barcode: productData.barcode?.trim() || undefined,
+        weight: productData.weight?.trim() || undefined,
+        dimensions: productData.dimensions?.trim() || undefined,
         isFeatured: Boolean(productData.isFeatured),
         features: Array.isArray(productData.features) ? productData.features : [],
         specifications: productData.specifications || {},
+        tags: Array.isArray(productData.tags) ? productData.tags : [],
         suggestedProductIds: Array.isArray(productData.suggestedProductIds)
           ? productData.suggestedProductIds
           : [],
+        crossSellIds: Array.isArray(productData.crossSellIds) ? productData.crossSellIds : [],
+        upsellIds: Array.isArray(productData.upsellIds) ? productData.upsellIds : [],
+        groupedProductIds: Array.isArray(productData.groupedProductIds) ? productData.groupedProductIds : [],
+        attributes: Array.isArray(productData.attributes) ? productData.attributes : [],
+        variations: Array.isArray(productData.variations) ? productData.variations : [],
+        taxStatus: productData.taxStatus || "taxable",
+        taxClass: productData.taxClass || "standard",
+        saleStartDate: productData.saleStartDate || undefined,
+        saleEndDate: productData.saleEndDate || undefined,
+        pricingTierId: productData.pricingTierId || undefined,
+        pricingTierName: productData.pricingTierName || undefined,
+        pricingTiers: Array.isArray(productData.pricingTiers) ? productData.pricingTiers : undefined,
+        volumeDiscountThreshold:
+          productData.volumeDiscountThreshold !== undefined &&
+          productData.volumeDiscountThreshold !== null &&
+          !isNaN(Number(productData.volumeDiscountThreshold))
+            ? Number(productData.volumeDiscountThreshold)
+            : undefined,
+        volumeDiscountPercentage:
+          productData.volumeDiscountPercentage !== undefined &&
+          productData.volumeDiscountPercentage !== null &&
+          !isNaN(Number(productData.volumeDiscountPercentage))
+            ? Number(productData.volumeDiscountPercentage)
+            : undefined,
+        volumeUnit: productData.volumeUnit?.trim() || undefined,
+        manageStock: productData.manageStock !== false,
+        stockStatus: productData.stockStatus || "in_stock",
+        allowBackorders: productData.allowBackorders || "no",
+        lowStockThreshold:
+          productData.lowStockThreshold !== undefined ? Number(productData.lowStockThreshold) : 5,
         isActive: productData.isActive !== false,
         updatedAt: now,
       };
@@ -730,6 +766,8 @@ export async function saveProductToDb(
       name: productData.name.trim(),
       slug,
       description: productData.description?.trim() || "",
+      shortDescription: productData.shortDescription?.trim() || "",
+      productType: productData.productType || "simple",
       price: Number(productData.price),
       stockQuantity: 0,
       category: productData.category?.trim() || "Industrial Chemicals",
@@ -744,12 +782,46 @@ export async function saveProductToDb(
       galleryImages: Array.isArray(productData.galleryImages) ? productData.galleryImages : [],
       unit: productData.unit?.trim() || "kg",
       sku: productData.sku?.trim() || `SKU-${Date.now().toString().slice(-6)}`,
+      barcode: productData.barcode?.trim() || undefined,
+      weight: productData.weight?.trim() || undefined,
+      dimensions: productData.dimensions?.trim() || undefined,
       isFeatured: Boolean(productData.isFeatured),
       features: Array.isArray(productData.features) ? productData.features : [],
       specifications: productData.specifications || {},
+      tags: Array.isArray(productData.tags) ? productData.tags : [],
       suggestedProductIds: Array.isArray(productData.suggestedProductIds)
         ? productData.suggestedProductIds
         : [],
+      crossSellIds: Array.isArray(productData.crossSellIds) ? productData.crossSellIds : [],
+      upsellIds: Array.isArray(productData.upsellIds) ? productData.upsellIds : [],
+      groupedProductIds: Array.isArray(productData.groupedProductIds) ? productData.groupedProductIds : [],
+      attributes: Array.isArray(productData.attributes) ? productData.attributes : [],
+      variations: Array.isArray(productData.variations) ? productData.variations : [],
+      taxStatus: productData.taxStatus || "taxable",
+      taxClass: productData.taxClass || "standard",
+      saleStartDate: productData.saleStartDate || undefined,
+      saleEndDate: productData.saleEndDate || undefined,
+      pricingTierId: productData.pricingTierId || undefined,
+      pricingTierName: productData.pricingTierName || undefined,
+      pricingTiers: Array.isArray(productData.pricingTiers) ? productData.pricingTiers : undefined,
+      volumeDiscountThreshold:
+        productData.volumeDiscountThreshold !== undefined &&
+        productData.volumeDiscountThreshold !== null &&
+        !isNaN(Number(productData.volumeDiscountThreshold))
+          ? Number(productData.volumeDiscountThreshold)
+          : undefined,
+      volumeDiscountPercentage:
+        productData.volumeDiscountPercentage !== undefined &&
+        productData.volumeDiscountPercentage !== null &&
+        !isNaN(Number(productData.volumeDiscountPercentage))
+          ? Number(productData.volumeDiscountPercentage)
+          : undefined,
+      volumeUnit: productData.volumeUnit?.trim() || undefined,
+      manageStock: productData.manageStock !== false,
+      stockStatus: productData.stockStatus || "in_stock",
+      allowBackorders: productData.allowBackorders || "no",
+      lowStockThreshold:
+        productData.lowStockThreshold !== undefined ? Number(productData.lowStockThreshold) : 5,
       isActive: productData.isActive !== false,
       createdAt: productData.createdAt || now,
       updatedAt: now,

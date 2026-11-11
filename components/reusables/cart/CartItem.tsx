@@ -12,7 +12,7 @@ interface CartItemProps {
 }
 
 export function CartItem({ item }: CartItemProps) {
-  const { updateQuantity, removeFromCart } = useCart();
+  const { updateQuantity, removeFromCart, cart } = useCart();
   const [isUpdating, setIsUpdating] = useState(false);
 
   const handleQuantityChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -36,9 +36,9 @@ export function CartItem({ item }: CartItemProps) {
     setIsUpdating(false);
   };
 
-  // Authoritative dynamic tier pricing calculation
-  const effective = getEffectiveCartItemPrice(item);
-  const isTierActive = Boolean(effective.appliedTier);
+  // Authoritative dynamic tier and volume pricing calculation
+  const effective = getEffectiveCartItemPrice(item, cart);
+  const isDiscountActive = effective.discountPercentage > 0;
   const itemSubtotal = effective.unitPrice * item.quantity;
 
   const formattedSubtotal = new Intl.NumberFormat("en-NG", {
@@ -92,7 +92,7 @@ export function CartItem({ item }: CartItemProps) {
         {/* Pricing & Tier Status Display */}
         <div className="mt-1 space-y-1">
           <div className="flex items-center gap-2 flex-wrap">
-            {isTierActive ? (
+            {isDiscountActive ? (
               <div className="flex items-baseline gap-1.5">
                 <span className="line-through text-slate-400 text-xs">
                   {item.priceData.formatted.price}
@@ -126,18 +126,35 @@ export function CartItem({ item }: CartItemProps) {
             )}
           </div>
 
-          {/* Active Wholesale Tier Badge */}
-          {isTierActive && (
+          {/* Active Wholesale Tier or Volume Discount Badge */}
+          {effective.isVolumeDiscountApplied ? (
+            <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-bold">
+              <Sparkles size={11} className="text-emerald-600" />
+              <span>
+                Volume Wholesale Applied: {effective.discountPercentage}% OFF ({effective.cumulativeVolume} {effective.volumeUnit} equivalent reached)
+              </span>
+            </div>
+          ) : effective.appliedTier ? (
             <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-bold">
               <Sparkles size={11} className="text-emerald-600" />
               <span>
                 Bulk Tier Applied: {effective.discountPercentage}% OFF ({effective.appliedTier?.minQuantity}+ items)
               </span>
             </div>
+          ) : null}
+
+          {/* Volume Stacking Nudge if threshold is set but not yet met */}
+          {effective.volumeThreshold && !effective.isVolumeDiscountApplied && (
+            <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-orange-50 text-orange-800 border border-orange-200 text-[10px] font-medium">
+              <Tag size={10} className="text-orange-600" />
+              <span>
+                Add {Math.max(0, effective.volumeThreshold - effective.cumulativeVolume)} more {effective.volumeUnit} across any container size to unlock {item.volumeDiscountPercentage}% bulk wholesale discount!
+              </span>
+            </div>
           )}
 
-          {/* Nudge if near a wholesale threshold */}
-          {!isTierActive && nextTier && (
+          {/* Quantity Tier Nudge */}
+          {!isDiscountActive && nextTier && (
             <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-orange-50 text-orange-800 border border-orange-200 text-[10px] font-medium">
               <Tag size={10} className="text-orange-600" />
               <span>

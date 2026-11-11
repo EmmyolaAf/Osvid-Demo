@@ -75,6 +75,11 @@ export async function GET(req: NextRequest) {
           pricingTierId: data.pricingTierId || undefined,
           pricingTierName: data.pricingTierName || undefined,
           pricingTiers: Array.isArray(data.pricingTiers) ? data.pricingTiers : undefined,
+          volumeDiscountThreshold:
+            data.volumeDiscountThreshold !== undefined ? Number(data.volumeDiscountThreshold) : undefined,
+          volumeDiscountPercentage:
+            data.volumeDiscountPercentage !== undefined ? Number(data.volumeDiscountPercentage) : undefined,
+          volumeUnit: data.volumeUnit || undefined,
           createdAt: data.createdAt || new Date().toISOString(),
           updatedAt: data.updatedAt || new Date().toISOString(),
         } as Product;
@@ -180,6 +185,19 @@ export async function POST(req: NextRequest) {
       pricingTierId: product.pricingTierId || undefined,
       pricingTierName: product.pricingTierName || undefined,
       pricingTiers: Array.isArray(product.pricingTiers) ? product.pricingTiers : undefined,
+      volumeDiscountThreshold:
+        product.volumeDiscountThreshold !== undefined &&
+        product.volumeDiscountThreshold !== null &&
+        !isNaN(Number(product.volumeDiscountThreshold))
+          ? Number(product.volumeDiscountThreshold)
+          : undefined,
+      volumeDiscountPercentage:
+        product.volumeDiscountPercentage !== undefined &&
+        product.volumeDiscountPercentage !== null &&
+        !isNaN(Number(product.volumeDiscountPercentage))
+          ? Number(product.volumeDiscountPercentage)
+          : undefined,
+      volumeUnit: product.volumeUnit?.trim() || undefined,
       isActive: product.isActive !== false,
       createdAt: product.createdAt || now,
       updatedAt: now,

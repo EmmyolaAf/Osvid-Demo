@@ -35,24 +35,34 @@ export type CartItem = {
   pricingTierId?: string;
   pricingTierName?: string;
   pricingTiers?: PricingTierItem[];
+  capacity?: number;
+  capacityUnit?: string;
+  volumeDiscountThreshold?: number;
+  volumeDiscountPercentage?: number;
+  volumeUnit?: string;
 };
 
-export function getEffectiveCartItemPrice(item: CartItem): {
+export function getEffectiveCartItemPrice(
+  item: CartItem,
+  allItems?: CartItem[]
+): {
   unitPrice: number;
   baseUnitPrice: number;
   appliedTier?: PricingTierItem;
   discountPercentage: number;
+  isVolumeDiscountApplied: boolean;
+  cumulativeVolume: number;
+  volumeThreshold?: number;
+  volumeUnit?: string;
+  discountReason?: string;
+  savingsPerUnit: number;
 } {
   const basePrice = item.priceData.discountedPrice ?? item.priceData.price;
   const tiers = Array.isArray(item.pricingTiers) ? item.pricingTiers : [];
 
-  if (tiers.length === 0) {
-    return {
-      unitPrice: basePrice,
-      baseUnitPrice: basePrice,
-      discountPercentage: 0,
-    };
-  }
+  // 1. Evaluate single-variation or product-level quantity tiers
+  let tierDiscountPct = 0;
+  let appliedTier: PricingTierItem | undefined = undefined;
 
   const eligibleTiers = tiers.filter((t) => {
     if (typeof t.minQuantity === "number" && item.quantity < t.minQuantity) {
@@ -64,30 +74,60 @@ export function getEffectiveCartItemPrice(item: CartItem): {
     return true;
   });
 
-  if (eligibleTiers.length === 0) {
-    return {
-      unitPrice: basePrice,
-      baseUnitPrice: basePrice,
-      discountPercentage: 0,
-    };
+  if (eligibleTiers.length > 0) {
+    const sorted = [...eligibleTiers].sort(
+      (a, b) => (b.discountPercentage || 0) - (a.discountPercentage || 0)
+    );
+    appliedTier = sorted[0];
+    tierDiscountPct = Number(appliedTier.discountPercentage || 0);
   }
 
-  const sorted = [...eligibleTiers].sort((a, b) => (b.discountPercentage || 0) - (a.discountPercentage || 0));
-  const bestTier = sorted[0];
+  // 2. Evaluate cross-variation cumulative volume equivalent threshold
+  const sameProductItems = (allItems && allItems.length > 0 ? allItems : [item]).filter(
+    (i) => i.id === item.id
+  );
+  const cumulativeVolume = sameProductItems.reduce(
+    (acc, i) => acc + Number(i.quantity) * (Number(i.capacity) || 0),
+    0
+  );
+
+  let volumeDiscountPct = 0;
+  const vThreshold = Number(item.volumeDiscountThreshold || 0);
+  const vDiscountPct = Number(item.volumeDiscountPercentage || 0);
+
+  if (vThreshold > 0 && cumulativeVolume >= vThreshold && vDiscountPct > 0) {
+    volumeDiscountPct = vDiscountPct;
+  }
+
+  // 3. Award the customer whichever discount yields the greatest benefit
+  const bestDiscountPct = Math.max(tierDiscountPct, volumeDiscountPct);
+  const isVolumeDiscountApplied = volumeDiscountPct >= tierDiscountPct && volumeDiscountPct > 0;
 
   let unitPrice = basePrice;
-  if (bestTier.discountPercentage && Number(bestTier.discountPercentage) > 0) {
-    const pct = Math.min(100, Math.max(0, Number(bestTier.discountPercentage)));
+  if (bestDiscountPct > 0) {
+    const pct = Math.min(100, Math.max(0, bestDiscountPct));
     unitPrice = Math.round(basePrice * (1 - pct / 100));
-  } else if (bestTier.unitPrice && Number(bestTier.unitPrice) > 0) {
-    unitPrice = Number(bestTier.unitPrice);
+  } else if (appliedTier?.unitPrice && Number(appliedTier.unitPrice) > 0) {
+    unitPrice = Number(appliedTier.unitPrice);
   }
+
+  const volUnit = item.volumeUnit || item.capacityUnit || "Liters";
 
   return {
     unitPrice,
     baseUnitPrice: basePrice,
-    appliedTier: bestTier,
-    discountPercentage: bestTier.discountPercentage || 0,
+    appliedTier,
+    discountPercentage: bestDiscountPct,
+    isVolumeDiscountApplied,
+    cumulativeVolume,
+    volumeThreshold: vThreshold > 0 ? vThreshold : undefined,
+    volumeUnit: volUnit,
+    discountReason: isVolumeDiscountApplied
+      ? `Volume Wholesale (${cumulativeVolume} ${volUnit} reached)`
+      : tierDiscountPct > 0
+      ? `${tierDiscountPct}% Tier Discount`
+      : undefined,
+    savingsPerUnit: Math.max(0, basePrice - unitPrice),
   };
 }
 
@@ -216,7 +256,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const { totalItems, subtotal } = useMemo(() => {
     const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
     const subtotal = cart.reduce((sum, item) => {
-      const { unitPrice } = getEffectiveCartItemPrice(item);
+      const { unitPrice } = getEffectiveCartItemPrice(item, cart);
       return sum + unitPrice * item.quantity;
     }, 0);
     return { totalItems, subtotal };

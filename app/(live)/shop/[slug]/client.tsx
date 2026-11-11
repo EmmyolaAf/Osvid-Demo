@@ -93,25 +93,47 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
   const inStock = currentStock > 0 && currentStockStatus !== "outofstock" && currentStockStatus !== "out_of_stock" && product.isActive !== false;
   const isLowStock = inStock && currentStock <= 10;
 
+  // Active variation tiers and volume calculations
+  const activeTiers = useMemo(() => {
+    return selectedVariation?.pricingTiers && selectedVariation.pricingTiers.length > 0
+      ? selectedVariation.pricingTiers
+      : product.pricingTiers || [];
+  }, [selectedVariation, product.pricingTiers]);
+
+  const selectedCapacity = selectedVariation?.capacity !== undefined ? Number(selectedVariation.capacity) : 1;
+  const currentVolume = quantity * selectedCapacity;
+  const volumeDiscountThreshold =
+    product.volumeDiscountThreshold !== undefined ? Number(product.volumeDiscountThreshold) : 0;
+  const volumeDiscountPercentage =
+    product.volumeDiscountPercentage !== undefined ? Number(product.volumeDiscountPercentage) : 0;
+  const isVolumeThresholdMet =
+    volumeDiscountThreshold > 0 && currentVolume >= volumeDiscountThreshold && volumeDiscountPercentage > 0;
+
   // Active pricing tier calculation
   const activePricingTier = useMemo(() => {
-    if (!product.pricingTiers || product.pricingTiers.length === 0) return null;
+    if (!activeTiers || activeTiers.length === 0) return null;
     return (
-      product.pricingTiers.find(
+      activeTiers.find(
         (t) =>
           quantity >= t.minQuantity &&
           (!t.maxQuantity || quantity <= t.maxQuantity)
       ) || null
     );
-  }, [product.pricingTiers, quantity]);
+  }, [activeTiers, quantity]);
+
+  const effectiveDiscountPercentage = useMemo(() => {
+    const tierPct = activePricingTier?.discountPercentage || 0;
+    const volPct = isVolumeThresholdMet ? volumeDiscountPercentage : 0;
+    return Math.max(tierPct, volPct);
+  }, [activePricingTier, isVolumeThresholdMet, volumeDiscountPercentage]);
 
   const effectiveUnitPrice = useMemo(() => {
-    if (activePricingTier) {
-      if (activePricingTier.unitPrice) return activePricingTier.unitPrice;
-      return Math.round(currentPrice * (1 - activePricingTier.discountPercentage / 100));
+    if (effectiveDiscountPercentage > 0) {
+      return Math.round(currentPrice * (1 - effectiveDiscountPercentage / 100));
     }
+    if (activePricingTier?.unitPrice) return activePricingTier.unitPrice;
     return currentPrice;
-  }, [activePricingTier, currentPrice]);
+  }, [effectiveDiscountPercentage, activePricingTier, currentPrice]);
 
   const effectiveTotal = effectiveUnitPrice * quantity;
   const standardTotal = currentPrice * quantity;
@@ -192,9 +214,14 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
           variationId: selectedVariation?.id,
           variationAttributes: selectedVariation ? selectedAttributes : undefined,
           sku: currentSku,
-          pricingTierId: product.pricingTierId,
-          pricingTierName: product.pricingTierName,
-          pricingTiers: product.pricingTiers,
+          pricingTierId: selectedVariation?.pricingTierId || product.pricingTierId,
+          pricingTierName: selectedVariation?.pricingTierName || product.pricingTierName,
+          pricingTiers: activeTiers,
+          capacity: selectedVariation?.capacity !== undefined ? Number(selectedVariation.capacity) : undefined,
+          capacityUnit: selectedVariation?.capacityUnit || product.volumeUnit || product.unit,
+          volumeDiscountThreshold: product.volumeDiscountThreshold,
+          volumeDiscountPercentage: product.volumeDiscountPercentage,
+          volumeUnit: product.volumeUnit || product.unit,
           priceData: {
             price: basePrice,
             discountedPrice: salePrice,
@@ -465,8 +492,49 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
             </div>
           )}
 
+          {/* Cumulative Volume Wholesale Rule Banner */}
+          {volumeDiscountThreshold > 0 && volumeDiscountPercentage > 0 && (
+            <div className="p-4 rounded-3xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/90 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black uppercase tracking-wider text-amber-950 flex items-center gap-1.5">
+                  <Sparkles size={14} className="text-amber-600" />
+                  Volume Wholesale Stacking: {volumeDiscountPercentage}% OFF
+                </span>
+                <span className="text-[10px] font-extrabold text-amber-800 bg-amber-100/90 px-2.5 py-0.5 rounded-full border border-amber-200">
+                  {volumeDiscountThreshold} {product.volumeUnit || "Liters"} Threshold
+                </span>
+              </div>
+              <p className="text-xs text-amber-950/80 leading-relaxed">
+                Stack any combination of container sizes (or purchase bulk units) to reach{" "}
+                <strong>
+                  {volumeDiscountThreshold} {product.volumeUnit || "Liters"}
+                </strong>{" "}
+                total volume, and automatically unlock <strong>{volumeDiscountPercentage}% wholesale discount</strong>!
+              </p>
+
+              {selectedVariation?.capacity && (
+                <div className="text-[11px] font-semibold text-amber-950 bg-white/90 p-2.5 rounded-2xl border border-amber-200/60 flex items-center justify-between">
+                  <span>
+                    Current selection: {quantity} &times; {selectedVariation.capacity}{" "}
+                    {selectedVariation.capacityUnit || product.volumeUnit || "L"} ={" "}
+                    <strong>{currentVolume} {product.volumeUnit || "Liters"}</strong>
+                  </span>
+                  {isVolumeThresholdMet ? (
+                    <span className="text-emerald-700 font-bold flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-md">
+                      <Check size={12} /> Wholesale Discount Active!
+                    </span>
+                  ) : (
+                    <span className="text-amber-700">
+                      (Buy {Math.ceil((volumeDiscountThreshold - currentVolume) / Number(selectedVariation.capacity))} more to unlock)
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Wholesale & Tiered Pricing Breakdown */}
-          {product.pricingTiers && product.pricingTiers.length > 0 && (
+          {activeTiers && activeTiers.length > 0 && (
             <div className="p-5 rounded-3xl bg-gradient-to-br from-orange-50/80 via-amber-50/50 to-orange-50/80 border border-orange-200/90 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-black uppercase tracking-wider text-orange-950 flex items-center gap-1.5">
@@ -482,7 +550,7 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
               </p>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-1">
-                {product.pricingTiers.map((tier, idx) => {
+                {activeTiers.map((tier, idx) => {
                   const isReached =
                     quantity >= tier.minQuantity &&
                     (!tier.maxQuantity || quantity <= tier.maxQuantity);
@@ -500,11 +568,11 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
                       }`}
                     >
                       <div className="flex items-center justify-between font-extrabold text-slate-900">
-                        <span>{tier.minQuantity}+ {product.unit || "units"}</span>
+                        <span>{tier.minQuantity}+ {selectedVariation?.capacityUnit || product.unit || "units"}</span>
                         <span className="text-orange-600 font-black">-{tier.discountPercentage}%</span>
                       </div>
                       <div className="text-[11px] font-bold text-slate-600">
-                        {formatCurrency("NGN", tierPrice)} / {product.unit || "unit"}
+                        {formatCurrency("NGN", tierPrice)} / {selectedVariation?.capacityUnit || product.unit || "unit"}
                       </div>
                       {isReached && (
                         <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md mt-0.5">
@@ -770,7 +838,7 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
                 OSVID Chemicals provides verified volume purchasing tiers for manufacturers, project contractors, and regional distributors. Tier discounts calculate automatically at checkout:
               </p>
 
-              {product.pricingTiers && product.pricingTiers.length > 0 ? (
+              {activeTiers && activeTiers.length > 0 ? (
                 <div className="overflow-hidden rounded-2xl border border-slate-200">
                   <table className="w-full text-xs text-left">
                     <thead className="bg-slate-100 text-slate-800 font-extrabold uppercase">
@@ -782,7 +850,7 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {product.pricingTiers.map((tier, i) => (
+                      {activeTiers.map((tier, i) => (
                         <tr key={i} className="hover:bg-orange-50/40">
                           <td className="px-5 py-3.5 font-bold text-slate-900">
                             {tier.minQuantity} {tier.maxQuantity ? `– ${tier.maxQuantity}` : "+"} {product.unit || "units"}

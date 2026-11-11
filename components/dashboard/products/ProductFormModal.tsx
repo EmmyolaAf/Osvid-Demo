@@ -5,6 +5,7 @@ import {
   Product,
   ProductCategory,
   PricingTierGroup,
+  PricingTierItem,
   ProductType,
   ProductAttribute,
   ProductVariation,
@@ -26,6 +27,8 @@ import {
   Sparkles,
   Check,
   X,
+  Gauge,
+  Percent,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +45,7 @@ import {
   validateMediaFile,
   isOwnedStorageUrl,
 } from "@/lib/firebase/storage";
+import { savePricingTierInDb } from "@/lib/firebase/firestore";
 import { toast } from "sonner";
 import formatCurrency from "@/helpers/formatCurrency";
 
@@ -85,7 +89,7 @@ export function ProductFormModal({
   const [weight, setWeight] = useState(editingProduct?.weight || "");
   const [dimensions, setDimensions] = useState(editingProduct?.dimensions || "");
 
-  // Pricing
+  // Pricing & Discounts
   const [price, setPrice] = useState(editingProduct ? editingProduct.price.toString() : "");
   const [discountPrice, setDiscountPrice] = useState(
     editingProduct?.discountPrice ? editingProduct.discountPrice.toString() : ""
@@ -93,6 +97,38 @@ export function ProductFormModal({
   const [saleStartDate, setSaleStartDate] = useState(editingProduct?.saleStartDate || "");
   const [saleEndDate, setSaleEndDate] = useState(editingProduct?.saleEndDate || "");
   const [pricingTierId, setPricingTierId] = useState(editingProduct?.pricingTierId || "");
+  const [discountMode, setDiscountMode] = useState<"existing" | "custom" | "none">(
+    editingProduct?.pricingTierId
+      ? "existing"
+      : editingProduct?.pricingTiers && editingProduct.pricingTiers.length > 0
+      ? "custom"
+      : "existing"
+  );
+  const [customTierName, setCustomTierName] = useState(
+    editingProduct?.pricingTierName || "Volume Quantity Discount"
+  );
+  const [customTiers, setCustomTiers] = useState<PricingTierItem[]>(
+    editingProduct?.pricingTiers && editingProduct.pricingTiers.length > 0
+      ? editingProduct.pricingTiers
+      : [
+          { minQuantity: 5, discountPercentage: 5 },
+          { minQuantity: 10, discountPercentage: 10 },
+        ]
+  );
+  const [volumeDiscountThreshold, setVolumeDiscountThreshold] = useState(
+    editingProduct?.volumeDiscountThreshold !== undefined
+      ? editingProduct.volumeDiscountThreshold.toString()
+      : ""
+  );
+  const [volumeDiscountPercentage, setVolumeDiscountPercentage] = useState(
+    editingProduct?.volumeDiscountPercentage !== undefined
+      ? editingProduct.volumeDiscountPercentage.toString()
+      : ""
+  );
+  const [volumeUnit, setVolumeUnit] = useState(
+    editingProduct?.volumeUnit || editingProduct?.unit || "Liters"
+  );
+  const [isSavingCustomTierToGlobal, setIsSavingCustomTierToGlobal] = useState(false);
   const [taxStatus, setTaxStatus] = useState(editingProduct?.taxStatus || "taxable");
   const [taxClass, setTaxClass] = useState(editingProduct?.taxClass || "standard");
 
@@ -188,6 +224,57 @@ export function ProductFormModal({
     setAttributes(attributes.filter((a) => a.id !== id));
   };
 
+  // Custom Live Pricing Tiers Helpers
+  const handleAddCustomTier = () => {
+    const lastTier = customTiers[customTiers.length - 1];
+    const nextMin = lastTier ? lastTier.minQuantity + 5 : 5;
+    const nextPct = lastTier ? Math.min(100, lastTier.discountPercentage + 5) : 5;
+    setCustomTiers([...customTiers, { minQuantity: nextMin, discountPercentage: nextPct }]);
+  };
+
+  const handleRemoveCustomTier = (idx: number) => {
+    if (customTiers.length <= 1) {
+      toast.warning("At least one tier bracket is required in custom mode.");
+      return;
+    }
+    setCustomTiers(customTiers.filter((_, i) => i !== idx));
+  };
+
+  const handleUpdateCustomTier = (idx: number, field: keyof PricingTierItem, val: any) => {
+    const copy = [...customTiers];
+    copy[idx] = { ...copy[idx], [field]: Number(val) || 0 };
+    setCustomTiers(copy);
+  };
+
+  const handleSaveCustomTierGlobally = async () => {
+    if (!customTierName.trim()) {
+      toast.error("Please provide a name for this pricing scheme.");
+      return;
+    }
+    try {
+      setIsSavingCustomTierToGlobal(true);
+      const res = await savePricingTierInDb({
+        name: customTierName.trim(),
+        description: `Created from product "${name || "Catalogue Product"}"`,
+        tiers: customTiers,
+        isActive: true,
+      });
+      if (!res.success) {
+        toast.error(res.error || "Failed to save discount scheme.");
+        return;
+      }
+      toast.success(`Pricing scheme "${customTierName}" saved to global Discounts library!`);
+      if (res.data?.id) {
+        setPricingTierId(res.data.id);
+        setDiscountMode("existing");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to save pricing tier to database.");
+    } finally {
+      setIsSavingCustomTierToGlobal(false);
+    }
+  };
+
   // Add individual variation
   const handleAddVariation = () => {
     const varId = `var_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -199,6 +286,8 @@ export function ProductFormModal({
       stockQuantity: 50,
       stockStatus: "in_stock",
       manageStock: true,
+      capacity: 1,
+      capacityUnit: volumeUnit || unit || "Liters",
       attributes: {},
       isActive: true,
     };
@@ -299,7 +388,24 @@ export function ProductFormModal({
       .map((t) => t.trim())
       .filter(Boolean);
 
-    const selectedGroup = pricingTierGroups.find((g) => g.id === pricingTierId);
+    let tierId: string | undefined = undefined;
+    let tierName: string | undefined = undefined;
+    let tiersToSave: PricingTierItem[] | undefined = undefined;
+
+    if (discountMode === "existing" && pricingTierId) {
+      const selectedGroup = pricingTierGroups.find((g) => g.id === pricingTierId);
+      if (selectedGroup) {
+        tierId = selectedGroup.id;
+        tierName = selectedGroup.name;
+        tiersToSave = selectedGroup.tiers;
+      }
+    } else if (discountMode === "custom") {
+      const validCustom = customTiers.filter((t) => t.minQuantity > 0 && t.discountPercentage > 0);
+      if (validCustom.length > 0) {
+        tierName = customTierName.trim() || "Custom Product Tiers";
+        tiersToSave = validCustom;
+      }
+    }
 
     const payload = {
       name: name.trim(),
@@ -315,9 +421,18 @@ export function ProductFormModal({
       discountPrice: discountPrice ? parseFloat(discountPrice) : undefined,
       saleStartDate: saleStartDate || undefined,
       saleEndDate: saleEndDate || undefined,
-      pricingTierId: selectedGroup ? selectedGroup.id : undefined,
-      pricingTierName: selectedGroup ? selectedGroup.name : undefined,
-      pricingTiers: selectedGroup ? selectedGroup.tiers : undefined,
+      pricingTierId: tierId,
+      pricingTierName: tierName,
+      pricingTiers: tiersToSave,
+      volumeDiscountThreshold:
+        volumeDiscountThreshold !== "" && !isNaN(Number(volumeDiscountThreshold))
+          ? Number(volumeDiscountThreshold)
+          : undefined,
+      volumeDiscountPercentage:
+        volumeDiscountPercentage !== "" && !isNaN(Number(volumeDiscountPercentage))
+          ? Number(volumeDiscountPercentage)
+          : undefined,
+      volumeUnit: volumeUnit.trim() || undefined,
       taxStatus,
       taxClass,
       stockQuantity: parseInt(stockQuantity, 10) || 0,
@@ -332,7 +447,14 @@ export function ProductFormModal({
       imageUrl: imageUrl.trim() || "/images/placeholder.webp",
       galleryImages,
       attributes,
-      variations,
+      variations: variations.map((v) => ({
+        ...v,
+        capacity: v.capacity !== undefined && !isNaN(Number(v.capacity)) ? Number(v.capacity) : undefined,
+        capacityUnit: v.capacityUnit?.trim() || volumeUnit || unit || "Liters",
+        pricingTierId: v.pricingTierId || undefined,
+        pricingTierName: v.pricingTierName || undefined,
+        pricingTiers: v.pricingTiers && v.pricingTiers.length > 0 ? v.pricingTiers : undefined,
+      })),
       groupedProductIds,
       upsellIds,
       crossSellIds,
@@ -616,38 +738,268 @@ export function ProductFormModal({
                 </p>
               </div>
 
-              {/* Quantity / Wholesale Pricing Tier Selection */}
-              <div className="bg-orange-50/50 border border-orange-200/80 rounded-2xl p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                    <Tag size={14} className="text-orange-600" />
-                    Quantity / Wholesale Pricing Tier
-                  </Label>
-                  {pricingTierId && (
-                    <span className="text-[10px] font-bold text-orange-700 bg-orange-100 px-2 py-0.5 rounded-full">
-                      Tier Attached
+              {/* Bulk & Volume Discounting Strategy */}
+              <div className="bg-orange-50/50 border border-orange-200/80 rounded-2xl p-4 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-orange-100 pb-3">
+                  <div>
+                    <Label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <Tag size={14} className="text-orange-600" />
+                      Bulk &amp; Tiered Discounting Strategy
+                    </Label>
+                    <p className="text-[11px] text-slate-500">
+                      Select a reusable scheme from the Discounts screen or build custom tiers live right here.
+                    </p>
+                  </div>
+
+                  {/* Mode Selector */}
+                  <div className="inline-flex rounded-xl bg-orange-100/70 p-1 text-xs font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => setDiscountMode("existing")}
+                      className={`px-3 py-1 rounded-lg transition-all ${
+                        discountMode === "existing"
+                          ? "bg-white text-orange-900 shadow-xs font-bold"
+                          : "text-orange-700 hover:text-orange-950"
+                      }`}
+                    >
+                      Select Scheme
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDiscountMode("custom")}
+                      className={`px-3 py-1 rounded-lg transition-all ${
+                        discountMode === "custom"
+                          ? "bg-white text-orange-900 shadow-xs font-bold"
+                          : "text-orange-700 hover:text-orange-950"
+                      }`}
+                    >
+                      Custom Live Tiers
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDiscountMode("none");
+                        setPricingTierId("");
+                      }}
+                      className={`px-3 py-1 rounded-lg transition-all ${
+                        discountMode === "none"
+                          ? "bg-white text-orange-900 shadow-xs font-bold"
+                          : "text-orange-700 hover:text-orange-950"
+                      }`}
+                    >
+                      No Tiers
+                    </button>
+                  </div>
+                </div>
+
+                {/* MODE 1: SELECT EXISTING SCHEME */}
+                {discountMode === "existing" && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[11px] font-bold text-slate-700">
+                        Select Pricing Tier Scheme (From Discounts Screen)
+                      </Label>
+                      {pricingTierId && (
+                        <span className="text-[10px] font-bold text-orange-700 bg-orange-100 px-2 py-0.5 rounded-full">
+                          Scheme Linked
+                        </span>
+                      )}
+                    </div>
+                    <select
+                      value={pricingTierId}
+                      onChange={(e) => setPricingTierId(e.target.value)}
+                      className="w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium outline-none focus:border-orange-500"
+                    >
+                      <option value="">Choose a pre-configured scheme...</option>
+                      {pricingTierGroups
+                        .filter((g) => g.isActive)
+                        .map((group) => {
+                          const breakdown = (group.tiers || [])
+                            .map((t) => `${t.minQuantity}+ (${t.discountPercentage}%)`)
+                            .join(", ");
+                          return (
+                            <option key={group.id} value={group.id}>
+                              {group.name} {breakdown ? `— [${breakdown}]` : ""}
+                            </option>
+                          );
+                        })}
+                    </select>
+                    <p className="text-[10px] text-slate-400">
+                      Need new global tier templates? You can manage them in Dashboard &gt; Discounts &gt; Pricing Tiers.
+                    </p>
+                  </div>
+                )}
+
+                {/* MODE 2: CUSTOM LIVE TIERS BUILDER */}
+                {discountMode === "custom" && (
+                  <div className="space-y-3 bg-white p-3.5 rounded-xl border border-orange-200/60 shadow-2xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex-1">
+                        <Label className="text-[11px] font-bold text-slate-700">Custom Scheme Name</Label>
+                        <Input
+                          value={customTierName}
+                          onChange={(e) => setCustomTierName(e.target.value)}
+                          placeholder="e.g. Chemical Volume Discount"
+                          className="mt-1 h-8 rounded-lg text-xs"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5 pt-4">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={handleSaveCustomTierGlobally}
+                          disabled={isSavingCustomTierToGlobal}
+                          className="h-8 text-xs font-semibold gap-1 text-orange-700 hover:bg-orange-50"
+                        >
+                          <Sparkles size={12} className="text-orange-500" />
+                          {isSavingCustomTierToGlobal ? "Saving..." : "Save to Global Schemes"}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={handleAddCustomTier}
+                          className="h-8 text-xs font-bold gap-1 bg-orange-600 hover:bg-orange-700 text-white"
+                        >
+                          <Plus size={12} /> Add Tier Bracket
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 pt-2">
+                      {customTiers.map((tier, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center gap-2 p-2 rounded-lg bg-orange-50/40 border border-orange-100 text-xs"
+                        >
+                          <div className="flex-1">
+                            <Label className="text-[10px] font-semibold text-slate-600">
+                              Min Quantity ({unit || "units"})
+                            </Label>
+                            <Input
+                              type="number"
+                              min="2"
+                              value={tier.minQuantity}
+                              onChange={(e) => handleUpdateCustomTier(idx, "minQuantity", e.target.value)}
+                              className="h-8 rounded-lg text-xs font-bold"
+                            />
+                          </div>
+
+                          <div className="flex-1">
+                            <Label className="text-[10px] font-semibold text-slate-600">
+                              Discount Percentage (%)
+                            </Label>
+                            <Input
+                              type="number"
+                              min="1"
+                              max="95"
+                              value={tier.discountPercentage}
+                              onChange={(e) =>
+                                handleUpdateCustomTier(idx, "discountPercentage", e.target.value)
+                              }
+                              className="h-8 rounded-lg text-xs font-bold text-orange-600"
+                            />
+                          </div>
+
+                          <div className="flex-1">
+                            <Label className="text-[10px] font-semibold text-slate-600">
+                              Override Unit Price (Optional NGN)
+                            </Label>
+                            <Input
+                              type="number"
+                              min="0"
+                              placeholder="Auto calculated"
+                              value={tier.unitPrice || ""}
+                              onChange={(e) =>
+                                handleUpdateCustomTier(
+                                  idx,
+                                  "unitPrice",
+                                  e.target.value ? parseFloat(e.target.value) : undefined
+                                )
+                              }
+                              className="h-8 rounded-lg text-xs"
+                            />
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveCustomTier(idx)}
+                            className="text-slate-400 hover:text-rose-600 p-1.5 pt-4"
+                            title="Remove tier bracket"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* VOLUME EQUIVALENT WHOLESALE THRESHOLD */}
+                <div className="pt-2 border-t border-orange-100">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <Label className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <Gauge size={14} className="text-orange-600" />
+                      Cumulative Volume Wholesale Threshold (Cross-Variant)
+                    </Label>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                      Wholesale Stacking
                     </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">
+                    Set a cumulative volume trigger (e.g. 120 Liters). If a customer purchases smaller container sizes that combine to meet this threshold (e.g. 30 × 4L = 120L) or buys a large unit (e.g. 1 × 120L drum), the wholesale discount automatically activates for all items!
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <Label className="text-[11px] font-bold text-slate-700">Volume Threshold</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        placeholder="e.g. 120"
+                        value={volumeDiscountThreshold}
+                        onChange={(e) => setVolumeDiscountThreshold(e.target.value)}
+                        className="mt-1 h-9 rounded-xl text-xs font-bold"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-[11px] font-bold text-slate-700">Wholesale Discount (%)</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        max="90"
+                        placeholder="e.g. 10"
+                        value={volumeDiscountPercentage}
+                        onChange={(e) => setVolumeDiscountPercentage(e.target.value)}
+                        className="mt-1 h-9 rounded-xl text-xs font-bold text-orange-600"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-[11px] font-bold text-slate-700">Volume Unit</Label>
+                      <Input
+                        placeholder="Liters, kg, Gallons"
+                        value={volumeUnit}
+                        onChange={(e) => setVolumeUnit(e.target.value)}
+                        className="mt-1 h-9 rounded-xl text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  {volumeDiscountThreshold && volumeDiscountPercentage && (
+                    <div className="mt-2.5 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200/80 text-emerald-900 text-xs flex items-center gap-2">
+                      <Sparkles size={14} className="text-emerald-600 shrink-0" />
+                      <span>
+                        <strong>Wholesale Rule Active:</strong> Any cart combination reaching{" "}
+                        <strong>
+                          {volumeDiscountThreshold} {volumeUnit || "Liters"}
+                        </strong>{" "}
+                        will receive a <strong>{volumeDiscountPercentage}% bulk discount</strong> automatically.
+                      </span>
+                    </div>
                   )}
                 </div>
-                <select
-                  value={pricingTierId}
-                  onChange={(e) => setPricingTierId(e.target.value)}
-                  className="w-full h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium outline-none focus:border-orange-500"
-                >
-                  <option value="">No Quantity Tier (Standard Price Only)</option>
-                  {pricingTierGroups
-                    .filter((g) => g.isActive)
-                    .map((group) => {
-                      const breakdown = (group.tiers || [])
-                        .map((t) => `${t.minQuantity}+ (${t.discountPercentage}%)`)
-                        .join(", ");
-                      return (
-                        <option key={group.id} value={group.id}>
-                          {group.name} {breakdown ? `— [${breakdown}]` : ""}
-                        </option>
-                      );
-                    })}
-                </select>
               </div>
 
               {/* Tax & VAT Configuration */}
@@ -972,6 +1324,91 @@ export function ProductFormModal({
                             ))}
                           </div>
                         )}
+
+                        {/* Capacity / Volume & Variation Discount Configuration */}
+                        <div className="p-3 bg-slate-50/80 rounded-xl border border-slate-200/80 space-y-2.5">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <div>
+                              <Label className="text-[10px] font-bold text-slate-700 flex items-center gap-1">
+                                <Gauge size={12} className="text-orange-600" />
+                                Unit Capacity / Volume (e.g. 4 for 4L, 120 for 120L Drum)
+                              </Label>
+                              <div className="flex items-center gap-1.5 mt-1">
+                                <Input
+                                  type="number"
+                                  min="0.1"
+                                  step="any"
+                                  placeholder="e.g. 4"
+                                  value={v.capacity !== undefined ? v.capacity : ""}
+                                  onChange={(e) =>
+                                    handleUpdateVariation(
+                                      idx,
+                                      "capacity",
+                                      e.target.value ? parseFloat(e.target.value) : undefined
+                                    )
+                                  }
+                                  className="h-8 rounded-lg text-xs font-bold w-24"
+                                />
+                                <Input
+                                  placeholder="Unit (Liters, kg)"
+                                  value={v.capacityUnit || volumeUnit || unit || "Liters"}
+                                  onChange={(e) =>
+                                    handleUpdateVariation(idx, "capacityUnit", e.target.value)
+                                  }
+                                  className="h-8 rounded-lg text-xs flex-1"
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <Label className="text-[10px] font-bold text-slate-700 flex items-center gap-1">
+                                <Tag size={12} className="text-orange-600" />
+                                Variation Discount Scheme (Optional Override)
+                              </Label>
+                              <select
+                                value={v.pricingTierId || ""}
+                                onChange={(e) => {
+                                  const selectedId = e.target.value;
+                                  const grp = pricingTierGroups.find((g) => g.id === selectedId);
+                                  handleUpdateVariation(idx, "pricingTierId", selectedId || undefined);
+                                  handleUpdateVariation(idx, "pricingTierName", grp?.name || undefined);
+                                  handleUpdateVariation(idx, "pricingTiers", grp?.tiers || undefined);
+                                }}
+                                className="mt-1 w-full h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs"
+                              >
+                                <option value="">Inherit Product Level Discount</option>
+                                {pricingTierGroups
+                                  .filter((g) => g.isActive)
+                                  .map((group) => {
+                                    const breakdown = (group.tiers || [])
+                                      .map((t) => `${t.minQuantity}+ (${t.discountPercentage}%)`)
+                                      .join(", ");
+                                    return (
+                                      <option key={group.id} value={group.id}>
+                                        {group.name} {breakdown ? `— [${breakdown}]` : ""}
+                                      </option>
+                                    );
+                                  })}
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Quick Custom Tier for this Variation if no scheme selected */}
+                          <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px]">
+                            {volumeDiscountThreshold && v.capacity && Number(v.capacity) > 0 ? (
+                              <div className="text-emerald-700 font-medium flex items-center gap-1">
+                                <Sparkles size={11} className="text-emerald-600 shrink-0" />
+                                <span>
+                                  {Math.ceil(Number(volumeDiscountThreshold) / Number(v.capacity))} units of this variation reach the {volumeDiscountThreshold} {volumeUnit || "L"} wholesale threshold ({volumeDiscountPercentage || 10}% off)
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400">
+                                Set container capacity to calculate equivalent wholesale stacking.
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
