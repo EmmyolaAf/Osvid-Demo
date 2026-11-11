@@ -32,6 +32,7 @@ import { useCart } from "@/providers/CartProvider";
 import { toast } from "sonner";
 import companyData from "@/data/company";
 import BackInStockNotificationButton from "@/components/reusables/BackInStockNotificationButton";
+import { calculateEffectiveVariantPrice } from "@/lib/pricing/variant-pricing-engine";
 
 interface ProductDetailsClientProps {
   product: Product;
@@ -121,23 +122,36 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
     );
   }, [activeTiers, quantity]);
 
-  const effectiveDiscountPercentage = useMemo(() => {
-    const tierPct = activePricingTier?.discountPercentage || 0;
-    const volPct = isVolumeThresholdMet ? volumeDiscountPercentage : 0;
-    return Math.max(tierPct, volPct);
-  }, [activePricingTier, isVolumeThresholdMet, volumeDiscountPercentage]);
+  const pricingResult = useMemo(() => {
+    return calculateEffectiveVariantPrice({
+      baseProductPrice: product.price,
+      variant: selectedVariation || {
+        priceOverride: product.price,
+        regularPrice: product.price,
+        salePrice: product.discountPrice,
+        pricingTiers: activeTiers,
+      },
+      quantity,
+      cumulativeProductVolume: currentVolume,
+      volumeDiscountThreshold,
+      volumeDiscountPercentage,
+    });
+  }, [
+    product.price,
+    selectedVariation,
+    product.discountPrice,
+    activeTiers,
+    quantity,
+    currentVolume,
+    volumeDiscountThreshold,
+    volumeDiscountPercentage,
+  ]);
 
-  const effectiveUnitPrice = useMemo(() => {
-    if (effectiveDiscountPercentage > 0) {
-      return Math.round(currentPrice * (1 - effectiveDiscountPercentage / 100));
-    }
-    if (activePricingTier?.unitPrice) return activePricingTier.unitPrice;
-    return currentPrice;
-  }, [effectiveDiscountPercentage, activePricingTier, currentPrice]);
-
-  const effectiveTotal = effectiveUnitPrice * quantity;
-  const standardTotal = currentPrice * quantity;
-  const tierSavings = standardTotal - effectiveTotal;
+  const effectiveDiscountPercentage = pricingResult.discountPercentage;
+  const effectiveUnitPrice = pricingResult.unitPrice;
+  const effectiveTotal = pricingResult.lineTotal;
+  const standardTotal = pricingResult.standardLineTotal;
+  const tierSavings = pricingResult.totalSavings;
 
   const handleAttributeSelect = (attrName: string, value: string) => {
     const updated = { ...selectedAttributes, [attrName]: value };

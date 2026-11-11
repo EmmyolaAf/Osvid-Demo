@@ -29,6 +29,11 @@ import {
   X,
   Gauge,
   Percent,
+  Wand2,
+  Flame,
+  ShieldAlert,
+  CheckCircle2,
+  SlidersHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,6 +51,8 @@ import {
   isOwnedStorageUrl,
 } from "@/lib/firebase/storage";
 import { savePricingTierInDb } from "@/lib/firebase/firestore";
+import { generateCartesianCombinations } from "@/lib/pricing/variant-pricing-engine";
+import { VariantDiscountDrawer } from "./VariantDiscountDrawer";
 import { toast } from "sonner";
 import formatCurrency from "@/helpers/formatCurrency";
 
@@ -222,6 +229,168 @@ export function ProductFormModal({
 
   const handleRemoveAttribute = (id: string) => {
     setAttributes(attributes.filter((a) => a.id !== id));
+  };
+
+  // Combinatorial & Drawer state
+  const [combinatorialMode, setCombinatorialMode] = useState<"cartesian" | "manual">("cartesian");
+  const [drawerVariantIndex, setDrawerVariantIndex] = useState<number | null>(null);
+
+  // Bulk fill inputs state
+  const [bulkPrice, setBulkPrice] = useState("");
+  const [bulkStock, setBulkStock] = useState("");
+  const [bulkCost, setBulkCost] = useState("");
+  const [bulkCapacity, setBulkCapacity] = useState("");
+
+  const handleGenerateCartesianMatrix = () => {
+    const validAttrs = attributes.filter(
+      (a) => a.name.trim().length > 0 && Array.isArray(a.values) && a.values.length > 0
+    );
+
+    if (validAttrs.length === 0) {
+      toast.error("Please configure at least one attribute with values before generating permutations.");
+      return;
+    }
+
+    try {
+      const combos = generateCartesianCombinations(validAttrs, 300);
+      if (combos.length === 0) {
+        toast.info("No combinations could be produced from current attributes.");
+        return;
+      }
+
+      const productSlugPart = (slug || name || "SKU")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "-")
+        .replace(/-+/g, "-")
+        .slice(0, 15);
+
+      const parsedBasePrice = parseFloat(price) || 0;
+      const parsedStock = parseInt(stockQuantity, 10) || 50;
+
+      const generated: ProductVariation[] = combos.map((combo, idx) => {
+        // Find existing match to preserve customized prices/tiers
+        const existing = variations.find((v) => {
+          const vAttrs = v.attributes || {};
+          return Object.entries(combo.attributes).every(([k, val]) => vAttrs[k] === val);
+        });
+
+        if (existing) {
+          return existing;
+        }
+
+        const skuSuffix = Object.values(combo.attributes)
+          .map((val) => val.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4))
+          .join("-");
+
+        const varSku = `${productSlugPart.toUpperCase()}-${skuSuffix || idx + 1}`;
+
+        // Smart capacity detection (e.g. "4L Canister" -> 4, "120L Drum" -> 120)
+        let detectedCapacity = 1;
+        for (const val of Object.values(combo.attributes)) {
+          const match = val.match(/(\d+(\.\d+)?)\s*(l|liter|litres|kg|g|ml)/i);
+          if (match) {
+            detectedCapacity = parseFloat(match[1]);
+            break;
+          }
+        }
+
+        return {
+          id: `var_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
+          sku: varSku,
+          price: parsedBasePrice,
+          regularPrice: parsedBasePrice,
+          priceOverride: parsedBasePrice > 0 ? parsedBasePrice : undefined,
+          stockQuantity: parsedStock,
+          stockStatus: "in_stock",
+          manageStock: true,
+          capacity: detectedCapacity,
+          capacityUnit: volumeUnit || unit || "Liters",
+          attributes: combo.attributes,
+          isActive: true,
+        };
+      });
+
+      setVariations(generated);
+      toast.success(
+        `Generated ${generated.length} permutation ${generated.length === 1 ? "variant" : "variants"}!`
+      );
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to generate combinations.");
+    }
+  };
+
+  const handleApplyBulkPrice = () => {
+    const p = parseFloat(bulkPrice);
+    if (isNaN(p) || p < 0) {
+      toast.error("Please enter a valid price amount.");
+      return;
+    }
+    setVariations(
+      variations.map((v) => ({
+        ...v,
+        price: p,
+        regularPrice: p,
+        priceOverride: p,
+      }))
+    );
+    toast.success(`Applied ₦${p.toLocaleString()} regular price to all ${variations.length} variants.`);
+    setBulkPrice("");
+  };
+
+  const handleApplyBulkStock = () => {
+    const s = parseInt(bulkStock, 10);
+    if (isNaN(s) || s < 0) {
+      toast.error("Please enter a valid stock quantity.");
+      return;
+    }
+    setVariations(
+      variations.map((v) => ({
+        ...v,
+        stockQuantity: s,
+        stockStatus: s > 0 ? "in_stock" : "out_of_stock",
+      }))
+    );
+    toast.success(`Applied stock quantity of ${s} to all ${variations.length} variants.`);
+    setBulkStock("");
+  };
+
+  const handleApplyBulkCost = () => {
+    const c = parseFloat(bulkCost);
+    if (isNaN(c) || c < 0) {
+      toast.error("Please enter a valid cost amount.");
+      return;
+    }
+    setVariations(
+      variations.map((v) => ({
+        ...v,
+        costPrice: c,
+      }))
+    );
+    toast.success(`Applied cost price of ₦${c.toLocaleString()} to all ${variations.length} variants.`);
+    setBulkCost("");
+  };
+
+  const handleApplyBulkCapacity = () => {
+    const cap = parseFloat(bulkCapacity);
+    if (isNaN(cap) || cap <= 0) {
+      toast.error("Please enter a valid capacity amount.");
+      return;
+    }
+    setVariations(
+      variations.map((v) => ({
+        ...v,
+        capacity: cap,
+      }))
+    );
+    toast.success(`Applied capacity of ${cap} ${volumeUnit || "L"} to all ${variations.length} variants.`);
+    setBulkCapacity("");
+  };
+
+  const handleClearAllVariations = () => {
+    if (confirm("Are you sure you want to remove all configured variations?")) {
+      setVariations([]);
+      toast.info("All variations cleared.");
+    }
   };
 
   // Custom Live Pricing Tiers Helpers
@@ -448,12 +617,44 @@ export function ProductFormModal({
       galleryImages,
       attributes,
       variations: variations.map((v) => ({
-        ...v,
-        capacity: v.capacity !== undefined && !isNaN(Number(v.capacity)) ? Number(v.capacity) : undefined,
+        id: v.id,
+        sku: v.sku?.trim() || "",
+        price: Number(v.priceOverride || v.regularPrice || v.price || numPrice),
+        regularPrice: Number(v.regularPrice || v.priceOverride || v.price || numPrice),
+        priceOverride:
+          v.priceOverride !== undefined && !isNaN(Number(v.priceOverride))
+            ? Number(v.priceOverride)
+            : undefined,
+        costPrice:
+          v.costPrice !== undefined && !isNaN(Number(v.costPrice)) ? Number(v.costPrice) : undefined,
+        minPriceFloor:
+          v.minPriceFloor !== undefined && !isNaN(Number(v.minPriceFloor))
+            ? Number(v.minPriceFloor)
+            : undefined,
+        stockQuantity: parseInt(String(v.stockQuantity), 10) || 0,
+        stockStatus: v.stockStatus || "in_stock",
+        manageStock: v.manageStock !== false,
+        weight: v.weight?.trim() || undefined,
+        weightKg:
+          v.weightKg !== undefined && !isNaN(Number(v.weightKg)) ? Number(v.weightKg) : undefined,
+        imageUrl: v.imageUrl?.trim() || undefined,
+        attributes: v.attributes || {},
+        isActive: v.isActive !== false,
+        capacity:
+          v.capacity !== undefined && !isNaN(Number(v.capacity)) ? Number(v.capacity) : undefined,
         capacityUnit: v.capacityUnit?.trim() || volumeUnit || unit || "Liters",
         pricingTierId: v.pricingTierId || undefined,
         pricingTierName: v.pricingTierName || undefined,
         pricingTiers: v.pricingTiers && v.pricingTiers.length > 0 ? v.pricingTiers : undefined,
+        discountType: v.discountType || undefined,
+        discountValue:
+          v.discountValue !== undefined && !isNaN(Number(v.discountValue))
+            ? Number(v.discountValue)
+            : undefined,
+        badgeText: v.badgeText?.trim() || undefined,
+        startsAt: v.startsAt || undefined,
+        endsAt: v.endsAt || undefined,
+        isFlashSaleActive: Boolean(v.isFlashSaleActive),
       })),
       groupedProductIds,
       upsellIds,
@@ -1142,371 +1343,456 @@ export function ProductFormModal({
             </div>
           )}
 
-          {/* TAB 4: VARIATIONS & ATTRIBUTES */}
+          {/* TAB 4: VARIATIONS & ATTRIBUTES (COMBINATORIAL CREATION WIZARD) */}
           {activeTab === "variations" && productType === "variable" && (
-            <div className="space-y-5">
-              {/* Attributes Section */}
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
-                    <Layers size={14} className="text-orange-600" />
-                    Product Attributes (e.g. Weight, Size, Grade)
-                  </h4>
-                  <span className="text-[11px] text-slate-500 font-medium">
-                    {attributes.length} configured
-                  </span>
+            <div className="space-y-6">
+              {/* 1. ATTRIBUTE GROUPS & OPTIONS BUILDER */}
+              <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-4 sm:p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/70 pb-3">
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
+                      <Layers size={14} className="text-orange-600" />
+                      1. Multi-Attribute Dimensions &amp; Option Builder
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Define dimensions (e.g. Size, Packaging, Grade, Flavor) and their respective option values.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-slate-600 bg-white border border-slate-200 px-2.5 py-1 rounded-full shadow-2xs">
+                      {attributes.length} {attributes.length === 1 ? "Dimension" : "Dimensions"}
+                    </span>
+                    {attributes.length > 0 && (
+                      <span className="text-[11px] font-mono font-bold text-orange-700 bg-orange-100/80 px-2.5 py-1 rounded-full">
+                        {attributes.reduce((acc, a) => acc * Math.max(1, a.values.length), 1)} Permutations
+                      </span>
+                    )}
+                  </div>
                 </div>
 
+                {/* Configured Attributes List */}
                 {attributes.length > 0 && (
-                  <div className="space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     {attributes.map((attr) => (
                       <div
                         key={attr.id}
-                        className="flex items-center justify-between p-3 rounded-xl bg-white border border-slate-200 text-xs"
+                        className="p-3 rounded-xl bg-white border border-slate-200/90 text-xs shadow-2xs flex flex-col justify-between gap-2"
                       >
-                        <div>
-                          <strong className="text-slate-900">{attr.name}:</strong>{" "}
-                          <span className="text-slate-600">{attr.values.join(", ")}</span>
+                        <div className="flex items-center justify-between">
+                          <strong className="text-slate-900 font-bold uppercase tracking-wider text-[11px]">
+                            {attr.name}
+                          </strong>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRemoveAttribute(attr.id)}
+                            className="h-6 w-6 text-rose-600 hover:bg-rose-50 p-0 rounded-md"
+                          >
+                            <Trash2 size={12} />
+                          </Button>
                         </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRemoveAttribute(attr.id)}
-                          className="h-7 text-rose-600 hover:bg-rose-50 p-1 rounded-lg"
-                        >
-                          <Trash2 size={13} />
-                        </Button>
+                        <div className="flex flex-wrap gap-1">
+                          {attr.values.map((val) => (
+                            <span
+                              key={val}
+                              className="bg-slate-100 text-slate-700 font-medium px-2 py-0.5 rounded-md text-[10px]"
+                            >
+                              {val}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>
                 )}
 
-                {/* Add Attribute Row */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
-                  <Input
-                    placeholder="Attribute name (e.g. Weight)"
-                    value={newAttrName}
-                    onChange={(e) => setNewAttrName(e.target.value)}
-                    className="h-9 text-xs rounded-xl"
-                  />
-                  <Input
-                    placeholder="Values: 100g, 250g, 1kg, 5kg"
-                    value={newAttrValues}
-                    onChange={(e) => setNewAttrValues(e.target.value)}
-                    className="h-9 text-xs rounded-xl"
-                  />
-                  <Button
-                    type="button"
-                    onClick={handleAddAttribute}
-                    className="h-9 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold gap-1"
-                  >
-                    <Plus size={13} /> Add Attribute
-                  </Button>
+                {/* Add Attribute Dimension Row */}
+                <div className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Add New Attribute Group
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <Input
+                      placeholder="Dimension name (e.g. Packaging, Size, Color)"
+                      value={newAttrName}
+                      onChange={(e) => setNewAttrName(e.target.value)}
+                      className="h-9 text-xs rounded-xl"
+                    />
+                    <Input
+                      placeholder="Values comma separated: 4L Canister, 20L Jerrycan, 120L Drum"
+                      value={newAttrValues}
+                      onChange={(e) => setNewAttrValues(e.target.value)}
+                      className="h-9 text-xs rounded-xl"
+                    />
+                    <Button
+                      type="button"
+                      onClick={handleAddAttribute}
+                      className="h-9 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold gap-1 shadow-xs"
+                    >
+                      <Plus size={13} /> Add Dimension
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Mode Selector & Cartesian Generation Trigger */}
+                <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-200/80">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCombinatorialMode("cartesian")}
+                      className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all ${
+                        combinatorialMode === "cartesian"
+                          ? "bg-orange-600 text-white shadow-xs"
+                          : "bg-white text-slate-600 border border-slate-200"
+                      }`}
+                    >
+                      Cartesian Permutations (Combined Matrix)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCombinatorialMode("manual")}
+                      className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all ${
+                        combinatorialMode === "manual"
+                          ? "bg-slate-900 text-white shadow-xs"
+                          : "bg-white text-slate-600 border border-slate-200"
+                      }`}
+                    >
+                      Manual / Single Option Mode
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {combinatorialMode === "cartesian" ? (
+                      <Button
+                        type="button"
+                        onClick={handleGenerateCartesianMatrix}
+                        className="h-9 rounded-xl bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 text-white text-xs font-bold gap-1.5 shadow-sm"
+                      >
+                        <Wand2 size={13} /> Generate Cartesian Matrix Permutations
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        onClick={handleAddVariation}
+                        className="h-9 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold gap-1.5 shadow-sm"
+                      >
+                        <Plus size={13} /> Add Single SKU
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {/* Variations Manager */}
+              {/* 2. BULK FILL ACTIONS TOOLBAR */}
+              {variations.length > 0 && (
+                <div className="p-3.5 bg-slate-900 text-white rounded-2xl space-y-2.5 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-orange-400 flex items-center gap-1.5">
+                      <SlidersHorizontal size={12} />
+                      Bulk Matrix Fill Actions ({variations.length} SKUs configured)
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleClearAllVariations}
+                      className="h-6 text-[10px] text-rose-400 hover:text-rose-300 hover:bg-rose-950/50 p-1 rounded-md"
+                    >
+                      Clear All Matrix Rows
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
+                    {/* Bulk Price */}
+                    <div className="flex items-center gap-1">
+                      <Input
+                        type="number"
+                        placeholder="Regular ₦"
+                        value={bulkPrice}
+                        onChange={(e) => setBulkPrice(e.target.value)}
+                        className="h-8 text-xs bg-slate-800 border-slate-700 text-white font-mono"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleApplyBulkPrice}
+                        className="h-8 bg-orange-600 hover:bg-orange-700 text-white text-[10px] font-bold px-2 rounded-lg shrink-0"
+                      >
+                        Set Price
+                      </Button>
+                    </div>
+
+                    {/* Bulk Stock */}
+                    <div className="flex items-center gap-1">
+                      <Input
+                        type="number"
+                        placeholder="Stock Qty"
+                        value={bulkStock}
+                        onChange={(e) => setBulkStock(e.target.value)}
+                        className="h-8 text-xs bg-slate-800 border-slate-700 text-white font-mono"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleApplyBulkStock}
+                        className="h-8 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white text-[10px] font-bold px-2 rounded-lg shrink-0"
+                      >
+                        Set Stock
+                      </Button>
+                    </div>
+
+                    {/* Bulk Cost */}
+                    <div className="flex items-center gap-1">
+                      <Input
+                        type="number"
+                        placeholder="Cost ₦"
+                        value={bulkCost}
+                        onChange={(e) => setBulkCost(e.target.value)}
+                        className="h-8 text-xs bg-slate-800 border-slate-700 text-white font-mono"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleApplyBulkCost}
+                        className="h-8 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white text-[10px] font-bold px-2 rounded-lg shrink-0"
+                      >
+                        Set Cost
+                      </Button>
+                    </div>
+
+                    {/* Bulk Capacity */}
+                    <div className="flex items-center gap-1">
+                      <Input
+                        type="number"
+                        placeholder="Cap (L/kg)"
+                        value={bulkCapacity}
+                        onChange={(e) => setBulkCapacity(e.target.value)}
+                        className="h-8 text-xs bg-slate-800 border-slate-700 text-white font-mono"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleApplyBulkCapacity}
+                        className="h-8 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white text-[10px] font-bold px-2 rounded-lg shrink-0"
+                      >
+                        Set Cap
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 3. CARTESIAN MATRIX TABLE UI */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h4 className="text-sm font-bold text-slate-900">Configured Variations</h4>
+                    <h4 className="text-sm font-black text-slate-900">
+                      Variant SKUs &amp; Independent Discount Matrices
+                    </h4>
                     <p className="text-[11px] text-slate-500">
-                      Each variation can have its own price, SKU, stock quantity, and attribute options.
+                      Each SKU possesses its own pricing, stock, volume ladders, flash deals, and cost floors.
                     </p>
                   </div>
-                  <Button
-                    type="button"
-                    onClick={handleAddVariation}
-                    className="h-8 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold gap-1.5"
-                  >
-                    <Plus size={13} /> Add Variation
-                  </Button>
+                  {variations.length > 0 && (
+                    <span className="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1 rounded-full">
+                      {variations.length} Active SKUs
+                    </span>
+                  )}
                 </div>
 
                 {variations.length === 0 ? (
-                  <div className="border border-dashed border-slate-300 rounded-2xl p-6 text-center text-xs text-slate-400">
-                    No variations added yet. Click &quot;Add Variation&quot; above to create price/size options.
+                  <div className="border border-dashed border-slate-300 rounded-2xl p-8 text-center text-xs text-slate-400 space-y-2">
+                    <p className="font-semibold text-slate-600">No variant SKUs generated yet.</p>
+                    <p className="text-[11px]">
+                      Add attribute dimensions above and click &quot;Generate Cartesian Matrix Permutations&quot; to populate your SKU catalog.
+                    </p>
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {variations.map((v, idx) => (
-                      <div
-                        key={v.id}
-                        className="p-4 rounded-2xl border border-slate-200 bg-white space-y-3 shadow-xs"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-orange-950 font-mono">
-                            Variation #{idx + 1} ({v.sku})
-                          </span>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleRemoveVariation(idx)}
-                            className="h-7 text-rose-600 hover:bg-rose-50 rounded-lg p-1"
-                          >
-                            <Trash2 size={13} />
-                          </Button>
-                        </div>
+                  <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-2xs">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase font-bold text-slate-500 tracking-wider">
+                          <tr>
+                            <th className="py-3 px-3">Variant Dimensions</th>
+                            <th className="py-3 px-3">SKU Code</th>
+                            <th className="py-3 px-3">Regular (₦)</th>
+                            <th className="py-3 px-3">Cost (₦)</th>
+                            <th className="py-3 px-3">Stock</th>
+                            <th className="py-3 px-3">Capacity</th>
+                            <th className="py-3 px-3">Volume Tiers &amp; Sales</th>
+                            <th className="py-3 px-3 text-center">Status</th>
+                            <th className="py-3 px-3 text-right">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {variations.map((v, idx) => {
+                            const hasTiers = Array.isArray(v.pricingTiers) && v.pricingTiers.length > 0;
+                            const hasFlash = Boolean(v.isFlashSaleActive && v.discountValue);
+                            const hasFloor = Boolean(v.minPriceFloor && v.minPriceFloor > 0);
 
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                          <div>
-                            <Label className="text-[10px] font-bold text-slate-600">SKU</Label>
-                            <Input
-                              value={v.sku}
-                              onChange={(e) => handleUpdateVariation(idx, "sku", e.target.value)}
-                              className="h-8 rounded-lg text-xs font-mono"
-                            />
-                          </div>
-                          <div>
-                            <Label className="text-[10px] font-bold text-slate-600">Regular Price (NGN)</Label>
-                            <Input
-                              type="number"
-                              value={v.regularPrice}
-                              onChange={(e) =>
-                                handleUpdateVariation(idx, "regularPrice", parseFloat(e.target.value) || 0)
-                              }
-                              className="h-8 rounded-lg text-xs font-bold"
-                            />
-                          </div>
-                          <div>
-                            <Label className="text-[10px] font-bold text-slate-600">Sale Price (NGN)</Label>
-                            <Input
-                              type="number"
-                              placeholder="Optional"
-                              value={v.salePrice || ""}
-                              onChange={(e) =>
-                                handleUpdateVariation(
-                                  idx,
-                                  "salePrice",
-                                  e.target.value ? parseFloat(e.target.value) : undefined
-                                )
-                              }
-                              className="h-8 rounded-lg text-xs"
-                            />
-                          </div>
-                          <div>
-                            <Label className="text-[10px] font-bold text-slate-600">Stock Qty</Label>
-                            <Input
-                              type="number"
-                              value={v.stockQuantity}
-                              onChange={(e) =>
-                                handleUpdateVariation(idx, "stockQuantity", parseInt(e.target.value, 10) || 0)
-                              }
-                              className="h-8 rounded-lg text-xs"
-                            />
-                          </div>
-                        </div>
-
-                        {/* Attribute Selectors for Variation */}
-                        {attributes.length > 0 && (
-                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 border-t border-slate-100">
-                            {attributes.map((attr) => (
-                              <div key={attr.id}>
-                                <Label className="text-[10px] font-bold text-slate-500">{attr.name}</Label>
-                                <select
-                                  value={v.attributes?.[attr.name] || ""}
-                                  onChange={(e) => {
-                                    const newAttrs = { ...v.attributes, [attr.name]: e.target.value };
-                                    handleUpdateVariation(idx, "attributes", newAttrs);
-                                  }}
-                                  className="w-full h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs"
-                                >
-                                  <option value="">Any {attr.name}</option>
-                                  {attr.values.map((val) => (
-                                    <option key={val} value={val}>
-                                      {val}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Capacity / Volume & Variation Discount Configuration */}
-                        <div className="p-3 bg-slate-50/80 rounded-xl border border-slate-200/80 space-y-2.5">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                            <div>
-                              <Label className="text-[10px] font-bold text-slate-700 flex items-center gap-1">
-                                <Gauge size={12} className="text-orange-600" />
-                                Unit Capacity / Volume (e.g. 4 for 4L, 120 for 120L Drum)
-                              </Label>
-                              <div className="flex items-center gap-1.5 mt-1">
-                                <Input
-                                  type="number"
-                                  min="0.1"
-                                  step="any"
-                                  placeholder="e.g. 4"
-                                  value={v.capacity !== undefined ? v.capacity : ""}
-                                  onChange={(e) =>
-                                    handleUpdateVariation(
-                                      idx,
-                                      "capacity",
-                                      e.target.value ? parseFloat(e.target.value) : undefined
-                                    )
-                                  }
-                                  className="h-8 rounded-lg text-xs font-bold w-24"
-                                />
-                                <Input
-                                  placeholder="Unit (Liters, kg)"
-                                  value={v.capacityUnit || volumeUnit || unit || "Liters"}
-                                  onChange={(e) =>
-                                    handleUpdateVariation(idx, "capacityUnit", e.target.value)
-                                  }
-                                  className="h-8 rounded-lg text-xs flex-1"
-                                />
-                              </div>
-                            </div>
-
-                            <div>
-                              <Label className="text-[10px] font-bold text-slate-700 flex items-center gap-1">
-                                <Tag size={12} className="text-orange-600" />
-                                Variation Discount Scheme (Optional Override)
-                              </Label>
-                              <select
-                                value={v.pricingTierId || (v.pricingTiers && v.pricingTiers.length > 0 ? "custom" : "")}
-                                onChange={(e) => {
-                                  const selectedId = e.target.value;
-                                  if (selectedId === "custom") {
-                                    handleUpdateVariation(idx, "pricingTierId", "custom");
-                                    handleUpdateVariation(idx, "pricingTierName", "Custom Variation Tiers");
-                                    if (!v.pricingTiers || v.pricingTiers.length === 0) {
-                                      handleUpdateVariation(idx, "pricingTiers", [{ minQuantity: 5, discountPercentage: 5 }]);
-                                    }
-                                  } else if (selectedId === "") {
-                                    handleUpdateVariation(idx, "pricingTierId", undefined);
-                                    handleUpdateVariation(idx, "pricingTierName", undefined);
-                                    handleUpdateVariation(idx, "pricingTiers", undefined);
-                                  } else {
-                                    const grp = pricingTierGroups.find((g) => g.id === selectedId);
-                                    handleUpdateVariation(idx, "pricingTierId", selectedId);
-                                    handleUpdateVariation(idx, "pricingTierName", grp?.name || undefined);
-                                    handleUpdateVariation(idx, "pricingTiers", grp?.tiers || undefined);
-                                  }
-                                }}
-                                className="mt-1 w-full h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs"
-                              >
-                                <option value="">Inherit Product Level Discount</option>
-                                <option value="custom">★ Custom Discount Tiers for this Variation</option>
-                                {pricingTierGroups
-                                  .filter((g) => g.isActive)
-                                  .map((group) => {
-                                    const breakdown = (group.tiers || [])
-                                      .map((t) => `${t.minQuantity}+ (${t.discountPercentage}%)`)
-                                      .join(", ");
-                                    return (
-                                      <option key={group.id} value={group.id}>
-                                        {group.name} {breakdown ? `— [${breakdown}]` : ""}
-                                      </option>
-                                    );
-                                  })}
-                              </select>
-                            </div>
-                          </div>
-
-                          {/* Inline Custom Tier Rules Builder for this Variation */}
-                          {v.pricingTierId === "custom" && (
-                            <div className="pt-2.5 pb-1 space-y-2 border-t border-slate-200/80 bg-white/70 p-2.5 rounded-lg">
-                              <div className="flex items-center justify-between">
-                                <span className="text-[10px] font-bold text-slate-800">
-                                  Variation Tier Rules:
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const currentTiers = v.pricingTiers || [];
-                                    const last = currentTiers[currentTiers.length - 1];
-                                    const nextMin = last ? last.minQuantity + 5 : 5;
-                                    const nextPct = last ? Math.min(100, (last.discountPercentage || 0) + 5) : 5;
-                                    handleUpdateVariation(idx, "pricingTiers", [
-                                      ...currentTiers,
-                                      { minQuantity: nextMin, discountPercentage: nextPct },
-                                    ]);
-                                  }}
-                                  className="text-[10px] font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1"
-                                >
-                                  <Plus size={11} /> Add Tier Bracket
-                                </button>
-                              </div>
-                              {(v.pricingTiers && v.pricingTiers.length > 0
-                                ? v.pricingTiers
-                                : [{ minQuantity: 5, discountPercentage: 5 }]
-                              ).map((t, tIdx) => (
-                                <div key={tIdx} className="flex items-center gap-2">
-                                  <div className="flex items-center gap-1 text-[10px] font-medium text-slate-600">
-                                    <span>Buy</span>
-                                    <input
-                                      type="number"
-                                      min="1"
-                                      value={t.minQuantity}
-                                      onChange={(e) => {
-                                        const copy = [...(v.pricingTiers || [])];
-                                        copy[tIdx] = {
-                                          ...copy[tIdx],
-                                          minQuantity: parseInt(e.target.value, 10) || 1,
-                                        };
-                                        handleUpdateVariation(idx, "pricingTiers", copy);
-                                      }}
-                                      className="w-14 h-7 text-xs font-bold rounded border border-slate-200 px-1 text-center bg-white"
-                                    />
-                                    <span>+ units &rarr;</span>
-                                  </div>
-                                  <div className="flex items-center gap-1 text-[10px] font-medium text-slate-600">
-                                    <input
-                                      type="number"
-                                      min="1"
-                                      max="100"
-                                      value={t.discountPercentage || 0}
-                                      onChange={(e) => {
-                                        const copy = [...(v.pricingTiers || [])];
-                                        copy[tIdx] = {
-                                          ...copy[tIdx],
-                                          discountPercentage: parseFloat(e.target.value) || 0,
-                                        };
-                                        handleUpdateVariation(idx, "pricingTiers", copy);
-                                      }}
-                                      className="w-14 h-7 text-xs font-bold text-emerald-700 rounded border border-slate-200 px-1 text-center bg-white"
-                                    />
-                                    <span>% OFF</span>
-                                  </div>
-                                  {(v.pricingTiers || []).length > 1 && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const copy = (v.pricingTiers || []).filter((_, i) => i !== tIdx);
-                                        handleUpdateVariation(idx, "pricingTiers", copy);
-                                      }}
-                                      className="text-rose-500 hover:text-rose-700 p-1"
-                                      title="Remove tier"
-                                    >
-                                      <Trash2 size={12} />
-                                    </button>
+                            return (
+                              <tr key={v.id} className="hover:bg-slate-50/70 transition-colors">
+                                {/* Dimensions Badges */}
+                                <td className="py-2.5 px-3 min-w-[140px]">
+                                  {Object.keys(v.attributes || {}).length > 0 ? (
+                                    <div className="flex flex-wrap gap-1">
+                                      {Object.entries(v.attributes).map(([k, val]) => (
+                                        <span
+                                          key={k}
+                                          className="text-[10px] font-bold bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded border border-slate-200/80"
+                                        >
+                                          {val}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-400 italic">Default</span>
                                   )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                                </td>
 
-                          {/* Quick Custom Tier for this Variation if no scheme selected */}
-                          <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px]">
-                            {volumeDiscountThreshold && v.capacity && Number(v.capacity) > 0 ? (
-                              <div className="text-emerald-700 font-medium flex items-center gap-1">
-                                <Sparkles size={11} className="text-emerald-600 shrink-0" />
-                                <span>
-                                  {Math.ceil(Number(volumeDiscountThreshold) / Number(v.capacity))} units of this variation reach the {volumeDiscountThreshold} {volumeUnit || "L"} wholesale threshold ({volumeDiscountPercentage || 10}% off)
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="text-slate-400">
-                                Set container capacity to calculate equivalent wholesale stacking.
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                                {/* SKU Input */}
+                                <td className="py-2.5 px-3 min-w-[130px]">
+                                  <Input
+                                    value={v.sku}
+                                    onChange={(e) => handleUpdateVariation(idx, "sku", e.target.value)}
+                                    className="h-8 text-xs font-mono font-bold rounded-lg"
+                                  />
+                                </td>
+
+                                {/* Regular Price Override */}
+                                <td className="py-2.5 px-3 min-w-[100px]">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    value={v.regularPrice !== undefined ? v.regularPrice : v.price}
+                                    onChange={(e) => {
+                                      const val = parseFloat(e.target.value) || 0;
+                                      handleUpdateVariation(idx, "regularPrice", val);
+                                      handleUpdateVariation(idx, "price", val);
+                                      handleUpdateVariation(idx, "priceOverride", val);
+                                    }}
+                                    className="h-8 text-xs font-bold text-slate-900 rounded-lg text-right"
+                                  />
+                                </td>
+
+                                {/* Cost Price */}
+                                <td className="py-2.5 px-3 min-w-[90px]">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    placeholder="Cost"
+                                    value={v.costPrice !== undefined ? v.costPrice : ""}
+                                    onChange={(e) =>
+                                      handleUpdateVariation(
+                                        idx,
+                                        "costPrice",
+                                        e.target.value ? parseFloat(e.target.value) : undefined
+                                      )
+                                    }
+                                    className="h-8 text-xs font-mono rounded-lg text-right"
+                                  />
+                                </td>
+
+                                {/* Stock Quantity */}
+                                <td className="py-2.5 px-3 min-w-[80px]">
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    value={v.stockQuantity}
+                                    onChange={(e) =>
+                                      handleUpdateVariation(
+                                        idx,
+                                        "stockQuantity",
+                                        parseInt(e.target.value, 10) || 0
+                                      )
+                                    }
+                                    className="h-8 text-xs rounded-lg text-center font-bold"
+                                  />
+                                </td>
+
+                                {/* Capacity / Unit */}
+                                <td className="py-2.5 px-3 min-w-[90px]">
+                                  <div className="flex items-center gap-1">
+                                    <Input
+                                      type="number"
+                                      min="0.1"
+                                      step="any"
+                                      value={v.capacity !== undefined ? v.capacity : 1}
+                                      onChange={(e) =>
+                                        handleUpdateVariation(
+                                          idx,
+                                          "capacity",
+                                          e.target.value ? parseFloat(e.target.value) : 1
+                                        )
+                                      }
+                                      className="h-8 w-14 text-xs rounded-lg text-center font-mono font-bold"
+                                    />
+                                    <span className="text-[10px] text-slate-400 font-bold uppercase">
+                                      {v.capacityUnit || volumeUnit || "L"}
+                                    </span>
+                                  </div>
+                                </td>
+
+                                {/* Per-Variant Discount Trigger Button */}
+                                <td className="py-2.5 px-3 min-w-[170px]">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => setDrawerVariantIndex(idx)}
+                                    className={`h-8 rounded-xl text-[11px] font-bold gap-1 px-2.5 transition-all shadow-2xs ${
+                                      hasTiers || hasFlash || hasFloor
+                                        ? "bg-orange-50 border-orange-300 text-orange-700 hover:bg-orange-100"
+                                        : "hover:border-slate-300 text-slate-700"
+                                    }`}
+                                  >
+                                    <Tag size={12} className={hasTiers || hasFlash ? "text-orange-600" : "text-slate-400"} />
+                                    <span>
+                                      {hasTiers
+                                        ? `🪜 ${v.pricingTiers?.length} Tiers`
+                                        : hasFlash
+                                        ? `🔥 ${v.discountValue}% Sale`
+                                        : "+ Configure Discounts"}
+                                    </span>
+                                    {hasFloor && (
+                                      <span className="text-[9px] bg-rose-100 text-rose-700 px-1 py-0.2 rounded font-mono ml-0.5">
+                                        Floor
+                                      </span>
+                                    )}
+                                  </Button>
+                                </td>
+
+                                {/* Active Status */}
+                                <td className="py-2.5 px-3 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={v.isActive !== false}
+                                    onChange={(e) =>
+                                      handleUpdateVariation(idx, "isActive", e.target.checked)
+                                    }
+                                    className="w-4 h-4 rounded text-orange-600 focus:ring-orange-500 border-slate-300 cursor-pointer"
+                                  />
+                                </td>
+
+                                {/* Remove Action */}
+                                <td className="py-2.5 px-3 text-right">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleRemoveVariation(idx)}
+                                    className="h-7 w-7 p-0 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg"
+                                  >
+                                    <Trash2 size={13} />
+                                  </Button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1782,6 +2068,25 @@ export function ProductFormModal({
             </div>
           </div>
         </form>
+
+        {/* PER-VARIANT DISCOUNT DRAWER DIALOG */}
+        {drawerVariantIndex !== null && variations[drawerVariantIndex] && (
+          <VariantDiscountDrawer
+            isOpen={drawerVariantIndex !== null}
+            onClose={() => setDrawerVariantIndex(null)}
+            variant={variations[drawerVariantIndex]}
+            variantIndex={drawerVariantIndex}
+            baseProductPrice={parseFloat(price) || 0}
+            onSaveVariantDiscount={(idx, updates) => {
+              const copy = [...variations];
+              copy[idx] = { ...copy[idx], ...updates };
+              setVariations(copy);
+              toast.success(
+                `Discounting rules applied to SKU ${copy[idx].sku || `#${idx + 1}`}!`
+              );
+            }}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

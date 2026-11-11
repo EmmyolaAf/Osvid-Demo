@@ -9,6 +9,7 @@ import {
   useMemo,
 } from "react";
 import { PricingTierItem } from "@/types/auth";
+import { calculateEffectiveVariantPrice } from "@/lib/pricing/variant-pricing-engine";
 
 // Standardized type definitions
 type PriceData = {
@@ -57,32 +58,6 @@ export function getEffectiveCartItemPrice(
   discountReason?: string;
   savingsPerUnit: number;
 } {
-  const basePrice = item.priceData.discountedPrice ?? item.priceData.price;
-  const tiers = Array.isArray(item.pricingTiers) ? item.pricingTiers : [];
-
-  // 1. Evaluate single-variation or product-level quantity tiers
-  let tierDiscountPct = 0;
-  let appliedTier: PricingTierItem | undefined = undefined;
-
-  const eligibleTiers = tiers.filter((t) => {
-    if (typeof t.minQuantity === "number" && item.quantity < t.minQuantity) {
-      return false;
-    }
-    if (typeof t.maxQuantity === "number" && t.maxQuantity > 0 && item.quantity > t.maxQuantity) {
-      return false;
-    }
-    return true;
-  });
-
-  if (eligibleTiers.length > 0) {
-    const sorted = [...eligibleTiers].sort(
-      (a, b) => (b.discountPercentage || 0) - (a.discountPercentage || 0)
-    );
-    appliedTier = sorted[0];
-    tierDiscountPct = Number(appliedTier.discountPercentage || 0);
-  }
-
-  // 2. Evaluate cross-variation cumulative volume equivalent threshold
   const sameProductItems = (allItems && allItems.length > 0 ? allItems : [item]).filter(
     (i) => i.id === item.id
   );
@@ -91,43 +66,42 @@ export function getEffectiveCartItemPrice(
     0
   );
 
-  let volumeDiscountPct = 0;
-  const vThreshold = Number(item.volumeDiscountThreshold || 0);
-  const vDiscountPct = Number(item.volumeDiscountPercentage || 0);
-
-  if (vThreshold > 0 && cumulativeVolume >= vThreshold && vDiscountPct > 0) {
-    volumeDiscountPct = vDiscountPct;
-  }
-
-  // 3. Award the customer whichever discount yields the greatest benefit
-  const bestDiscountPct = Math.max(tierDiscountPct, volumeDiscountPct);
-  const isVolumeDiscountApplied = volumeDiscountPct >= tierDiscountPct && volumeDiscountPct > 0;
-
-  let unitPrice = basePrice;
-  if (bestDiscountPct > 0) {
-    const pct = Math.min(100, Math.max(0, bestDiscountPct));
-    unitPrice = Math.round(basePrice * (1 - pct / 100));
-  } else if (appliedTier?.unitPrice && Number(appliedTier.unitPrice) > 0) {
-    unitPrice = Number(appliedTier.unitPrice);
-  }
+  const engineResult = calculateEffectiveVariantPrice({
+    baseProductPrice: item.priceData.price,
+    variant: {
+      priceOverride: item.priceData.price,
+      salePrice: item.priceData.discountedPrice,
+      pricingTiers: item.pricingTiers,
+      capacity: item.capacity,
+    },
+    quantity: item.quantity,
+    cumulativeProductVolume: cumulativeVolume,
+    volumeDiscountThreshold: item.volumeDiscountThreshold,
+    volumeDiscountPercentage: item.volumeDiscountPercentage,
+  });
 
   const volUnit = item.volumeUnit || item.capacityUnit || "Liters";
 
+  let discountReason: string | undefined = undefined;
+  if (engineResult.isVolumeWholesaleApplied) {
+    discountReason = `Volume Wholesale (${cumulativeVolume} ${volUnit} reached)`;
+  } else if (engineResult.appliedFlashSale) {
+    discountReason = engineResult.appliedFlashSale.badgeText || "Flash Deal";
+  } else if (engineResult.appliedTier?.discountPercentage) {
+    discountReason = `${engineResult.appliedTier.discountPercentage}% Tier Discount`;
+  }
+
   return {
-    unitPrice,
-    baseUnitPrice: basePrice,
-    appliedTier,
-    discountPercentage: bestDiscountPct,
-    isVolumeDiscountApplied,
+    unitPrice: engineResult.unitPrice,
+    baseUnitPrice: engineResult.baseUnitPrice,
+    appliedTier: engineResult.appliedTier,
+    discountPercentage: engineResult.discountPercentage,
+    isVolumeDiscountApplied: engineResult.isVolumeWholesaleApplied,
     cumulativeVolume,
-    volumeThreshold: vThreshold > 0 ? vThreshold : undefined,
+    volumeThreshold: item.volumeDiscountThreshold ? Number(item.volumeDiscountThreshold) : undefined,
     volumeUnit: volUnit,
-    discountReason: isVolumeDiscountApplied
-      ? `Volume Wholesale (${cumulativeVolume} ${volUnit} reached)`
-      : tierDiscountPct > 0
-      ? `${tierDiscountPct}% Tier Discount`
-      : undefined,
-    savingsPerUnit: Math.max(0, basePrice - unitPrice),
+    discountReason,
+    savingsPerUnit: engineResult.savingsPerUnit,
   };
 }
 

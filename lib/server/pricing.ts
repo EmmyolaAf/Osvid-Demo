@@ -10,6 +10,7 @@ import {
   CheckoutQuoteResponse,
 } from "@/types/commerce";
 import { DiscountCode } from "@/types/auth";
+import { calculateEffectiveVariantPrice } from "@/lib/pricing/variant-pricing-engine";
 
 export class CommerceValidationError extends Error {
   statusCode: number;
@@ -329,68 +330,24 @@ export async function calculateAuthoritativeQuote(params: {
       variation = data.variations.find((v: any) => v.id === item.variationId);
     }
 
-    const basePrice = variation
-      ? Number(variation.regularPrice || variation.price || data.price)
-      : Number(data.price);
-
-    if (isNaN(basePrice) || basePrice < 0) {
-      throw new CommerceValidationError(
-        `Authoritative product "${data.name || item.productId}" has an invalid price configuration.`,
-        500
-      );
-    }
-
-    const hasDiscount =
-      variation?.salePrice !== undefined && Number(variation.salePrice) > 0
-        ? Number(variation.salePrice) < basePrice
-        : data.discountPrice !== undefined &&
-          Number(data.discountPrice) > 0 &&
-          Number(data.discountPrice) < basePrice;
-
-    const startingPrice = hasDiscount
-      ? Number(variation?.salePrice || data.discountPrice)
-      : basePrice;
-
-    // Evaluate quantity tiers (variation tiers take precedence if defined)
-    const tiers =
-      Array.isArray(variation?.pricingTiers) && variation.pricingTiers.length > 0
-        ? variation.pricingTiers
-        : Array.isArray(data.pricingTiers)
-        ? data.pricingTiers
-        : [];
-
-    let tierDiscountPct = 0;
-    let overrideUnitPrice: number | undefined = undefined;
-
-    if (tiers.length > 0) {
-      const sorted = [...tiers].sort((a: any, b: any) => a.minQuantity - b.minQuantity);
-      for (const t of sorted) {
-        if (item.quantity >= t.minQuantity && (!t.maxQuantity || item.quantity <= t.maxQuantity)) {
-          if (t.discountPercentage && Number(t.discountPercentage) > 0) {
-            tierDiscountPct = Math.min(100, Math.max(0, Number(t.discountPercentage)));
-          } else if (t.unitPrice && Number(t.unitPrice) > 0) {
-            overrideUnitPrice = Number(t.unitPrice);
-          }
-        }
-      }
-    }
-
-    // Evaluate volume wholesale threshold (cross-variant)
     const cumVolume = productVolumeMap.get(item.productId) || 0;
-    const vThreshold = Number(data.volumeDiscountThreshold || 0);
-    const vPct = Number(data.volumeDiscountPercentage || 0);
-    const volumeDiscountPct = vThreshold > 0 && cumVolume >= vThreshold && vPct > 0 ? vPct : 0;
 
-    const effectivePct = Math.max(tierDiscountPct, volumeDiscountPct);
-    let unitPrice = startingPrice;
+    const pricingEngineResult = calculateEffectiveVariantPrice({
+      baseProductPrice: Number(data.price) || 0,
+      variant: variation || {
+        priceOverride: data.price,
+        regularPrice: data.price,
+        salePrice: data.discountPrice,
+        pricingTiers: data.pricingTiers,
+      },
+      quantity: item.quantity,
+      cumulativeProductVolume: cumVolume,
+      volumeDiscountThreshold: Number(data.volumeDiscountThreshold) || 0,
+      volumeDiscountPercentage: Number(data.volumeDiscountPercentage) || 0,
+    });
 
-    if (effectivePct > 0) {
-      unitPrice = Math.round(basePrice * (1 - effectivePct / 100));
-    } else if (overrideUnitPrice !== undefined) {
-      unitPrice = overrideUnitPrice;
-    }
-
-    const lineTotal = unitPrice * item.quantity;
+    const unitPrice = pricingEngineResult.unitPrice;
+    const lineTotal = pricingEngineResult.lineTotal;
 
     const variantLabel = variation
       ? Object.values(variation.attributes || {}).join(", ") || variation.sku || "Variation"

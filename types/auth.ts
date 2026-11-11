@@ -243,6 +243,7 @@ export interface PricingTierItem {
   maxQuantity?: number;
   discountPercentage: number;
   unitPrice?: number;
+  tierPrice?: number;
   minVolumeEquivalent?: number;
   variationId?: string;
 }
@@ -271,6 +272,9 @@ export interface ProductVariation {
   id: string;
   sku?: string;
   price: number;
+  priceOverride?: number;
+  costPrice?: number;
+  minPriceFloor?: number;
   barcode?: string;
   regularPrice?: number;
   salePrice?: number;
@@ -280,6 +284,7 @@ export interface ProductVariation {
   stockStatus: "in_stock" | "out_of_stock" | "on_backorder" | "instock" | "outofstock";
   manageStock?: boolean;
   weight?: string;
+  weightKg?: number;
   dimensions?: string;
   imageUrl?: string;
   attributes: Record<string, string>;
@@ -291,6 +296,12 @@ export interface ProductVariation {
   pricingTierId?: string;
   pricingTierName?: string;
   pricingTiers?: PricingTierItem[];
+  discountType?: "percentage" | "fixed_amount";
+  discountValue?: number;
+  badgeText?: string;
+  startsAt?: string;
+  endsAt?: string;
+  isFlashSaleActive?: boolean;
 }
 
 export interface ProductReview {
