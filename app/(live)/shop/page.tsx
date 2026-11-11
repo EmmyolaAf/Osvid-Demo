@@ -133,6 +133,12 @@ export default async function ProductsPage({
     discountPrice: p.discountPrice,
     image: p.imageUrl,
     slug: p.slug,
+    category: p.category,
+    categorySlug: p.categorySlug,
+    pricingTierId: p.pricingTierId,
+    pricingTierName: p.pricingTierName,
+    pricingTiers: p.pricingTiers,
+    stockQuantity: p.stockQuantity,
   }));
 
   return (

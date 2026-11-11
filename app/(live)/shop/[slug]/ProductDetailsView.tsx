@@ -102,10 +102,14 @@ export default function ProductDetailsView({
         ]}
       />
 
-      <section className="container mx-auto py-10 px-4 sm:px-6">
-        <ProductDetailsClient product={product} />
-        <ProductReviewsSection productId={product.id} productName={product.name} />
-      </section>
+      <div className="bg-slate-50/60 py-10 sm:py-14">
+        <section className="container mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
+          <ProductDetailsClient product={product} />
+          <div className="pt-8 border-t border-slate-200">
+            <ProductReviewsSection productId={product.id} productName={product.name} />
+          </div>
+        </section>
+      </div>
 
       <TrustBuildingSection />
       <CTASection />

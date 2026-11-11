@@ -2,10 +2,19 @@
 
 import React, { useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import type { PricingTierItem } from "@/types/auth";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Star, ShoppingCart, Loader2, Check } from "lucide-react";
-import Link from "next/link";
+import {
+  ArrowRight,
+  Star,
+  ShoppingCart,
+  Loader2,
+  Check,
+  Eye,
+  Tag,
+  ShieldCheck,
+} from "lucide-react";
 import { FadeInAnimationWrapper } from "../custom-animation-wrapper";
 import formatCurrency from "@/helpers/formatCurrency";
 import { useCart } from "@/providers/CartProvider";
@@ -21,6 +30,7 @@ interface ProductCardProps {
     discountPrice?: number;
     image?: string;
     variant?: string;
+    category?: string;
     pricingTierId?: string;
     pricingTierName?: string;
     pricingTiers?: PricingTierItem[];
@@ -41,7 +51,7 @@ export default function ProductCard({
   const [justAdded, setJustAdded] = useState(false);
   const { cart, addToCart } = useCart();
 
-  const mainImage = product.image || "/images/placeholder-product.jpg";
+  const mainImage = product.image || "/images/placeholder.webp";
 
   const hasDiscount =
     product.discountPrice !== undefined &&
@@ -97,7 +107,7 @@ export default function ProductCard({
 
       await addToCart(cartItem, 1);
       setJustAdded(true);
-      toast.success("Added to cart!");
+      toast.success(`${product.name} added to cart!`);
       setTimeout(() => setJustAdded(false), 2000);
     } catch (error) {
       console.error("Failed to add to cart:", error);
@@ -111,131 +121,164 @@ export default function ProductCard({
     <FadeInAnimationWrapper
       type="fadeInY"
       index={index}
-      className="group relative bg-white rounded-xl shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden"
+      className="group flex flex-col bg-white rounded-2xl border border-slate-200/90 hover:border-orange-500/40 hover:shadow-xl hover:shadow-slate-200/60 transition-all duration-300 overflow-hidden"
     >
-      <Link
-        href={`/shop/${product.slug}`}
-        className="absolute inset-0 z-10 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 rounded-xl"
-        aria-label={`View details for ${product.name}`}
+      {/* Product Image Frame */}
+      <div
+        className="relative w-full aspect-square overflow-hidden bg-gradient-to-b from-slate-50 to-slate-100 flex items-center justify-center cursor-pointer"
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
-        <span className="sr-only">View details for {product.name}</span>
-      </Link>
+        <Link
+          href={`/shop/${product.slug}`}
+          className="absolute inset-0 z-10"
+          aria-label={`View ${product.name}`}
+        >
+          <span className="sr-only">View {product.name}</span>
+        </Link>
 
-      {/* Image Container */}
-      <div className="relative w-full aspect-square overflow-hidden">
         {product.image ? (
           <Image
             src={mainImage}
             alt={product.name || "Product"}
             fill
-            className={`object-cover transition-transform duration-500 ${
-              isHovered ? "scale-105" : "scale-100"
+            className={`object-cover transition-transform duration-700 ease-out ${
+              isHovered ? "scale-108" : "scale-100"
             }`}
-            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
             priority={index < 4}
           />
         ) : (
-          <div className="w-full h-full bg-gray-50 flex flex-col items-center justify-center text-gray-400">
-            <ShoppingCart size={48} className="mb-2" />
-            <span className="text-sm">No Image Available</span>
+          <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 p-6 text-center">
+            <ShoppingCart size={40} className="mb-2 text-slate-300" />
+            <span className="text-xs font-medium text-slate-400">OSVID Chemical Formulation</span>
           </div>
         )}
 
-        {/* Discount Badge */}
-        {hasDiscount && (
-          <div className="absolute top-4 left-4 bg-orange-600 text-white text-xs font-bold px-3 py-1 rounded-full z-20 shadow-md">
-            {discountPercentage}% OFF
+        {/* Top Badges Overlay */}
+        <div className="absolute top-3 inset-x-3 flex items-start justify-between z-20 pointer-events-none">
+          <div className="flex flex-col gap-1.5 items-start">
+            {hasDiscount && (
+              <span className="bg-gradient-to-r from-orange-600 to-amber-600 text-white text-[11px] font-black px-2.5 py-0.5 rounded-full shadow-md tracking-wider">
+                {discountPercentage}% OFF
+              </span>
+            )}
+            {product.pricingTierName && (
+              <span className="inline-flex items-center gap-1 bg-white/95 backdrop-blur-sm text-orange-700 border border-orange-200 text-[10px] font-extrabold px-2 py-0.5 rounded-full shadow-sm">
+                <Tag size={10} />
+                Bulk Tier
+              </span>
+            )}
           </div>
-        )}
 
-        {/* Quick Add Button */}
-        <div className="absolute bottom-4 left-0 right-0 px-4 z-20">
+          {product.category && (
+            <span className="bg-slate-900/80 backdrop-blur-md text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider shadow-sm">
+              {product.category}
+            </span>
+          )}
+        </div>
+
+        {/* Floating Quick Action Overlay on Desktop Hover */}
+        <div
+          className={`absolute inset-x-3 bottom-3 z-20 flex gap-2 transition-all duration-300 ${
+            isHovered ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4 pointer-events-none hidden lg:flex"
+          }`}
+        >
+          <Link
+            href={`/shop/${product.slug}`}
+            className="flex-1"
+          >
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full h-9 bg-white/95 hover:bg-white text-slate-800 text-xs font-bold rounded-xl border border-slate-200 shadow-md backdrop-blur-sm gap-1.5"
+            >
+              <Eye size={13} className="text-orange-600" />
+              <span>Details</span>
+            </Button>
+          </Link>
+        </div>
+      </div>
+
+      {/* Product Content Details */}
+      <div className="p-4 sm:p-5 flex flex-col flex-1 justify-between gap-3">
+        <div className="space-y-1.5">
+          {/* Category & Rating */}
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+              {product.category || "Industrial Formulation"}
+            </span>
+            <div className="flex items-center gap-1 text-amber-500 font-bold text-xs">
+              <Star size={13} fill="currentColor" />
+              <span>{rating.toFixed(1)}</span>
+            </div>
+          </div>
+
+          {/* Product Title */}
+          <Link
+            href={`/shop/${product.slug}`}
+            className="block group-hover:text-orange-600 transition-colors"
+          >
+            <h3 className="text-sm sm:text-base font-bold text-slate-900 line-clamp-2 leading-snug">
+              {product.name}
+            </h3>
+          </Link>
+        </div>
+
+        {/* Pricing & Cart Action */}
+        <div className="pt-2 border-t border-slate-100 space-y-3">
+          <div className="flex items-baseline justify-between gap-2">
+            <div className="flex items-baseline gap-2">
+              {product.price !== undefined && (
+                <>
+                  <span className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
+                    {hasDiscount
+                      ? formatCurrency(currency, Number(product.discountPrice))
+                      : formatCurrency(currency, Number(product.price))}
+                  </span>
+                  {hasDiscount && product.discountPrice !== undefined ? (
+                    <span className="text-xs text-slate-400 line-through font-medium">
+                      {formatCurrency(currency, Number(product.price))}
+                    </span>
+                  ) : null}
+                </>
+              )}
+            </div>
+
+            <span className="text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full flex items-center gap-1">
+              <ShieldCheck size={11} />
+              In Stock
+            </span>
+          </div>
+
+          {/* Add to Cart Button */}
           <Button
             onClick={handleAddToCart}
-            className={`w-full font-medium shadow-md transition-all duration-300 ${
+            disabled={isAddingToCart}
+            className={`w-full h-10 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 ${
               justAdded || isInCart
-                ? "bg-green-600 hover:bg-green-700 text-white"
-                : "bg-white text-orange-600 hover:bg-orange-50"
-            } ${
-              isHovered
-                ? "translate-y-0 opacity-100"
-                : "translate-y-20 opacity-0"
+                ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                : "bg-orange-600 hover:bg-orange-700 text-white hover:shadow-orange-600/20 hover:shadow-md"
             }`}
-            disabled={isAddingToCart || isInCart}
-            aria-live="polite"
-            aria-busy={isAddingToCart}
           >
             {isAddingToCart ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Adding...
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span>Adding to Cart...</span>
               </>
             ) : justAdded || isInCart ? (
               <>
-                <Check className="mr-2 h-4 w-4" />
-                {isInCart ? "In Cart" : "Added!"}
+                <Check className="h-4 w-4" />
+                <span>{isInCart ? "In Your Cart" : "Added to Cart!"}</span>
               </>
             ) : (
               <>
-                <ShoppingCart className="mr-2 h-4 w-4" />
-                Quick Add
+                <ShoppingCart className="h-3.5 w-3.5" />
+                <span>Add to Cart</span>
               </>
             )}
           </Button>
         </div>
-      </div>
-
-      {/* Product Info */}
-      <div className="p-4 space-y-2">
-        <h3 className="text-lg font-semibold text-gray-900 line-clamp-2">
-          {product.name}
-        </h3>
-
-        <div className="flex items-center justify-between">
-          <div className="flex items-baseline gap-2">
-            {product.price !== undefined && (
-              <>
-                {hasDiscount && product.discountPrice !== undefined ? (
-                  <span className="text-gray-500 text-sm line-through">
-                    {formatCurrency(currency, Number(product.price))}
-                  </span>
-                ) : null}
-                <span className="text-lg font-bold text-gray-900">
-                  {hasDiscount
-                    ? formatCurrency(currency, Number(product.discountPrice))
-                    : formatCurrency(currency, Number(product.price))}
-                </span>
-              </>
-            )}
-          </div>
-
-          {product.pricingTierName && (
-            <span className="text-[10px] font-bold text-orange-700 bg-orange-100/80 px-2 py-0.5 rounded-full">
-              Bulk Savings
-            </span>
-          )}
-          <div className="flex items-center gap-1">
-            <Star
-              size={16}
-              fill="currentColor"
-              className="text-yellow-400"
-              aria-hidden="true"
-            />
-            <span className="text-sm text-gray-600">{rating.toFixed(1)}</span>
-          </div>
-        </div>
-
-        <Button
-          variant="link"
-          className="w-full text-orange-600 hover:text-orange-700 p-0 h-auto justify-start"
-          asChild
-        >
-          <Link href={`/shop/${product.slug}`}>
-            View Details <ArrowRight className="ml-1 h-4 w-4" />
-          </Link>
-        </Button>
       </div>
     </FadeInAnimationWrapper>
   );
