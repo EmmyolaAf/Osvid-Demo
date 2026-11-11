@@ -111,11 +111,19 @@ export async function getServerProducts(
 
     return { success: true, data: products };
   } catch (error: any) {
-    console.error("Storefront getServerProducts error:", error?.message);
-    return {
-      success: false,
-      error: "Unable to load products right now.",
-    };
+    console.error("Storefront getServerProducts error, falling back to local catalogue:", error?.message);
+    const local = await getLocalProducts();
+    const products = local.filter((p) => {
+      if (p.isActive === false) return false;
+      if (categorySlug && categorySlug !== "all") {
+        return (
+          p.category?.toLowerCase() === categorySlug.toLowerCase() ||
+          p.categorySlug?.toLowerCase() === categorySlug.toLowerCase()
+        );
+      }
+      return true;
+    });
+    return { success: true, data: products };
   }
 }
 
@@ -201,7 +209,14 @@ export async function getServerProductBySlug(
 
     return { success: true, data: null };
   } catch (error: any) {
-    console.error(`Storefront getServerProductBySlug (${slug}) error:`, error?.message);
+    console.error(`Storefront getServerProductBySlug (${slug}) error, checking local fallback:`, error?.message);
+    const local = await getLocalProducts();
+    const found = local.find(
+      (p) => (p.slug === slug || p.id === slug) && p.isActive !== false
+    );
+    if (found) {
+      return { success: true, data: found };
+    }
     return {
       success: false,
       error: "Unable to load product details right now.",
@@ -254,11 +269,11 @@ export async function getServerFeaturedProducts(
 
     return { success: true, data: products };
   } catch (error: any) {
-    console.error("Storefront getServerFeaturedProducts error:", error?.message);
-    return {
-      success: false,
-      error: "Unable to load featured products right now.",
-    };
+    console.error("Storefront getServerFeaturedProducts error, checking local fallback:", error?.message);
+    const local = await getLocalProducts();
+    const featured = local.filter((p) => p.isActive !== false && p.isFeatured);
+    const products = (featured.length > 0 ? featured : local.filter((p) => p.isActive !== false)).slice(0, limitCount);
+    return { success: true, data: products };
   }
 }
 
@@ -298,11 +313,82 @@ export async function getServerProductCategories(): Promise<
 
     return { success: true, data: categories };
   } catch (error: any) {
-    console.error("Server Firestore getProductCategories error:", error);
-    return {
-      success: false,
-      error: "Unable to load product categories right now.",
-    };
+    console.error("Server Firestore getProductCategories error, using default categories:", error?.message);
+    const defaults: ProductCategory[] = [
+      {
+        _id: "cat_waterproofing",
+        _owner: "admin",
+        _createdDate: new Date().toISOString(),
+        _updatedDate: new Date().toISOString(),
+        priority: 1,
+        slug: "waterproofing-sealants",
+        title: "Waterproofing & Sealants",
+        imageUrl: "/images/products/aquablock.webp",
+        description: "Advanced elastomeric waterproofing membranes and sealants",
+        products: [],
+      },
+      {
+        _id: "cat_epoxy",
+        _owner: "admin",
+        _createdDate: new Date().toISOString(),
+        _updatedDate: new Date().toISOString(),
+        priority: 2,
+        slug: "epoxy-resins",
+        title: "Epoxy & Resins",
+        imageUrl: "/images/products/epoxshield.webp",
+        description: "Heavy-duty 3D epoxy flooring and industrial resins",
+        products: [],
+      },
+      {
+        _id: "cat_adhesives",
+        _owner: "admin",
+        _createdDate: new Date().toISOString(),
+        _updatedDate: new Date().toISOString(),
+        priority: 3,
+        slug: "industrial-adhesives",
+        title: "Industrial Adhesives",
+        imageUrl: "/images/products/osvid-bond-glue.webp",
+        description: "High-strength structural and industrial adhesives",
+        products: [],
+      },
+      {
+        _id: "cat_grout",
+        _owner: "admin",
+        _createdDate: new Date().toISOString(),
+        _updatedDate: new Date().toISOString(),
+        priority: 4,
+        slug: "grout-tile-care",
+        title: "Grout & Tile Care",
+        imageUrl: "/images/products/tile-master.webp",
+        description: "Anti-fungal waterproof tile grouts and tile adhesives",
+        products: [],
+      },
+      {
+        _id: "cat_concrete",
+        _owner: "admin",
+        _createdDate: new Date().toISOString(),
+        _updatedDate: new Date().toISOString(),
+        priority: 5,
+        slug: "concrete-admixtures",
+        title: "Concrete & Admixtures",
+        imageUrl: "/images/products/plastcrete.webp",
+        description: "Superplasticizers, accelerators, and concrete admixtures",
+        products: [],
+      },
+      {
+        _id: "cat_chemicals",
+        _owner: "admin",
+        _createdDate: new Date().toISOString(),
+        _updatedDate: new Date().toISOString(),
+        priority: 6,
+        slug: "industrial-chemicals",
+        title: "Industrial Chemicals",
+        imageUrl: "/images/placeholder.webp",
+        description: "Specialized chemical formulations and raw ingredients",
+        products: [],
+      },
+    ];
+    return { success: true, data: defaults };
   }
 }
 

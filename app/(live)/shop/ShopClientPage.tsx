@@ -18,8 +18,9 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
+import { getProductsFromDb } from "@/lib/firebase/firestore";
 
 interface ProductItem {
   _id: string;
@@ -68,45 +69,77 @@ export default function ShopClientPage({
 
   // Real-time synchronization with Cloud Firestore products collection
   useEffect(() => {
+    let unsubscribe: () => void = () => {};
+
+    // Initial direct fetch fallback if initialProducts was empty
+    getProductsFromDb().then((fetched) => {
+      if (fetched && fetched.length > 0) {
+        setAllProducts((prev) => {
+          const mapped: ProductItem[] = fetched.map((p) => ({
+            _id: p.id,
+            name: p.name,
+            price: p.price,
+            discountPrice: p.discountPrice,
+            image: p.imageUrl || "/images/placeholder.webp",
+            slug: p.slug,
+            category: p.category,
+            categorySlug: p.categorySlug,
+            createdAt: p.createdAt,
+            stockQuantity: p.stockQuantity,
+            pricingTierId: p.pricingTierId,
+            pricingTierName: p.pricingTierName,
+            pricingTiers: p.pricingTiers,
+          }));
+          return prev.length >= mapped.length ? prev : mapped;
+        });
+      }
+    });
+
     try {
-      const q = query(collection(db, "products"), where("isActive", "==", true));
-      const unsubscribe = onSnapshot(
-        q,
+      const colRef = collection(db, "products");
+      unsubscribe = onSnapshot(
+        colRef,
         (snapshot) => {
           if (!snapshot.empty) {
-            const liveItems: ProductItem[] = snapshot.docs.map((d) => {
-              const data = d.data();
-              return {
-                _id: d.id,
-                name: data.name || "",
-                price: Number(data.price) || 0,
-                discountPrice:
-                  data.discountPrice !== undefined && data.discountPrice !== null
-                    ? Number(data.discountPrice)
-                    : undefined,
-                image: data.imageUrl || "/images/placeholder.webp",
-                slug: data.slug || d.id,
-                category: data.category || "General",
-                categorySlug:
-                  data.categorySlug || data.category?.toLowerCase().replace(/\s+/g, "-"),
-                createdAt: data.createdAt,
-                stockQuantity: Number(data.stockQuantity) || 0,
-                pricingTierId: data.pricingTierId,
-                pricingTierName: data.pricingTierName,
-                pricingTiers: data.pricingTiers,
-              };
-            });
-            setAllProducts(liveItems);
+            const liveItems: ProductItem[] = snapshot.docs
+              .filter((d) => d.data().isActive !== false)
+              .map((d) => {
+                const data = d.data();
+                return {
+                  _id: d.id,
+                  name: data.name || "",
+                  price: Number(data.price) || 0,
+                  discountPrice:
+                    data.discountPrice !== undefined && data.discountPrice !== null
+                      ? Number(data.discountPrice)
+                      : undefined,
+                  image: data.imageUrl || "/images/placeholder.webp",
+                  slug: data.slug || d.id,
+                  category: data.category || "General",
+                  categorySlug:
+                    data.categorySlug || data.category?.toLowerCase().replace(/\s+/g, "-"),
+                  createdAt: data.createdAt,
+                  stockQuantity: Number(data.stockQuantity) || 0,
+                  pricingTierId: data.pricingTierId,
+                  pricingTierName: data.pricingTierName,
+                  pricingTiers: data.pricingTiers,
+                };
+              });
+
+            if (liveItems.length > 0) {
+              setAllProducts(liveItems);
+            }
           }
         },
         (err) => {
           console.warn("Firestore real-time products listener error:", err);
         }
       );
-      return () => unsubscribe();
     } catch (e) {
       console.warn("Could not attach real-time products listener:", e);
     }
+
+    return () => unsubscribe();
   }, []);
 
   // Update when initialProducts changes

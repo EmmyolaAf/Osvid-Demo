@@ -53,6 +53,38 @@ export async function generateMetadata({
   };
 }
 
+const CATEGORY_SYNONYMS: Record<string, string[]> = {
+  "concrete-admixtures": ["concrete", "admixture", "construction", "cement", "plastcrete"],
+  "construction-chemicals": ["concrete", "admixture", "construction", "chemical"],
+  "waterproofing-sealants": ["waterproof", "sealant", "aquablock", "membrane"],
+  "epoxy-resins": ["epoxy", "resin", "floor", "3d", "epoxshield"],
+  "grout-tile-care": ["tile", "grout", "adhesive"],
+  "tile-adhesives": ["tile", "grout", "adhesive"],
+  "industrial-adhesives": ["adhesive", "glue", "bond"],
+  "industrial-chemicals": ["chemical", "solvent", "raw"],
+};
+
+function matchesCategory(productCategory: string = "", target: string = ""): boolean {
+  if (!target || target === "all") return true;
+  const pCat = productCategory.toLowerCase().trim();
+  const tgt = target.toLowerCase().trim().replace(/-/g, " ");
+  const tgtSlug = target.toLowerCase().trim().replace(/\s+/g, "-");
+
+  if (pCat === tgt || pCat.replace(/-/g, " ") === tgt) return true;
+
+  const synonyms = CATEGORY_SYNONYMS[tgtSlug] || [];
+  for (const syn of synonyms) {
+    if (pCat.includes(syn)) return true;
+  }
+
+  const keywords = tgt.split(/[\s&/,-]+/).filter((w) => w.length > 3);
+  for (const kw of keywords) {
+    if (pCat.includes(kw)) return true;
+  }
+
+  return false;
+}
+
 export default async function ProductCategoryDetailPage({
   params,
 }: ProductCategoryDetailPageProps) {
@@ -66,10 +98,15 @@ export default async function ProductCategoryDetailPage({
 
   const currentCategory = allCategories.find((c) => c.slug === categorySlug);
 
-  // If no explicit category record is found, attempt to fetch products with this category tag
+  // Fetch products and match intelligently
   const categoryTitle = currentCategory?.title || categorySlug.replace(/-/g, " ");
-  const productsRes = await getProducts(currentCategory?.title || categorySlug);
-  const categoryProducts = productsRes.success ? productsRes.data : [];
+  const productsRes = await getProducts();
+  const allProducts = productsRes.success ? productsRes.data : [];
+  const categoryProducts = allProducts.filter(
+    (p) =>
+      matchesCategory(p.category, currentCategory?.title || categorySlug) ||
+      matchesCategory(p.categorySlug, categorySlug)
+  );
 
   if (!currentCategory && categoryProducts.length === 0) {
     return notFound();
