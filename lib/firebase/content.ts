@@ -8,42 +8,31 @@ const SITE_CONTENT_DOC_ID = "homepage";
  * Fetch dynamic website content directly from codebase with fallback
  */
 export async function getSiteContent(): Promise<SiteContent> {
+  // 1. Query live Cloud Firestore document directly (authoritative, never stale)
+  try {
+    const docRef = doc(db, "site_content", SITE_CONTENT_DOC_ID);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data() as SiteContent;
+      return data;
+    }
+  } catch (err) {
+    console.warn("Could not fetch site content from Firestore, trying API fallback:", err);
+  }
+
+  // 2. Server API fallback if Firestore direct client query encountered network error
   if (typeof window !== "undefined") {
     try {
       const res = await fetch("/api/admin/website-content/content", { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
         if (data.content) {
-          localStorage.setItem("osvid_site_content", JSON.stringify(data.content));
           return data.content;
         }
       }
     } catch {
-      // Fallback to localStorage or Firestore if offline
+      // Fallback to default
     }
-
-    try {
-      const cached = localStorage.getItem("osvid_site_content");
-      if (cached) {
-        return JSON.parse(cached);
-      }
-    } catch {
-      // fallback
-    }
-  }
-
-  try {
-    const docRef = doc(db, "site_content", SITE_CONTENT_DOC_ID);
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
-      const data = snap.data() as SiteContent;
-      if (typeof window !== "undefined") {
-        localStorage.setItem("osvid_site_content", JSON.stringify(data));
-      }
-      return data;
-    }
-  } catch (err) {
-    console.warn("Could not fetch site content from Firestore, using default:", err);
   }
 
   return DEFAULT_SITE_CONTENT;
@@ -76,7 +65,7 @@ export async function saveSiteContent(
   };
 
   if (typeof window !== "undefined") {
-    localStorage.setItem("osvid_site_content", JSON.stringify(merged));
+    localStorage.removeItem("osvid_site_content");
     window.dispatchEvent(new CustomEvent("osvid_content_updated", { detail: merged }));
 
     // Send to codebase save endpoint
@@ -164,7 +153,7 @@ export async function revertWebsiteChangeLog(logId: string): Promise<{ success: 
     }
 
     if (data.content && typeof window !== "undefined") {
-      localStorage.setItem("osvid_site_content", JSON.stringify(data.content));
+      localStorage.removeItem("osvid_site_content");
       window.dispatchEvent(new CustomEvent("osvid_content_updated", { detail: data.content }));
     }
 

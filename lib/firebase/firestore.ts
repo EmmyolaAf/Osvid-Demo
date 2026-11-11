@@ -280,7 +280,7 @@ export async function getOrdersFromDb(statusFilter?: OrderStatus): Promise<Order
     const snap = await Promise.race([
       getDocs(q),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Orders query timed out")), 2500)
+        setTimeout(() => reject(new Error("Orders query timed out")), 10000)
       ),
     ]);
     return snap.docs.map((d) => d.data() as Order);
@@ -901,7 +901,7 @@ export async function getDashboardStats() {
     const [ordersSnap, productsSnap, managersSnap] = await Promise.race([
       fetchPromise,
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Dashboard stats read timed out")), 2000)
+        setTimeout(() => reject(new Error("Dashboard stats read timed out")), 10000)
       ),
     ]);
 
@@ -1383,7 +1383,7 @@ export async function getExecutiveGovernanceStats() {
     const [ordersSnap, productsSnap, usersSnap] = await Promise.race([
       fetchPromise,
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Executive governance stats read timed out")), 2000)
+        setTimeout(() => reject(new Error("Executive governance stats read timed out")), 10000)
       ),
     ]);
 

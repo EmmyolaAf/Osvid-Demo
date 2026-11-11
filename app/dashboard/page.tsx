@@ -40,22 +40,50 @@ import {
 import { Button } from "@/components/ui/button";
 import { isSuperAdminEmail } from "@/lib/firebase/auth";
 import formatCurrency from "@/helpers/formatCurrency";
+import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
+import { db } from "@/lib/firebase/client";
 import OperationsTimelineChart from "@/components/dashboard/OperationsTimelineChart";
 import OperationsDistributionCharts from "@/components/dashboard/OperationsDistributionCharts";
 import BestSellingProducts from "@/components/dashboard/BestSellingProducts";
 import RecentActivityFeed from "@/components/dashboard/RecentActivityFeed";
 
+interface DashboardMetrics {
+  totalOrders: number;
+  pendingOrders: number;
+  totalRevenue: number;
+  totalProducts: number;
+  lowStockProducts: number;
+  totalManagers: number;
+}
+
 export default function DashboardOverviewPage() {
   const router = useRouter();
   const { userProfile, user, role, isSuperAdmin, isAdmin, isManager, loading: authLoading } = useAuth();
 
-  const [stats, setStats] = useState({
-    totalOrders: 0,
-    pendingOrders: 0,
-    totalRevenue: 0,
-    totalProducts: 0,
-    lowStockProducts: 0,
-    totalManagers: 0,
+  const [stats, setStats] = useState<DashboardMetrics>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const cached = sessionStorage.getItem("osvid_dashboard_stats");
+        if (cached) return JSON.parse(cached);
+      } catch (_) {}
+    }
+    return {
+      totalOrders: 0,
+      pendingOrders: 0,
+      totalRevenue: 0,
+      totalProducts: 0,
+      lowStockProducts: 0,
+      totalManagers: 0,
+    };
+  });
+
+  const [hasCachedStats, setHasCachedStats] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        return Boolean(sessionStorage.getItem("osvid_dashboard_stats"));
+      } catch (_) {}
+    }
+    return false;
   });
 
   const [allOrders, setAllOrders] = useState<Order[]>([]);
@@ -66,7 +94,7 @@ export default function DashboardOverviewPage() {
 
   const [orderFilter, setOrderFilter] = useState<string>("all");
   const [timeRange, setTimeRange] = useState<"7D" | "14D" | "30D" | "ALL">("14D");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!hasCachedStats);
   const [refreshing, setRefreshing] = useState(false);
 
   const isSuper = Boolean(
@@ -84,27 +112,101 @@ export default function DashboardOverviewPage() {
     }
   }, [authLoading, isSuper, router]);
 
+  // Real-time listener for orders and products so stats are instant and always fresh
+  useEffect(() => {
+    if (isSuper) return;
+
+    let unsubOrders: (() => void) | null = null;
+    let unsubProducts: (() => void) | null = null;
+
+    try {
+      unsubOrders = onSnapshot(
+        query(collection(db, "orders"), orderBy("createdAt", "desc")),
+        (snapshot) => {
+          const orders = snapshot.docs.map((d) => d.data() as Order);
+          setAllOrders(orders);
+          setStats((prev: DashboardMetrics) => {
+            const paidRev = orders
+              .filter((o) => o.paymentStatus === "paid")
+              .reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+            const pending = orders.filter(
+              (o) => o.orderStatus === "pending" || o.orderStatus === "processing"
+            ).length;
+            const updated: DashboardMetrics = {
+              ...prev,
+              totalOrders: orders.length,
+              pendingOrders: pending,
+              totalRevenue: paidRev,
+            };
+            if (typeof window !== "undefined") {
+              sessionStorage.setItem("osvid_dashboard_stats", JSON.stringify(updated));
+            }
+            return updated;
+          });
+          setHasCachedStats(true);
+          setLoading(false);
+        },
+        (err) => {
+          console.warn("Orders real-time listener error:", err);
+        }
+      );
+
+      unsubProducts = onSnapshot(
+        collection(db, "products"),
+        (snapshot) => {
+          const products = snapshot.docs.map((d) => d.data() as Product);
+          setAllProducts(products);
+          setStats((prev: DashboardMetrics) => {
+            const lowStock = products.filter(
+              (p) => (Number(p.stockQuantity) || 0) < 10
+            ).length;
+            const updated: DashboardMetrics = {
+              ...prev,
+              totalProducts: products.length,
+              lowStockProducts: lowStock,
+            };
+            if (typeof window !== "undefined") {
+              sessionStorage.setItem("osvid_dashboard_stats", JSON.stringify(updated));
+            }
+            return updated;
+          });
+          setHasCachedStats(true);
+          setLoading(false);
+        },
+        (err) => {
+          console.warn("Products real-time listener error:", err);
+        }
+      );
+    } catch (e) {
+      console.warn("Could not attach real-time dashboard listeners:", e);
+    }
+
+    return () => {
+      if (unsubOrders) unsubOrders();
+      if (unsubProducts) unsubProducts();
+    };
+  }, [isSuper]);
+
   const loadData = useCallback(async (isManualRefresh = false) => {
     if (isSuper) return;
     try {
       if (isManualRefresh) setRefreshing(true);
-      else setLoading(true);
 
-      const [kpis, orders, products, revs, discounts, customers] = await Promise.all([
+      const [kpis, revs, discounts, customers] = await Promise.all([
         getDashboardStats(),
-        getOrdersFromDb(),
-        getProductsFromDb(),
         getProductReviewsFromDb(),
         getDiscountsFromDb(),
         getCustomersFromDb(),
       ]);
 
       setStats(kpis);
-      setAllOrders(orders);
-      setAllProducts(products);
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("osvid_dashboard_stats", JSON.stringify(kpis));
+      }
       setReviews(revs);
       setActivePromosCount(discounts.filter((d) => d.isActive).length);
       setCustomersCount(customers.length);
+      setHasCachedStats(true);
     } catch (err) {
       console.error("Error loading dashboard data:", err);
     } finally {
@@ -265,9 +367,13 @@ export default function DashboardOverviewPage() {
             </div>
           </div>
           <div className="my-2">
-            <p className="text-2xl font-black text-slate-900 tracking-tight">
-              {formatCurrency("NGN", stats.totalRevenue)}
-            </p>
+            {!hasCachedStats && loading ? (
+              <div className="h-8 w-32 bg-slate-100 animate-pulse rounded-lg my-0.5" />
+            ) : (
+              <p className="text-2xl font-black text-slate-900 tracking-tight">
+                {formatCurrency("NGN", stats.totalRevenue)}
+              </p>
+            )}
           </div>
           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
             <span className="text-slate-500">Avg. Order Value</span>
@@ -288,9 +394,13 @@ export default function DashboardOverviewPage() {
             </div>
           </div>
           <div className="my-2">
-            <p className="text-2xl font-black text-slate-900 tracking-tight">
-              {stats.totalOrders}
-            </p>
+            {!hasCachedStats && loading ? (
+              <div className="h-8 w-20 bg-slate-100 animate-pulse rounded-lg my-0.5" />
+            ) : (
+              <p className="text-2xl font-black text-slate-900 tracking-tight">
+                {stats.totalOrders}
+              </p>
+            )}
           </div>
           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
             <span className="text-slate-500">Awaiting Dispatch</span>
@@ -311,9 +421,13 @@ export default function DashboardOverviewPage() {
             </div>
           </div>
           <div className="my-2">
-            <p className="text-2xl font-black text-slate-900 tracking-tight">
-              {stats.totalProducts} <span className="text-xs font-medium text-slate-400">SKUs</span>
-            </p>
+            {!hasCachedStats && loading ? (
+              <div className="h-8 w-24 bg-slate-100 animate-pulse rounded-lg my-0.5" />
+            ) : (
+              <p className="text-2xl font-black text-slate-900 tracking-tight">
+                {stats.totalProducts} <span className="text-xs font-medium text-slate-400">SKUs</span>
+              </p>
+            )}
           </div>
           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
             <span className="text-slate-500">Warehouse In-Stock</span>
@@ -340,10 +454,14 @@ export default function DashboardOverviewPage() {
             </div>
           </div>
           <div className="my-2">
-            <p className="text-2xl font-black text-slate-900 tracking-tight">
-              {stats.lowStockProducts}{" "}
-              <span className="text-xs font-medium text-slate-400">items</span>
-            </p>
+            {!hasCachedStats && loading ? (
+              <div className="h-8 w-20 bg-slate-100 animate-pulse rounded-lg my-0.5" />
+            ) : (
+              <p className="text-2xl font-black text-slate-900 tracking-tight">
+                {stats.lowStockProducts}{" "}
+                <span className="text-xs font-medium text-slate-400">items</span>
+              </p>
+            )}
           </div>
           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
             <span className="text-slate-500">Threshold: &lt;10 units</span>
@@ -367,10 +485,14 @@ export default function DashboardOverviewPage() {
             </div>
           </div>
           <div className="my-2">
-            <p className="text-2xl font-black text-slate-900 tracking-tight">
-              {reviews.length}{" "}
-              <span className="text-xs font-medium text-slate-400">reviews</span>
-            </p>
+            {!hasCachedStats && loading ? (
+              <div className="h-8 w-24 bg-slate-100 animate-pulse rounded-lg my-0.5" />
+            ) : (
+              <p className="text-2xl font-black text-slate-900 tracking-tight">
+                {reviews.length}{" "}
+                <span className="text-xs font-medium text-slate-400">reviews</span>
+              </p>
+            )}
           </div>
           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
             <span className="text-slate-500">Moderation Feed</span>
@@ -394,9 +516,13 @@ export default function DashboardOverviewPage() {
             </div>
           </div>
           <div className="my-2">
-            <p className="text-2xl font-black text-slate-900 tracking-tight">
-              {customersCount}
-            </p>
+            {!hasCachedStats && loading ? (
+              <div className="h-8 w-20 bg-slate-100 animate-pulse rounded-lg my-0.5" />
+            ) : (
+              <p className="text-2xl font-black text-slate-900 tracking-tight">
+                {customersCount}
+              </p>
+            )}
           </div>
           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
             <span className="text-slate-500">Directory</span>
@@ -420,10 +546,14 @@ export default function DashboardOverviewPage() {
             </div>
           </div>
           <div className="my-2">
-            <p className="text-2xl font-black text-slate-900 tracking-tight">
-              {activePromosCount}{" "}
-              <span className="text-xs font-medium text-slate-400">coupons</span>
-            </p>
+            {!hasCachedStats && loading ? (
+              <div className="h-8 w-20 bg-slate-100 animate-pulse rounded-lg my-0.5" />
+            ) : (
+              <p className="text-2xl font-black text-slate-900 tracking-tight">
+                {activePromosCount}{" "}
+                <span className="text-xs font-medium text-slate-400">coupons</span>
+              </p>
+            )}
           </div>
           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
             <span className="text-slate-500">Tier Pricing</span>
@@ -447,10 +577,14 @@ export default function DashboardOverviewPage() {
             </div>
           </div>
           <div className="my-2">
-            <p className="text-2xl font-black text-slate-900 tracking-tight">
-              {stats.totalManagers || 1}{" "}
-              <span className="text-xs font-medium text-slate-400">managers</span>
-            </p>
+            {!hasCachedStats && loading ? (
+              <div className="h-8 w-24 bg-slate-100 animate-pulse rounded-lg my-0.5" />
+            ) : (
+              <p className="text-2xl font-black text-slate-900 tracking-tight">
+                {stats.totalManagers || 1}{" "}
+                <span className="text-xs font-medium text-slate-400">managers</span>
+              </p>
+            )}
           </div>
           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
             <span className="text-slate-500">RBAC Controls</span>
