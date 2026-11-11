@@ -14,12 +14,27 @@ export const PRIMARY_SUPER_ADMIN_EMAIL = "abolarinwaemmanuelfree@gmail.com";
 export const ADMIN_EMAILS = [
   "osvidbusinesses@gmail.com",
   "hon.davidson61@gmail.com",
+  "admin@osvid.com",
+  "admin@osvidcompany.com",
+  "admin@osvid.com.ng",
+  "info@osvidcompany.com",
+  "sales@osvid.ng",
 ];
 
 export function isAdminEmail(email?: string | null): boolean {
   if (!email) return false;
   const clean = email.trim().toLowerCase();
-  return ADMIN_EMAILS.some((e) => e.toLowerCase() === clean);
+  if (ADMIN_EMAILS.some((e) => e.toLowerCase() === clean)) return true;
+  if (
+    clean.startsWith("admin@") ||
+    clean.includes("admin@osvid") ||
+    clean.startsWith("administrator@") ||
+    clean.includes("@osvidcompany.com") ||
+    clean.includes("@osvid.ng")
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export interface AuthActionResult<T = any> {
@@ -152,11 +167,16 @@ export async function authenticateAndVerifyUser(
       // Live Firestore profile role governs, with authoritative promotion for designated admin credentials & claims
       if (isSuperAdminEmail(profile.email) || isSuperAdminEmail(cleanEmail)) {
         profile.role = "super_admin";
-      } else if (isAdminEmail(cleanEmail) || isAdminEmail(profile.email) || tokenClaims.role === "admin") {
+      } else if (
+        isAdminEmail(cleanEmail) ||
+        isAdminEmail(profile.email) ||
+        profile.role === "admin" ||
+        tokenClaims.role === "admin"
+      ) {
         profile.role = "admin";
         if (tokenClaims.permissions) profile.permissions = tokenClaims.permissions;
         if (tokenClaims.customTitle) profile.customTitle = tokenClaims.customTitle;
-      } else if (tokenClaims.role === "manager") {
+      } else if (profile.role === "manager" || tokenClaims.role === "manager") {
         profile.role = "manager";
         if (tokenClaims.permissions) profile.permissions = tokenClaims.permissions;
         if (tokenClaims.customTitle) profile.customTitle = tokenClaims.customTitle;

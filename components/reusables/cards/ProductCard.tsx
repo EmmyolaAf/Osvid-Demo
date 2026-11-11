@@ -14,6 +14,7 @@ import {
   Eye,
   Tag,
   ShieldCheck,
+  Layers,
 } from "lucide-react";
 import { FadeInAnimationWrapper } from "../custom-animation-wrapper";
 import formatCurrency from "@/helpers/formatCurrency";
@@ -29,11 +30,17 @@ interface ProductCardProps {
     price?: number;
     discountPrice?: number;
     image?: string;
+    imageUrl?: string;
     variant?: string;
     category?: string;
+    productType?: "simple" | "variable" | "grouped";
+    variations?: any[];
     pricingTierId?: string;
     pricingTierName?: string;
     pricingTiers?: PricingTierItem[];
+    volumeDiscountThreshold?: number;
+    volumeDiscountPercentage?: number;
+    volumeUnit?: string;
   };
   index: number;
   currency?: string;
@@ -51,23 +58,44 @@ export default function ProductCard({
   const [justAdded, setJustAdded] = useState(false);
   const { cart, addToCart } = useCart();
 
-  const mainImage = product.image || "/images/placeholder.webp";
+  const mainImage = product.imageUrl || product.image || "/images/placeholder.webp";
+  const isVariableWithOptions =
+    product.productType === "variable" &&
+    Array.isArray(product.variations) &&
+    product.variations.length > 1;
+
+  // Determine effective display price
+  let displayPrice = product.price;
+  let displayDiscountPrice = product.discountPrice;
+
+  if (
+    (!displayPrice || displayPrice <= 0) &&
+    Array.isArray(product.variations) &&
+    product.variations.length > 0
+  ) {
+    const validPrices = product.variations
+      .map((v) => Number(v.salePrice || v.regularPrice || v.price))
+      .filter((p) => !isNaN(p) && p > 0);
+    if (validPrices.length > 0) {
+      displayPrice = Math.min(...validPrices);
+    }
+  }
 
   const hasDiscount =
-    product.discountPrice !== undefined &&
-    product.price !== undefined &&
-    product.discountPrice < product.price;
+    displayDiscountPrice !== undefined &&
+    displayPrice !== undefined &&
+    displayDiscountPrice < displayPrice;
 
   const discountPercentage = hasDiscount
     ? Math.round(
-        ((Number(product.price) - Number(product.discountPrice)) /
-          Number(product.price)) *
+        ((Number(displayPrice) - Number(displayDiscountPrice)) /
+          Number(displayPrice)) *
           100
       )
     : 0;
 
   const isInCart = cart.some(
-    (item) => item.id === product.id && item.variant === product.variant
+    (item) => item.id === product.id && (!product.variant || item.variant === product.variant)
   );
 
   const handleAddToCart = async (e: React.MouseEvent) => {
@@ -85,15 +113,15 @@ export default function ProductCard({
         id: product.id,
         name: product.name,
         priceData: {
-          price: product.price || 0,
-          discountedPrice: product.discountPrice,
+          price: displayPrice || 0,
+          discountedPrice: displayDiscountPrice,
           currency,
           formatted: {
-            price: formatCurrency(currency, product.price || 0),
+            price: formatCurrency(currency, displayPrice || 0),
             ...(hasDiscount && {
               discountedPrice: formatCurrency(
                 currency,
-                product.discountPrice || 0
+                displayDiscountPrice || 0
               ),
             }),
           },
@@ -103,6 +131,9 @@ export default function ProductCard({
         pricingTierId: product.pricingTierId,
         pricingTierName: product.pricingTierName,
         pricingTiers: product.pricingTiers,
+        volumeDiscountThreshold: product.volumeDiscountThreshold,
+        volumeDiscountPercentage: product.volumeDiscountPercentage,
+        volumeUnit: product.volumeUnit,
       };
 
       await addToCart(cartItem, 1);
@@ -229,16 +260,17 @@ export default function ProductCard({
         <div className="pt-2 border-t border-slate-100 space-y-3">
           <div className="flex items-baseline justify-between gap-2">
             <div className="flex items-baseline gap-2">
-              {product.price !== undefined && (
+              {displayPrice !== undefined && (
                 <>
                   <span className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
+                    {isVariableWithOptions && !hasDiscount ? "From " : ""}
                     {hasDiscount
-                      ? formatCurrency(currency, Number(product.discountPrice))
-                      : formatCurrency(currency, Number(product.price))}
+                      ? formatCurrency(currency, Number(displayDiscountPrice))
+                      : formatCurrency(currency, Number(displayPrice))}
                   </span>
-                  {hasDiscount && product.discountPrice !== undefined ? (
+                  {hasDiscount && displayDiscountPrice !== undefined ? (
                     <span className="text-xs text-slate-400 line-through font-medium">
-                      {formatCurrency(currency, Number(product.price))}
+                      {formatCurrency(currency, Number(displayPrice))}
                     </span>
                   ) : null}
                 </>
@@ -251,33 +283,45 @@ export default function ProductCard({
             </span>
           </div>
 
-          {/* Add to Cart Button */}
-          <Button
-            onClick={handleAddToCart}
-            disabled={isAddingToCart}
-            className={`w-full h-10 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 ${
-              justAdded || isInCart
-                ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-                : "bg-orange-600 hover:bg-orange-700 text-white hover:shadow-orange-600/20 hover:shadow-md"
-            }`}
-          >
-            {isAddingToCart ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>Adding to Cart...</span>
-              </>
-            ) : justAdded || isInCart ? (
-              <>
-                <Check className="h-4 w-4" />
-                <span>{isInCart ? "In Your Cart" : "Added to Cart!"}</span>
-              </>
-            ) : (
-              <>
-                <ShoppingCart className="h-3.5 w-3.5" />
-                <span>Add to Cart</span>
-              </>
-            )}
-          </Button>
+          {/* Add to Cart or Select Options for Variable Products */}
+          {isVariableWithOptions ? (
+            <Link href={`/shop/${product.slug}`} className="block w-full">
+              <Button
+                variant="outline"
+                className="w-full h-10 rounded-xl text-xs font-bold transition-all border-slate-300 hover:border-orange-600 hover:bg-orange-50 text-slate-800 hover:text-orange-600 flex items-center justify-center gap-2"
+              >
+                <Layers className="h-3.5 w-3.5 text-orange-600" />
+                <span>Select Options ({product.variations?.length} sizes)</span>
+              </Button>
+            </Link>
+          ) : (
+            <Button
+              onClick={handleAddToCart}
+              disabled={isAddingToCart}
+              className={`w-full h-10 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 ${
+                justAdded || isInCart
+                  ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                  : "bg-orange-600 hover:bg-orange-700 text-white hover:shadow-orange-600/20 hover:shadow-md"
+              }`}
+            >
+              {isAddingToCart ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Adding to Cart...</span>
+                </>
+              ) : justAdded || isInCart ? (
+                <>
+                  <Check className="h-4 w-4" />
+                  <span>{isInCart ? "In Your Cart" : "Added to Cart!"}</span>
+                </>
+              ) : (
+                <>
+                  <ShoppingCart className="h-3.5 w-3.5" />
+                  <span>Add to Cart</span>
+                </>
+              )}
+            </Button>
+          )}
         </div>
       </div>
     </FadeInAnimationWrapper>

@@ -1366,17 +1366,30 @@ export function ProductFormModal({
                                 Variation Discount Scheme (Optional Override)
                               </Label>
                               <select
-                                value={v.pricingTierId || ""}
+                                value={v.pricingTierId || (v.pricingTiers && v.pricingTiers.length > 0 ? "custom" : "")}
                                 onChange={(e) => {
                                   const selectedId = e.target.value;
-                                  const grp = pricingTierGroups.find((g) => g.id === selectedId);
-                                  handleUpdateVariation(idx, "pricingTierId", selectedId || undefined);
-                                  handleUpdateVariation(idx, "pricingTierName", grp?.name || undefined);
-                                  handleUpdateVariation(idx, "pricingTiers", grp?.tiers || undefined);
+                                  if (selectedId === "custom") {
+                                    handleUpdateVariation(idx, "pricingTierId", "custom");
+                                    handleUpdateVariation(idx, "pricingTierName", "Custom Variation Tiers");
+                                    if (!v.pricingTiers || v.pricingTiers.length === 0) {
+                                      handleUpdateVariation(idx, "pricingTiers", [{ minQuantity: 5, discountPercentage: 5 }]);
+                                    }
+                                  } else if (selectedId === "") {
+                                    handleUpdateVariation(idx, "pricingTierId", undefined);
+                                    handleUpdateVariation(idx, "pricingTierName", undefined);
+                                    handleUpdateVariation(idx, "pricingTiers", undefined);
+                                  } else {
+                                    const grp = pricingTierGroups.find((g) => g.id === selectedId);
+                                    handleUpdateVariation(idx, "pricingTierId", selectedId);
+                                    handleUpdateVariation(idx, "pricingTierName", grp?.name || undefined);
+                                    handleUpdateVariation(idx, "pricingTiers", grp?.tiers || undefined);
+                                  }
                                 }}
                                 className="mt-1 w-full h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs"
                               >
                                 <option value="">Inherit Product Level Discount</option>
+                                <option value="custom">★ Custom Discount Tiers for this Variation</option>
                                 {pricingTierGroups
                                   .filter((g) => g.isActive)
                                   .map((group) => {
@@ -1392,6 +1405,89 @@ export function ProductFormModal({
                               </select>
                             </div>
                           </div>
+
+                          {/* Inline Custom Tier Rules Builder for this Variation */}
+                          {v.pricingTierId === "custom" && (
+                            <div className="pt-2.5 pb-1 space-y-2 border-t border-slate-200/80 bg-white/70 p-2.5 rounded-lg">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-bold text-slate-800">
+                                  Variation Tier Rules:
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const currentTiers = v.pricingTiers || [];
+                                    const last = currentTiers[currentTiers.length - 1];
+                                    const nextMin = last ? last.minQuantity + 5 : 5;
+                                    const nextPct = last ? Math.min(100, (last.discountPercentage || 0) + 5) : 5;
+                                    handleUpdateVariation(idx, "pricingTiers", [
+                                      ...currentTiers,
+                                      { minQuantity: nextMin, discountPercentage: nextPct },
+                                    ]);
+                                  }}
+                                  className="text-[10px] font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1"
+                                >
+                                  <Plus size={11} /> Add Tier Bracket
+                                </button>
+                              </div>
+                              {(v.pricingTiers && v.pricingTiers.length > 0
+                                ? v.pricingTiers
+                                : [{ minQuantity: 5, discountPercentage: 5 }]
+                              ).map((t, tIdx) => (
+                                <div key={tIdx} className="flex items-center gap-2">
+                                  <div className="flex items-center gap-1 text-[10px] font-medium text-slate-600">
+                                    <span>Buy</span>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      value={t.minQuantity}
+                                      onChange={(e) => {
+                                        const copy = [...(v.pricingTiers || [])];
+                                        copy[tIdx] = {
+                                          ...copy[tIdx],
+                                          minQuantity: parseInt(e.target.value, 10) || 1,
+                                        };
+                                        handleUpdateVariation(idx, "pricingTiers", copy);
+                                      }}
+                                      className="w-14 h-7 text-xs font-bold rounded border border-slate-200 px-1 text-center bg-white"
+                                    />
+                                    <span>+ units &rarr;</span>
+                                  </div>
+                                  <div className="flex items-center gap-1 text-[10px] font-medium text-slate-600">
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      max="100"
+                                      value={t.discountPercentage || 0}
+                                      onChange={(e) => {
+                                        const copy = [...(v.pricingTiers || [])];
+                                        copy[tIdx] = {
+                                          ...copy[tIdx],
+                                          discountPercentage: parseFloat(e.target.value) || 0,
+                                        };
+                                        handleUpdateVariation(idx, "pricingTiers", copy);
+                                      }}
+                                      className="w-14 h-7 text-xs font-bold text-emerald-700 rounded border border-slate-200 px-1 text-center bg-white"
+                                    />
+                                    <span>% OFF</span>
+                                  </div>
+                                  {(v.pricingTiers || []).length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const copy = (v.pricingTiers || []).filter((_, i) => i !== tIdx);
+                                        handleUpdateVariation(idx, "pricingTiers", copy);
+                                      }}
+                                      className="text-rose-500 hover:text-rose-700 p-1"
+                                      title="Remove tier"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
 
                           {/* Quick Custom Tier for this Variation if no scheme selected */}
                           <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px]">

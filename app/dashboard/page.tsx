@@ -60,32 +60,16 @@ export default function DashboardOverviewPage() {
   const router = useRouter();
   const { userProfile, user, role, isSuperAdmin, isAdmin, isManager, loading: authLoading } = useAuth();
 
-  const [stats, setStats] = useState<DashboardMetrics>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const cached = sessionStorage.getItem("osvid_dashboard_stats");
-        if (cached) return JSON.parse(cached);
-      } catch (_) {}
-    }
-    return {
-      totalOrders: 0,
-      pendingOrders: 0,
-      totalRevenue: 0,
-      totalProducts: 0,
-      lowStockProducts: 0,
-      totalManagers: 0,
-    };
+  const [stats, setStats] = useState<DashboardMetrics>({
+    totalOrders: 0,
+    pendingOrders: 0,
+    totalRevenue: 0,
+    totalProducts: 0,
+    lowStockProducts: 0,
+    totalManagers: 0,
   });
 
-  const [hasCachedStats, setHasCachedStats] = useState(() => {
-    if (typeof window !== "undefined") {
-      try {
-        return Boolean(sessionStorage.getItem("osvid_dashboard_stats"));
-      } catch (_) {}
-    }
-    return false;
-  });
-
+  const [dataLoaded, setDataLoaded] = useState(false);
   const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [reviews, setReviews] = useState<ProductReview[]>([]);
@@ -94,7 +78,7 @@ export default function DashboardOverviewPage() {
 
   const [orderFilter, setOrderFilter] = useState<string>("all");
   const [timeRange, setTimeRange] = useState<"7D" | "14D" | "30D" | "ALL">("14D");
-  const [loading, setLoading] = useState(!hasCachedStats);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const isSuper = Boolean(
@@ -138,12 +122,9 @@ export default function DashboardOverviewPage() {
               pendingOrders: pending,
               totalRevenue: paidRev,
             };
-            if (typeof window !== "undefined") {
-              sessionStorage.setItem("osvid_dashboard_stats", JSON.stringify(updated));
-            }
             return updated;
           });
-          setHasCachedStats(true);
+          setDataLoaded(true);
           setLoading(false);
         },
         (err) => {
@@ -165,12 +146,9 @@ export default function DashboardOverviewPage() {
               totalProducts: products.length,
               lowStockProducts: lowStock,
             };
-            if (typeof window !== "undefined") {
-              sessionStorage.setItem("osvid_dashboard_stats", JSON.stringify(updated));
-            }
             return updated;
           });
-          setHasCachedStats(true);
+          setDataLoaded(true);
           setLoading(false);
         },
         (err) => {
@@ -200,13 +178,10 @@ export default function DashboardOverviewPage() {
       ]);
 
       setStats(kpis);
-      if (typeof window !== "undefined") {
-        sessionStorage.setItem("osvid_dashboard_stats", JSON.stringify(kpis));
-      }
       setReviews(revs);
       setActivePromosCount(discounts.filter((d) => d.isActive).length);
       setCustomersCount(customers.length);
-      setHasCachedStats(true);
+      setDataLoaded(true);
     } catch (err) {
       console.error("Error loading dashboard data:", err);
     } finally {
@@ -367,7 +342,7 @@ export default function DashboardOverviewPage() {
             </div>
           </div>
           <div className="my-2">
-            {!hasCachedStats && loading ? (
+            {!dataLoaded ? (
               <div className="h-8 w-32 bg-slate-100 animate-pulse rounded-lg my-0.5" />
             ) : (
               <p className="text-2xl font-black text-slate-900 tracking-tight">
@@ -394,7 +369,7 @@ export default function DashboardOverviewPage() {
             </div>
           </div>
           <div className="my-2">
-            {!hasCachedStats && loading ? (
+            {!dataLoaded ? (
               <div className="h-8 w-20 bg-slate-100 animate-pulse rounded-lg my-0.5" />
             ) : (
               <p className="text-2xl font-black text-slate-900 tracking-tight">
@@ -421,7 +396,7 @@ export default function DashboardOverviewPage() {
             </div>
           </div>
           <div className="my-2">
-            {!hasCachedStats && loading ? (
+            {!dataLoaded ? (
               <div className="h-8 w-24 bg-slate-100 animate-pulse rounded-lg my-0.5" />
             ) : (
               <p className="text-2xl font-black text-slate-900 tracking-tight">
@@ -454,7 +429,7 @@ export default function DashboardOverviewPage() {
             </div>
           </div>
           <div className="my-2">
-            {!hasCachedStats && loading ? (
+            {!dataLoaded ? (
               <div className="h-8 w-20 bg-slate-100 animate-pulse rounded-lg my-0.5" />
             ) : (
               <p className="text-2xl font-black text-slate-900 tracking-tight">
@@ -485,7 +460,7 @@ export default function DashboardOverviewPage() {
             </div>
           </div>
           <div className="my-2">
-            {!hasCachedStats && loading ? (
+            {!dataLoaded ? (
               <div className="h-8 w-24 bg-slate-100 animate-pulse rounded-lg my-0.5" />
             ) : (
               <p className="text-2xl font-black text-slate-900 tracking-tight">
@@ -516,7 +491,7 @@ export default function DashboardOverviewPage() {
             </div>
           </div>
           <div className="my-2">
-            {!hasCachedStats && loading ? (
+            {!dataLoaded ? (
               <div className="h-8 w-20 bg-slate-100 animate-pulse rounded-lg my-0.5" />
             ) : (
               <p className="text-2xl font-black text-slate-900 tracking-tight">
@@ -546,7 +521,7 @@ export default function DashboardOverviewPage() {
             </div>
           </div>
           <div className="my-2">
-            {!hasCachedStats && loading ? (
+            {!dataLoaded ? (
               <div className="h-8 w-20 bg-slate-100 animate-pulse rounded-lg my-0.5" />
             ) : (
               <p className="text-2xl font-black text-slate-900 tracking-tight">
@@ -577,7 +552,7 @@ export default function DashboardOverviewPage() {
             </div>
           </div>
           <div className="my-2">
-            {!hasCachedStats && loading ? (
+            {!dataLoaded ? (
               <div className="h-8 w-24 bg-slate-100 animate-pulse rounded-lg my-0.5" />
             ) : (
               <p className="text-2xl font-black text-slate-900 tracking-tight">

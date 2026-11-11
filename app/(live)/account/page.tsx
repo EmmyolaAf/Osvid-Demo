@@ -27,7 +27,7 @@ import { isSuperAdminEmail, isAdminEmail } from "@/lib/firebase/auth";
 
 export default function AccountPage() {
   const router = useRouter();
-  const { user, userProfile, role, logout, isStaff, isAdmin, isSuperAdmin, refreshProfile } = useAuth();
+  const { user, userProfile, role, logout, isStaff, isAdmin, isSuperAdmin, refreshProfile, loading } = useAuth();
   const [displayName, setDisplayName] = useState(userProfile?.displayName || "");
   const [phoneNumber, setPhoneNumber] = useState(userProfile?.phoneNumber || "");
   const [saving, setSaving] = useState(false);
@@ -36,7 +36,8 @@ export default function AccountPage() {
     isSuperAdmin ||
     role === "super_admin" ||
     userProfile?.role === "super_admin" ||
-    isSuperAdminEmail(user?.email)
+    isSuperAdminEmail(user?.email) ||
+    isSuperAdminEmail(userProfile?.email)
   );
 
   const isAdminUser = Boolean(
@@ -47,17 +48,22 @@ export default function AccountPage() {
     isAdminEmail(userProfile?.email)
   );
 
-  const isStaffUser = isSuper || isAdminUser || role === "manager" || userProfile?.role === "manager";
+  const isManagerUser = Boolean(
+    role === "manager" ||
+    userProfile?.role === "manager"
+  );
+
+  const isStaffUser = isSuper || isAdminUser || isManagerUser || Boolean(isStaff);
 
   React.useEffect(() => {
+    if (loading) return;
+
     if (isSuper) {
       router.replace("/dashboard/super-admin");
-    } else if (isAdminUser) {
-      router.replace("/dashboard");
-    } else if (role === "manager" || userProfile?.role === "manager") {
+    } else if (isAdminUser || isManagerUser || isStaffUser) {
       router.replace("/dashboard");
     }
-  }, [isSuper, isAdminUser, role, userProfile, router]);
+  }, [isSuper, isAdminUser, isManagerUser, isStaffUser, loading, router]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,6 +84,21 @@ export default function AccountPage() {
       setSaving(false);
     }
   };
+
+  // Immediate protection: If user is any administrative or management role, intercept and do NOT render customer UI
+  if (loading || isSuper || isAdminUser || isManagerUser || isStaffUser) {
+    return (
+      <div className="bg-slate-50 min-h-screen py-24 px-4 flex flex-col items-center justify-center text-center">
+        <div className="w-10 h-10 border-3 border-orange-600 border-t-transparent rounded-full animate-spin mb-4" />
+        <h2 className="text-base font-bold text-slate-800">
+          {isSuper || isAdminUser || isManagerUser || isStaffUser
+            ? "Redirecting to Admin Dashboard..."
+            : "Verifying Authentication..."}
+        </h2>
+        <p className="text-xs text-slate-500 mt-1">Taking you to your administrative control center.</p>
+      </div>
+    );
+  }
 
   return (
     <ProtectedRoute requireAuth={true}>
