@@ -274,43 +274,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <SuspensionBarrier subscription={subscription} />
       ) : (
         <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row text-slate-800 font-sans">
-          {/* Mobile Top App Bar */}
-          <header className="lg:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between sticky top-0 z-40">
-            <Link href="/dashboard" className="flex items-center">
-              <Image
-                src="/images/logo.webp"
-                alt="OSVID Logo"
-                width={120}
-                height={36}
-                className="h-8 w-auto object-contain"
-                priority
-              />
-            </Link>
-            <div className="flex items-center gap-2">
-              <Link href="/shop" target="_blank">
-                <Button
-                  size="sm"
-                  className="h-8 px-2.5 rounded-xl text-xs font-bold bg-orange-600 hover:bg-orange-700 text-white flex items-center gap-1.5"
-                >
-                  <ExternalLink size={13} />
-                  <span>Store</span>
-                </Button>
-              </Link>
-              <button
-                onClick={() => setSidebarOpen((prev) => !prev)}
-                className="p-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 transition-colors"
-                aria-label="Toggle navigation drawer"
-                aria-expanded={sidebarOpen}
-              >
-                {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
-              </button>
-            </div>
-          </header>
-
           {/* Mobile Backdrop Overlay */}
           {sidebarOpen && (
             <div
-              className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs lg:hidden transition-opacity"
+              className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs lg:hidden transition-opacity"
               onClick={() => setSidebarOpen(false)}
               aria-hidden="true"
             />
@@ -453,9 +420,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {/* Main Content Area */}
           <div className="flex-1 min-w-0 flex flex-col h-screen overflow-y-auto">
             {/* Top Navigation Bar with Search, Breadcrumbs & User Actions */}
-            <TopNavBar />
+            <TopNavBar onToggleSidebar={() => setSidebarOpen(true)} />
 
-            <main className="p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto flex-1 space-y-6">
+            <main className="p-3 sm:p-5 lg:p-8 max-w-7xl w-full mx-auto flex-1 space-y-5 sm:space-y-6">
               {/* Warning banner broadcast if active */}
               {subscription?.showWarning && subscription.warningNotice && !isSuperAdmin && (
                 <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex items-center justify-between gap-4 shadow-xs">

@@ -18,7 +18,15 @@ import {
 import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { getProductsFromDb } from "@/lib/firebase/firestore";
+import CustomSelect, { CustomSelectOption } from "@/components/ui/custom-select";
 import type { Product, ProductCategory } from "@/types";
+
+const SORT_OPTIONS: CustomSelectOption[] = [
+  { value: "newest", label: "Newest First" },
+  { value: "price-asc", label: "Price: Low to High" },
+  { value: "price-desc", label: "Price: High to Low" },
+  { value: "name-asc", label: "Alphabetical (A–Z)" },
+];
 
 interface ProductsCatalogClientProps {
   initialProducts: any[];
@@ -226,17 +234,13 @@ export default function ProductsCatalogClient({
               />
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
-              <select
+            <div className="flex items-center gap-1.5 shrink-0 w-full sm:w-44">
+              <CustomSelect
                 value={sortOrder}
-                onChange={(e) => setSortOrder(e.target.value)}
-                className="h-10 px-3 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 outline-none focus:border-orange-500"
-              >
-                <option value="newest">Newest First</option>
-                <option value="price-asc">Price: Low to High</option>
-                <option value="price-desc">Price: High to Low</option>
-                <option value="name-asc">Alphabetical (A–Z)</option>
-              </select>
+                onChange={setSortOrder}
+                options={SORT_OPTIONS}
+                size="md"
+              />
             </div>
           </div>
         </div>

@@ -161,13 +161,13 @@ export default function Header() {
       >
         <div className="w-full px-2 sm:px-4 flex items-center justify-between py-2 sm:py-2.5">
           {/* Logo */}
-          <Link href="/" className="flex items-center">
+          <Link href="/" className="flex items-center shrink-0">
             <Image
               src="/images/logo.webp"
               alt="Osvid Logo"
-              width={150}
-              height={50}
-              className="h-11 md:h-14 w-auto object-contain"
+              width={140}
+              height={46}
+              className="h-9 sm:h-11 md:h-14 w-auto object-contain"
               priority
             />
           </Link>
@@ -198,7 +198,7 @@ export default function Header() {
           </nav>
 
           {/* Right Side Actions */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             {user ? (
               <div className="flex items-center gap-2">
                 {isStaff || isSuperAdminUser ? (

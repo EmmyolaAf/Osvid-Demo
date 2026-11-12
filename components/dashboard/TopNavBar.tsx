@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -19,6 +20,7 @@ import {
   Briefcase,
   User,
   Sliders,
+  Menu,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -29,6 +31,7 @@ interface TopNavBarProps {
 }
 
 export default function TopNavBar({
+  onToggleSidebar,
   pendingOrdersCount = 0,
   pendingReviewsCount = 0,
 }: TopNavBarProps) {
@@ -66,10 +69,31 @@ export default function TopNavBar({
   const totalNotifications = pendingOrdersCount + pendingReviewsCount;
 
   return (
-    <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-4 sm:px-6 py-3 transition-all">
-      <div className="flex items-center justify-between gap-4">
-        {/* Left: Breadcrumbs & Page Context */}
-        <div className="flex items-center gap-2 min-w-0">
+    <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-3 sm:px-6 py-2.5 sm:py-3 transition-all">
+      <div className="flex items-center justify-between gap-2 sm:gap-4">
+        {/* Left: Hamburger, Brand on Mobile & Breadcrumbs on Desktop */}
+        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+          {onToggleSidebar && (
+            <button
+              onClick={onToggleSidebar}
+              className="lg:hidden p-2 -ml-1 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 transition-colors shrink-0 cursor-pointer"
+              aria-label="Open sidebar drawer"
+            >
+              <Menu size={18} />
+            </button>
+          )}
+
+          <Link href="/dashboard" className="lg:hidden flex items-center shrink-0 mr-1">
+            <Image
+              src="/images/logo.webp"
+              alt="OSVID Logo"
+              width={90}
+              height={26}
+              className="h-6 w-auto object-contain"
+              priority
+            />
+          </Link>
+
           <nav className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500 font-medium truncate">
             {breadcrumbs.map((crumb, idx) => (
               <React.Fragment key={crumb.url}>
@@ -87,7 +111,7 @@ export default function TopNavBar({
               </React.Fragment>
             ))}
           </nav>
-          <div className="sm:hidden font-bold text-sm text-slate-900 truncate">
+          <div className="hidden xs:block sm:hidden font-bold text-xs text-slate-800 truncate max-w-[120px]">
             {breadcrumbs[breadcrumbs.length - 1]?.label || "Dashboard"}
           </div>
         </div>

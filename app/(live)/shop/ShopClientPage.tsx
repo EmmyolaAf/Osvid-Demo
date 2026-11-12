@@ -21,6 +21,15 @@ import { Input } from "@/components/ui/input";
 import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { getProductsFromDb } from "@/lib/firebase/firestore";
+import CustomSelect, { CustomSelectOption } from "@/components/ui/custom-select";
+
+const SHOP_SORT_OPTIONS: CustomSelectOption[] = [
+  { value: "date", label: "Newest Arrivals" },
+  { value: "price", label: "Price: Low to High" },
+  { value: "price-desc", label: "Price: High to Low" },
+  { value: "name-asc", label: "Alphabetical (A–Z)" },
+  { value: "name-desc", label: "Alphabetical (Z–A)" },
+];
 
 interface ProductItem {
   _id: string;
@@ -201,8 +210,7 @@ export default function ShopClientPage({
     });
   };
 
-  const handleSortChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newSort = e.target.value;
+  const handleSortChange = (newSort: string) => {
     startTransition(() => {
       const params = new URLSearchParams(searchParams.toString());
       params.set("sort", newSort);
@@ -590,18 +598,15 @@ export default function ShopClientPage({
                   <ArrowUpDown size={14} className="text-slate-400" />
                   <span>Sort by:</span>
                 </div>
-                <select
-                  value={currentSort}
-                  onChange={handleSortChange}
-                  disabled={isPending}
-                  className="flex-1 sm:w-48 h-9 px-3 text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
-                >
-                  <option value="date">Newest Arrivals</option>
-                  <option value="price">Price: Low to High</option>
-                  <option value="price-desc">Price: High to Low</option>
-                  <option value="name-asc">Alphabetical (A–Z)</option>
-                  <option value="name-desc">Alphabetical (Z–A)</option>
-                </select>
+                <div className="flex-1 sm:w-48">
+                  <CustomSelect
+                    value={currentSort}
+                    onChange={handleSortChange}
+                    options={SHOP_SORT_OPTIONS}
+                    disabled={isPending}
+                    size="sm"
+                  />
+                </div>
               </div>
             </div>
 

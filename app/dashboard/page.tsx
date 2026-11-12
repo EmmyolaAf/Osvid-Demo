@@ -270,7 +270,7 @@ export default function DashboardOverviewPage() {
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       {/* Executive Welcome & Action Header */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200/90 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-6">
+      <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-200/90 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-6">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="w-2 h-2 rounded-full bg-orange-600 animate-pulse" />
@@ -278,19 +278,21 @@ export default function DashboardOverviewPage() {
               Operations Center &bull; {userProfile?.customTitle || (role === "admin" ? "General Administrator" : "Operations Manager")}
             </span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-slate-900 tracking-tight">
             {greeting}, {userProfile?.displayName?.split(" ")[0] || "Manager"}
           </h1>
-          <p className="text-xs text-slate-500 mt-1 flex items-center gap-2">
+          <p className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-1.5 sm:gap-2">
             <Calendar size={13} className="text-slate-400" />
-            {new Date().toLocaleDateString("en-NG", {
-              weekday: "long",
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })}
-            <span>&bull;</span>
-            <span>OSVID Chemicals Manufacturing Hub</span>
+            <span>
+              {new Date().toLocaleDateString("en-NG", {
+                weekday: "long",
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+              })}
+            </span>
+            <span className="hidden xs:inline">&bull;</span>
+            <span className="text-[11px] sm:text-xs text-slate-400">OSVID Chemicals Hub</span>
           </p>
         </div>
 
@@ -614,7 +616,7 @@ export default function DashboardOverviewPage() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
+                <table className="w-full text-left text-xs min-w-[620px]">
                   <thead className="bg-slate-50/70 border-b border-slate-200 text-slate-500 font-extrabold uppercase text-[10px] tracking-wider">
                     <tr>
                       <th className="py-3 px-4">Order ID</th>

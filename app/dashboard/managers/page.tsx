@@ -258,7 +258,7 @@ export default function ManagersManagementPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+              <table className="w-full text-left text-sm min-w-[650px]">
                 <thead className="bg-slate-50 border-b border-slate-200/80 text-[11px] uppercase tracking-wider font-bold text-slate-400">
                   <tr>
                     <th className="py-4 px-6">Manager &amp; Title</th>

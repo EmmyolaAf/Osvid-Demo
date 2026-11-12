@@ -303,7 +303,7 @@ export default function QuoteRequestModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleResetAndClose()}>
-      <DialogContent data-no-edit="true" className="max-w-2xl max-h-[92vh] overflow-y-auto bg-white rounded-2xl p-5 sm:p-7 border border-slate-200 shadow-2xl">
+      <DialogContent data-no-edit="true" className="max-w-2xl w-[96vw] sm:w-full max-h-[92vh] overflow-y-auto bg-white rounded-2xl sm:rounded-3xl p-3.5 sm:p-7 border border-slate-200 shadow-2xl">
         {submittedQuoteNumber ? (
           <div className="text-center py-6 space-y-5">
             <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-sm">
@@ -362,7 +362,7 @@ export default function QuoteRequestModal({
 
             <form onSubmit={handleSubmit} className="space-y-5">
               {/* Client Info Grid */}
-              <div className="bg-slate-50/70 p-4 rounded-xl border border-slate-200 space-y-3">
+              <div className="bg-slate-50/70 p-3 sm:p-4 rounded-xl border border-slate-200 space-y-3">
                 <span className="text-xs font-bold text-slate-800 uppercase tracking-wider block">
                   1. Contact & Business Coordinates
                 </span>
@@ -446,7 +446,7 @@ export default function QuoteRequestModal({
               </div>
 
               {/* Line Items Builder */}
-              <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/70 space-y-3">
+              <div className="border border-slate-200 rounded-xl p-3 sm:p-4 bg-slate-50/70 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
                     2. Chemical Requirements & Quantities *
@@ -533,7 +533,7 @@ export default function QuoteRequestModal({
               </div>
 
               {/* Timeline & Urgency */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50/70 p-4 rounded-xl border border-slate-200">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50/70 p-3 sm:p-4 rounded-xl border border-slate-200">
                 <div>
                   <Label className="text-xs font-semibold text-slate-700 mb-1 block">
                     Procurement Urgency

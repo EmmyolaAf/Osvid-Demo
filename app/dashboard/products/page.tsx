@@ -962,7 +962,7 @@ export default function ProductsManagementPage() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
+                <table className="w-full text-left text-sm min-w-[700px]">
                   <thead className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider font-bold text-slate-500">
                     <tr>
                       <th className="py-3.5 px-5">Product</th>

@@ -430,7 +430,7 @@ function VisualEditorToolbarInner() {
       {/* DOCKED / FLOATING VISUAL ELEMENT INSPECTOR */}
       {/* ============================================================ */}
       {isEditMode && selectedElement && (
-        <aside className="fixed top-20 right-4 z-[99999] w-88 max-w-[92vw] bg-white border border-slate-200 rounded-3xl shadow-2xl p-5 text-slate-800 animate-in slide-in-from-right duration-200 flex flex-col gap-4 max-h-[85vh] overflow-y-auto">
+        <aside className="fixed top-20 right-2 sm:right-4 z-[99999] w-88 max-w-[calc(100vw-1rem)] sm:max-w-[92vw] bg-white border border-slate-200 rounded-2xl sm:rounded-3xl shadow-2xl p-4 sm:p-5 text-slate-800 animate-in slide-in-from-right duration-200 flex flex-col gap-4 max-h-[85vh] overflow-y-auto">
           {/* Header */}
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
             <div className="flex items-center gap-2">

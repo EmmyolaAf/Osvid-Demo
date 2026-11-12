@@ -336,7 +336,7 @@ export default function OrdersManagementPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+            <table className="w-full text-left text-sm min-w-[700px]">
               <thead className="bg-slate-50/70 border-b border-slate-200 text-[10px] uppercase tracking-wider font-extrabold text-slate-500">
                 <tr>
                   <th className="py-3.5 px-6">Order Reference</th>

@@ -739,18 +739,18 @@ export default function AdminCrmPage() {
   return (
     <div className="space-y-6 pb-12 max-w-7xl mx-auto">
       {/* Top Banner / CRM Header */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white rounded-2xl p-6 sm:p-8 shadow-xl border border-slate-700/60 relative overflow-hidden">
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white rounded-2xl p-4 sm:p-6 md:p-8 shadow-xl border border-slate-700/60 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-80 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-6 relative z-10">
           <div>
             <div className="flex items-center gap-2 text-orange-400 font-semibold text-xs tracking-wider uppercase mb-1">
-              <Mail className="w-4 h-4" /> Commercial CRM & Inquiries Desk
+              <Mail className="w-4 h-4" /> Commercial CRM &amp; Inquiries Desk
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-              Customer Relations & Quotations Hub
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-extrabold tracking-tight">
+              Customer Relations &amp; Quotations Hub
             </h1>
-            <p className="text-slate-300 text-sm mt-1 max-w-2xl">
+            <p className="text-slate-300 text-xs sm:text-sm mt-1 max-w-2xl leading-relaxed">
               Process wholesale quotation requests (RFQs), reply to contact inquiries, manage newsletter subscribers, and dispatch official communications.
             </p>
           </div>
@@ -760,7 +760,7 @@ export default function AdminCrmPage() {
               variant="outline"
               size="sm"
               onClick={refreshAllData}
-              className="bg-white/10 hover:bg-white/20 text-white border-white/20 rounded-xl cursor-pointer"
+              className="bg-white/10 hover:bg-white/20 text-white border-white/20 rounded-xl cursor-pointer text-xs h-9 px-3"
             >
               <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Refresh Data
             </Button>
@@ -768,7 +768,7 @@ export default function AdminCrmPage() {
         </div>
 
         {/* KPI Ribbon */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mt-6 pt-6 border-t border-slate-700/60">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3 mt-5 sm:mt-6 pt-5 sm:pt-6 border-t border-slate-700/60">
           <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700/50">
             <span className="text-[11px] text-slate-400 block font-medium">Pending RFQs</span>
             <div className="flex items-baseline gap-2 mt-1">
@@ -1027,8 +1027,8 @@ export default function AdminCrmPage() {
                       <span className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
                         Requested Products & Volumes
                       </span>
-                      <div className="border border-slate-200 rounded-xl overflow-hidden">
-                        <table className="w-full text-left text-xs">
+                      <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                        <table className="w-full text-left text-xs min-w-[500px]">
                           <thead className="bg-slate-100/70 border-b border-slate-200 text-slate-600">
                             <tr>
                               <th className="py-2 px-3 font-semibold">Product Description</th>
@@ -1189,7 +1189,7 @@ export default function AdminCrmPage() {
           ) : (
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
+                <table className="w-full text-left text-xs min-w-[650px]">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
                     <tr>
                       <th className="py-3 px-4">Timestamp</th>
@@ -1390,8 +1390,8 @@ export default function AdminCrmPage() {
                   <p className="text-xs">No subscribers matching your filters.</p>
                 </div>
               ) : (
-                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-[480px] overflow-y-auto">
-                  <table className="w-full text-left text-xs">
+                <div className="border border-slate-200 rounded-xl overflow-x-auto max-h-[480px] overflow-y-auto">
+                  <table className="w-full text-left text-xs min-w-[460px]">
                     <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 sticky top-0">
                       <tr>
                         <th className="py-2.5 px-3 font-semibold">Subscriber Email</th>
@@ -1715,8 +1715,8 @@ export default function AdminCrmPage() {
                   <p className="text-xs">No communications recorded yet.</p>
                 </div>
               ) : (
-                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-[500px] overflow-y-auto">
-                  <table className="w-full text-left text-xs">
+                <div className="border border-slate-200 rounded-xl overflow-x-auto max-h-[500px] overflow-y-auto">
+                  <table className="w-full text-left text-xs min-w-[500px]">
                     <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 sticky top-0">
                       <tr>
                         <th className="py-2.5 px-3 font-semibold">Recipient</th>
@@ -1944,11 +1944,11 @@ export default function AdminCrmPage() {
             </DialogHeader>
 
             <div className="space-y-4">
-              <div className="border border-slate-200 rounded-xl overflow-hidden">
+              <div className="border border-slate-200 rounded-xl overflow-x-auto">
                 <div className="bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700">
                   Itemized Product Pricing
                 </div>
-                <table className="w-full text-left text-xs">
+                <table className="w-full text-left text-xs min-w-[500px]">
                   <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
                     <tr>
                       <th className="py-2 px-3">Product</th>
