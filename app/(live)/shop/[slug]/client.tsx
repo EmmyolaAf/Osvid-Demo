@@ -26,7 +26,9 @@ import {
   Star,
   ArrowRight,
   ShieldAlert,
+  FileSpreadsheet,
 } from "lucide-react";
+import QuoteRequestModal from "@/components/reusables/forms/QuoteRequestModal";
 import formatCurrency from "@/helpers/formatCurrency";
 import { useCart } from "@/providers/CartProvider";
 import { toast } from "sonner";
@@ -42,6 +44,7 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
   const { addToCart, openCart } = useCart();
   const isVariable = product.productType === "variable" && (product.variations?.length || 0) > 0;
   const isGrouped = product.productType === "grouped";
+  const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false);
 
   // Attributes state for variable products
   const [selectedAttributes, setSelectedAttributes] = useState<Record<string, string>>(() => {
@@ -693,6 +696,16 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
                   </Button>
                 </a>
               </div>
+
+              {/* Wholesale RFQ Quote Trigger */}
+              <button
+                type="button"
+                onClick={() => setIsQuoteModalOpen(true)}
+                className="w-full py-3 px-4 rounded-2xl border border-dashed border-orange-300 bg-orange-50/70 hover:bg-orange-100/80 text-orange-900 text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+              >
+                <FileSpreadsheet size={15} className="text-orange-600" />
+                <span>Buying wholesale drums or container loads? Request Official Proforma RFQ</span>
+              </button>
             </div>
           ) : (
             <div className="space-y-4 pt-2">
@@ -707,8 +720,22 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
                 selectedOptions={{}}
                 className="w-full py-6 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-extrabold text-sm shadow-md"
               />
+              <button
+                type="button"
+                onClick={() => setIsQuoteModalOpen(true)}
+                className="w-full py-3 px-4 rounded-2xl border border-dashed border-orange-300 bg-orange-50/70 hover:bg-orange-100/80 text-orange-900 text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+              >
+                <FileSpreadsheet size={15} className="text-orange-600" />
+                <span>Need wholesale reservation when restocked? Request Official RFQ</span>
+              </button>
             </div>
           )}
+
+          <QuoteRequestModal
+            isOpen={isQuoteModalOpen}
+            onClose={() => setIsQuoteModalOpen(false)}
+            prefilledProductName={product.name}
+          />
 
           {/* Trust Guarantees 4-Column Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t border-slate-100 text-slate-600 text-xs">

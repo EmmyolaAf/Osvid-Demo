@@ -320,6 +320,27 @@ service cloud.firestore {
       allow update: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageCustomers'));
     }
 
+    // ===============================================================
+    // 7B. CRM: QUOTE REQUESTS, NEWSLETTERS & EMAIL LOGS
+    // ===============================================================
+    match /quote_requests/{quoteId} {
+      allow create: if true;
+      allow read, update, delete: if isStaff();
+    }
+
+    match /newsletter_subscribers/{subId} {
+      allow create: if true;
+      allow read, update, delete: if isStaff();
+    }
+
+    match /crm_email_campaigns/{campaignId} {
+      allow read, write: if isStaff();
+    }
+
+    match /crm_email_logs/{logId} {
+      allow read, write: if isStaff();
+    }
+
     match /back_in_stock_requests/{requestId} {
       allow create: if true;
       allow read, delete: if isSuperAdmin() || (isSubscriptionOperational() && (hasManagerPermission('canManageProducts') || hasManagerPermission('canManageInventory')));

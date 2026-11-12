@@ -30,6 +30,7 @@ import {
   Star,
   AlertTriangle,
   ChevronDown,
+  Mail,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
@@ -178,6 +179,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               href: "/dashboard/orders",
               icon: ShoppingBag,
               allowed: isAdmin || Boolean(perms?.canManageOrders),
+            },
+            {
+              title: "CRM & Inquiries",
+              href: "/dashboard/crm",
+              icon: Mail,
+              allowed: isAdmin || Boolean(perms?.canManageCustomers) || Boolean(perms?.canManageOrders),
+              badge: "RFQ",
             },
             {
               title: "Customer Directory",
