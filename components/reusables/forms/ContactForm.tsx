@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import { Loader2, CheckCircle2, AlertCircle, Send } from "lucide-react";
 import { submitContactForm } from "@/lib/firebase/storefront";
-import { saveNewsletterSubscriberInDb } from "@/lib/firebase/crm";
 import { toast } from "sonner";
 
 export default function ContactForm() {
@@ -78,7 +77,6 @@ export default function ContactForm() {
         toast.success("Message submitted successfully!", {
           description: "Our chemical engineering specialists will contact you within 24 hours.",
         });
-        saveNewsletterSubscriberInDb(email, name, "contact").catch(() => {});
         formRef.current?.reset();
       } else {
         setStatus("error");
@@ -197,7 +195,7 @@ export default function ContactForm() {
         <Button
           type="submit"
           disabled={status === "sending"}
-          className="py-6 mt-2 bg-orange-600 hover:bg-orange-700 text-white font-bold text-sm w-full rounded-2xl shadow-lg shadow-orange-600/20 transition-all gap-2"
+          className="h-11 sm:h-12 px-5 py-2.5 mt-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold text-xs sm:text-sm w-full rounded-xl shadow-md shadow-orange-600/20 transition-all gap-2 cursor-pointer"
         >
           {status === "sending" ? (
             <>

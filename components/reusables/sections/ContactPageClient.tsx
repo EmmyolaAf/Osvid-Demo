@@ -28,7 +28,7 @@ export default function ContactPageClient() {
 
         <Button
           onClick={() => setIsQuoteModalOpen(true)}
-          className="bg-orange-600 hover:bg-orange-700 text-white font-bold px-6 py-6 rounded-2xl text-sm shrink-0 shadow-lg shadow-orange-600/30 flex items-center gap-2 cursor-pointer hover:scale-102 transition-all"
+          className="bg-orange-600 hover:bg-orange-700 text-white font-semibold px-5 py-2.5 h-11 sm:h-12 rounded-xl text-xs sm:text-sm shrink-0 shadow-md shadow-orange-600/30 flex items-center gap-2 cursor-pointer transition-all"
         >
           <FileSpreadsheet className="w-4 h-4" />
           <span>Request Wholesale RFQ Quote</span>

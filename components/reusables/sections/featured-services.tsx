@@ -129,7 +129,7 @@ export default function FeaturedServicesSection({
 
   return (
     <section
-      className="relative w-full px-4 py-12 md:py-16 bg-gray-50"
+      className="relative w-full px-3 sm:px-6 py-10 md:py-14 bg-gray-50"
       onMouseEnter={() => setIsAutoPlaying(false)}
       onMouseLeave={() => setIsAutoPlaying(true)}
       {...swipeHandlers}
@@ -166,7 +166,7 @@ export default function FeaturedServicesSection({
           )}
 
           {/* Slides Container */}
-          <div className="relative overflow-hidden px-8 md:px-12">
+          <div className="relative overflow-hidden px-2 sm:px-6 md:px-8">
             <AnimatePresence
               initial={false}
               custom={direction}

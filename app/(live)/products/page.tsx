@@ -45,7 +45,7 @@ export default async function ProductsCatalogPage() {
           />
         </div>
 
-        <div className="container mx-auto py-12 px-4 md:px-14 relative z-10">
+        <div className="max-w-7xl mx-auto py-10 sm:py-12 px-3 sm:px-6 relative z-10">
           <div className="max-w-3xl mx-auto text-center mb-12">
             <h2 className="text-sm md:text-base font-semibold uppercase w-max border-y py-1 px-4 mx-auto text-osvid-orange border-osvid-orange tracking-wider mb-4">
               Verified Nigerian Chemical Engineering

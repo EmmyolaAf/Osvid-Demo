@@ -197,7 +197,7 @@ export default function HeroSection() {
                     variants={overlayVariants}
                     className="absolute inset-0 z-20 flex items-center"
                   >
-                    <div className="container px-6 md:px-8 lg:px-12 xl:px-16 mx-auto">
+                    <div className="max-w-7xl px-3 sm:px-6 mx-auto">
                       <motion.div
                         key={`text-content-${currentRealIndex}`}
                         initial="initial"
@@ -278,20 +278,20 @@ export default function HeroSection() {
                               backgroundColor: primaryBtnOverride?.backgroundColor,
                               borderRadius: primaryBtnOverride?.borderRadius,
                             }}
-                            className="h-14 px-8 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg text-lg hover:shadow-lg transition-all"
+                            className="h-11 sm:h-12 px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl text-xs sm:text-sm shadow-md hover:shadow-lg transition-all cursor-pointer"
                           >
                             <Link href={slides[currentRealIndex].ctaLink}>
                               {slides[currentRealIndex].ctaText}
-                              <ArrowRight className="ml-2 h-5 w-5" />
+                              <ArrowRight className="ml-2 h-4 w-4" />
                             </Link>
                           </Button>
                           <Button
                             variant="outline"
                             asChild
-                            className="lg:hidden h-14 px-6 border-white text-white bg-white/10 hover:bg-white/20 hover:text-white rounded-lg text-lg"
+                            className="lg:hidden h-11 sm:h-12 px-5 border-white text-white bg-white/10 hover:bg-white/20 hover:text-white rounded-xl text-xs sm:text-sm font-semibold cursor-pointer"
                           >
                             <Link href={`tel:${companyData.phone}`}>
-                              <Phone className="mr-2 h-5 w-5" />
+                              <Phone className="mr-2 h-4 w-4" />
                               Call Now
                             </Link>
                           </Button>

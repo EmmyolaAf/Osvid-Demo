@@ -232,15 +232,15 @@ export default function ProductCard({
       </div>
 
       {/* Product Content Details */}
-      <div className="p-4 sm:p-5 flex flex-col flex-1 justify-between gap-3">
-        <div className="space-y-1.5">
+      <div className="p-3.5 sm:p-4 md:p-5 flex flex-col flex-1 justify-between gap-3 min-w-0">
+        <div className="space-y-1.5 min-w-0">
           {/* Category & Rating */}
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+          <div className="flex flex-wrap items-center justify-between gap-1 text-xs min-w-0">
+            <span className="text-[10px] sm:text-[11px] font-semibold text-slate-500 uppercase tracking-wide truncate max-w-[70%]">
               {product.category || "Industrial Formulation"}
             </span>
-            <div className="flex items-center gap-1 text-amber-500 font-bold text-xs">
-              <Star size={13} fill="currentColor" />
+            <div className="flex items-center gap-1 text-amber-500 font-bold text-xs shrink-0">
+              <Star size={12} fill="currentColor" />
               <span>{rating.toFixed(1)}</span>
             </div>
           </div>
@@ -248,28 +248,28 @@ export default function ProductCard({
           {/* Product Title */}
           <Link
             href={`/shop/${product.slug}`}
-            className="block group-hover:text-orange-600 transition-colors"
+            className="block group-hover:text-orange-600 transition-colors min-w-0"
           >
-            <h3 className="text-sm sm:text-base font-bold text-slate-900 line-clamp-2 leading-snug">
+            <h3 className="text-xs sm:text-sm md:text-base font-bold text-slate-900 line-clamp-2 leading-snug break-words">
               {product.name}
             </h3>
           </Link>
         </div>
 
         {/* Pricing & Cart Action */}
-        <div className="pt-2 border-t border-slate-100 space-y-3">
-          <div className="flex items-baseline justify-between gap-2">
-            <div className="flex items-baseline gap-2">
+        <div className="pt-2 border-t border-slate-100 space-y-2.5 min-w-0">
+          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 min-w-0">
+            <div className="flex flex-wrap items-baseline gap-1.5 min-w-0">
               {displayPrice !== undefined && (
                 <>
-                  <span className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
+                  <span className="text-sm sm:text-base md:text-lg font-black text-slate-900 tracking-tight break-words">
                     {isVariableWithOptions && !hasDiscount ? "From " : ""}
                     {hasDiscount
                       ? formatCurrency(currency, Number(displayDiscountPrice))
                       : formatCurrency(currency, Number(displayPrice))}
                   </span>
                   {hasDiscount && displayDiscountPrice !== undefined ? (
-                    <span className="text-xs text-slate-400 line-through font-medium">
+                    <span className="text-[11px] sm:text-xs text-slate-400 line-through font-medium">
                       {formatCurrency(currency, Number(displayPrice))}
                     </span>
                   ) : null}
@@ -277,7 +277,7 @@ export default function ProductCard({
               )}
             </div>
 
-            <span className="text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full flex items-center gap-1">
+            <span className="text-[10px] sm:text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
               <ShieldCheck size={11} />
               In Stock
             </span>
@@ -288,9 +288,9 @@ export default function ProductCard({
             <Link href={`/shop/${product.slug}`} className="block w-full">
               <Button
                 variant="outline"
-                className="w-full h-10 rounded-xl text-xs font-bold transition-all border-slate-300 hover:border-orange-600 hover:bg-orange-50 text-slate-800 hover:text-orange-600 flex items-center justify-center gap-2"
+                className="w-full min-h-[38px] sm:min-h-[40px] h-auto py-2 px-3 rounded-xl text-xs font-bold transition-all border-slate-300 hover:border-orange-600 hover:bg-orange-50 text-slate-800 hover:text-orange-600 flex items-center justify-center gap-1.5 text-center whitespace-normal break-words leading-tight"
               >
-                <Layers className="h-3.5 w-3.5 text-orange-600" />
+                <Layers className="h-3.5 w-3.5 text-orange-600 shrink-0" />
                 <span>Select Options ({product.variations?.length} sizes)</span>
               </Button>
             </Link>
@@ -298,7 +298,7 @@ export default function ProductCard({
             <Button
               onClick={handleAddToCart}
               disabled={isAddingToCart}
-              className={`w-full h-10 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 ${
+              className={`w-full min-h-[38px] sm:min-h-[40px] h-auto py-2 px-3 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 text-center whitespace-normal break-words leading-tight ${
                 justAdded || isInCart
                   ? "bg-emerald-600 hover:bg-emerald-700 text-white"
                   : "bg-orange-600 hover:bg-orange-700 text-white hover:shadow-orange-600/20 hover:shadow-md"
@@ -306,17 +306,17 @@ export default function ProductCard({
             >
               {isAddingToCart ? (
                 <>
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
                   <span>Adding to Cart...</span>
                 </>
               ) : justAdded || isInCart ? (
                 <>
-                  <Check className="h-4 w-4" />
+                  <Check className="h-4 w-4 shrink-0" />
                   <span>{isInCart ? "In Your Cart" : "Added to Cart!"}</span>
                 </>
               ) : (
                 <>
-                  <ShoppingCart className="h-3.5 w-3.5" />
+                  <ShoppingCart className="h-3.5 w-3.5 shrink-0" />
                   <span>Add to Cart</span>
                 </>
               )}

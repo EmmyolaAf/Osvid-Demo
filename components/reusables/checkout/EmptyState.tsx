@@ -21,7 +21,7 @@ export function EmptyCartState() {
         </p>
       </div>
       <Link href="/products">
-        <Button className="px-8 py-4 text-lg">Continue Shopping</Button>
+        <Button className="h-11 sm:h-12 px-5 text-xs sm:text-sm font-semibold rounded-xl">Continue Shopping</Button>
       </Link>
     </div>
   );

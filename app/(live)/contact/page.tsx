@@ -9,7 +9,7 @@ export default function ContactPage() {
       <PageHeader title="Contact & Quotations" />
 
       {/* Main Content */}
-      <section className="container px-4 py-12 md:px-14">
+      <section className="max-w-7xl mx-auto px-3 sm:px-6 py-10 sm:py-12">
         <ContactPageClient />
       </section>
     </main>

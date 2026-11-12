@@ -15,7 +15,7 @@ import { RevealAnimationWrapper } from "../custom-animation-wrapper";
 
 export default function FoundationSection() {
   return (
-    <section className="relative py-24 bg-gradient-to-br from-yellow-50 to-white px-4 md:px-8 lg:px-12 overflow-hidden">
+    <section className="relative py-16 md:py-20 bg-gradient-to-br from-yellow-50 to-white px-4 sm:px-6 lg:px-8 overflow-hidden">
       {/* Background Elements */}
       <div
         className="absolute top-0 left-0 w-full h-full z-0"
@@ -150,16 +150,16 @@ export default function FoundationSection() {
                 <div className="flex flex-col sm:flex-row gap-4 pt-2">
                   <Button
                     asChild
-                    className="h-14 px-8 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg text-base hover:shadow-lg transition-all"
+                    className="h-11 sm:h-12 px-5 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl text-xs sm:text-sm hover:shadow-md transition-all"
                   >
                     <Link href="/about">
-                      Learn More <ArrowRight className="ml-2 h-5 w-5" />
+                      Learn More <ArrowRight className="ml-2 h-4 w-4" />
                     </Link>
                   </Button>
                   <Button
                     variant="outline"
                     asChild
-                    className="h-14 px-6 border-orange-500 text-orange-500 hover:bg-orange-50 rounded-lg text-base"
+                    className="h-11 sm:h-12 px-5 border-orange-500 text-orange-600 hover:bg-orange-50 rounded-xl text-xs sm:text-sm font-semibold"
                   >
                     <Link href="/contact">Contact Our Experts</Link>
                   </Button>

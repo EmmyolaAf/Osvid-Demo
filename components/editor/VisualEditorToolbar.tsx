@@ -37,17 +37,45 @@ import {
 import { toast } from "sonner";
 import Link from "next/link";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
+import { applyElementOverridesToDOM } from "./SiteContentApplier";
 
 interface SelectedElementData {
   id: string;
   name: string;
   domElement: HTMLElement;
   text: string;
+  originalText?: string;
+  selector?: string;
   textColor: string;
   backgroundColor: string;
   borderRadius: string;
   fontSize: string;
   fontWeight: string;
+}
+
+function getElementSelector(el: HTMLElement): string {
+  if (el.id) return `#${el.id}`;
+  const path: string[] = [];
+  let current: HTMLElement | null = el;
+  while (current && current !== document.body && current.nodeType === Node.ELEMENT_NODE) {
+    let selector = current.tagName.toLowerCase();
+    if (current.id) {
+      selector += `#${current.id}`;
+      path.unshift(selector);
+      break;
+    }
+    const parent: HTMLElement | null = current.parentElement;
+    if (parent) {
+      const siblings = Array.from(parent.children).filter((c) => c.tagName === current?.tagName);
+      if (siblings.length > 1) {
+        const index = siblings.indexOf(current) + 1;
+        selector += `:nth-of-type(${index})`;
+      }
+    }
+    path.unshift(selector);
+    current = parent;
+  }
+  return path.join(" > ");
 }
 
 function VisualEditorToolbarInner() {
@@ -109,18 +137,7 @@ function VisualEditorToolbarInner() {
 
   // Apply styles saved in codebase to matching DOM elements
   const applySavedStylesToDOM = (elements: Record<string, ElementStyleOverride>) => {
-    if (typeof document === "undefined") return;
-    for (const [id, style] of Object.entries(elements)) {
-      const el = document.querySelector(`[data-editable-id="${id}"]`) as HTMLElement;
-      if (el) {
-        if (style.text && el.childElementCount === 0) el.innerText = style.text;
-        if (style.textColor) el.style.color = style.textColor;
-        if (style.backgroundColor) el.style.backgroundColor = style.backgroundColor;
-        if (style.borderRadius) el.style.borderRadius = style.borderRadius;
-        if (style.fontSize) el.style.fontSize = style.fontSize;
-        if (style.fontWeight) el.style.fontWeight = style.fontWeight;
-      }
-    }
+    applyElementOverridesToDOM(elements);
   };
 
   // Hover and selection interaction
@@ -197,6 +214,13 @@ function VisualEditorToolbarInner() {
           target.getAttribute("data-editable-name") ||
           `${target.tagName} element ("${target.innerText?.slice(0, 25) || "item"}")`;
 
+        // Ensure the element in DOM carries the data-editable-id immediately
+        if (!target.getAttribute("data-editable-id")) {
+          target.setAttribute("data-editable-id", id);
+        }
+
+        const selector = getElementSelector(target);
+        const originalText = target.innerText?.trim() || "";
         const computed = window.getComputedStyle(target);
 
         // Populate inspector state
@@ -205,6 +229,8 @@ function VisualEditorToolbarInner() {
           name,
           domElement: target,
           text: target.innerText || "",
+          originalText,
+          selector,
           textColor: target.style.color || computed.color || "#000000",
           backgroundColor: target.style.backgroundColor || computed.backgroundColor || "transparent",
           borderRadius: target.style.borderRadius || computed.borderRadius || "0px",
@@ -248,10 +274,14 @@ function VisualEditorToolbarInner() {
     if (updates.fontSize !== undefined) el.style.fontSize = updates.fontSize;
     if (updates.fontWeight !== undefined) el.style.fontWeight = updates.fontWeight;
 
-    // Track pending overrides to save to codebase
+    // Track pending overrides to save to codebase with robust selector & originalText
     setPendingOverrides((prev) => ({
       ...prev,
       [selectedElement.id]: {
+        selector: selectedElement.selector || getElementSelector(el),
+        originalText: selectedElement.originalText || selectedElement.text,
+        tagName: el.tagName,
+        page: pathname,
         ...(prev[selectedElement.id] || {}),
         ...updates,
       },

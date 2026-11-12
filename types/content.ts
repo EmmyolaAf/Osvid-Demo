@@ -42,6 +42,10 @@ export interface ElementStyleOverride {
   fontSize?: string;
   fontWeight?: string;
   padding?: string;
+  selector?: string;
+  originalText?: string;
+  tagName?: string;
+  page?: string;
 }
 
 export interface ContentChangeLog {

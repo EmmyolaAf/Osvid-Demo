@@ -46,7 +46,7 @@ export default async function AboutPage() {
 
       {/* MISSION + VISION - UPDATED */}
       <section className="bg-osvid-cream py-20 overflow-hidden">
-        <div className="container mx-auto px-4 md:px-12">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6">
           <h3 className="text-3xl md:text-5xl font-bold text-center text-gray-900 mb-12 animate-fade-in-down">
             Our Mission & Vision
           </h3>

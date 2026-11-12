@@ -103,8 +103,7 @@ export default function BlogSectionClient({ posts }: BlogSectionClientProps) {
         >
           <Button
             asChild
-            size="lg"
-            className="bg-osvid-orange hover:bg-orange-700 text-white font-semibold py-6 px-8 text-base group"
+            className="bg-osvid-orange hover:bg-orange-700 text-white font-semibold h-11 sm:h-12 px-6 py-2.5 text-xs sm:text-sm rounded-xl shadow-md group"
           >
             <Link href="/blog">
               View All Articles

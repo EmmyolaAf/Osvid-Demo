@@ -32,7 +32,7 @@ export default async function FeaturedProducts() {
 
         <div className="mt-8">
           <Link href="/shop">
-            <Button className="bg-osvid-orange hover:bg-orange-700 text-white py-6 font-semibold px-8 text-sm sm:text-base rounded-2xl shadow-lg shadow-orange-600/20">
+            <Button className="bg-osvid-orange hover:bg-orange-700 text-white h-11 sm:h-12 px-6 py-2.5 font-semibold text-xs sm:text-sm rounded-xl shadow-md shadow-orange-600/20">
               Explore All Chemicals ➔
             </Button>
           </Link>

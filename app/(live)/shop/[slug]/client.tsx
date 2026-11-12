@@ -669,14 +669,13 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
               </div>
 
               {/* Action CTAs */}
-              <div className="flex flex-col sm:flex-row gap-3 pt-2">
+              <div className="flex flex-col sm:flex-row gap-2.5 sm:gap-3 pt-2">
                 <Button
-                  size="lg"
                   onClick={handleAddToCart}
                   disabled={isAddingToCart}
-                  className="flex-1 h-14 bg-orange-600 hover:bg-orange-700 text-white font-extrabold rounded-2xl shadow-lg shadow-orange-600/25 text-sm gap-2 transition-all hover:scale-101"
+                  className="flex-1 h-11 sm:h-12 bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl shadow-md shadow-orange-600/20 text-xs sm:text-sm gap-2 transition-all cursor-pointer"
                 >
-                  <ShoppingCart size={18} />
+                  <ShoppingCart size={16} />
                   {isAddingToCart ? "Adding to Cart..." : `Add ${quantity} to Cart`}
                 </Button>
 
@@ -688,10 +687,9 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
                 >
                   <Button
                     variant="outline"
-                    size="lg"
-                    className="w-full h-14 border-slate-300 hover:bg-slate-100 text-slate-800 font-extrabold rounded-2xl text-sm gap-2"
+                    className="w-full h-11 sm:h-12 border-slate-300 hover:bg-slate-100 text-slate-800 font-bold rounded-xl text-xs sm:text-sm gap-2 cursor-pointer"
                   >
-                    <PhoneCall size={18} className="text-emerald-600" />
+                    <PhoneCall size={16} className="text-emerald-600" />
                     <span>WhatsApp Order</span>
                   </Button>
                 </a>

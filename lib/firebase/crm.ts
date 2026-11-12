@@ -33,21 +33,18 @@ export function cleanFirestoreData<T>(obj: T): T {
   if (obj === null || obj === undefined) {
     return null as any;
   }
-  if (Array.isArray(obj)) {
-    return obj
-      .filter((item) => item !== undefined)
-      .map((item) => (typeof item === "object" && item !== null ? cleanFirestoreData(item) : item)) as any;
-  }
-  if (typeof obj === "object" && !(obj instanceof Date)) {
-    const cleaned: Record<string, any> = {};
-    for (const [key, val] of Object.entries(obj)) {
-      if (val !== undefined) {
-        cleaned[key] = typeof val === "object" && val !== null ? cleanFirestoreData(val) : val;
+  // Deeply strip any undefined values across objects and arrays
+  try {
+    const json = JSON.stringify(obj, (key, value) => {
+      if (value === undefined) {
+        return undefined; // Strips keys with undefined values from objects
       }
-    }
-    return cleaned as T;
+      return value;
+    });
+    return JSON.parse(json);
+  } catch {
+    return obj;
   }
-  return obj;
 }
 
 // ============================================================================
@@ -86,13 +83,6 @@ export async function submitPublicQuoteRequest(
     const cleanQuote = cleanFirestoreData(newQuoteRaw);
 
     await setDoc(doc(db, "quote_requests", quoteId), cleanQuote);
-
-    // Also auto-add lead to newsletter / CRM subscribers if email provided
-    if (data.email) {
-      saveNewsletterSubscriberInDb(data.email, data.customerName, "quote_request").catch((e) => {
-        console.warn("Auto-subscribe lead to newsletter error:", e);
-      });
-    }
 
     return { success: true, quoteNumber };
   } catch (err: any) {

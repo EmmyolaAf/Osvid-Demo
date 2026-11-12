@@ -138,7 +138,8 @@ export default function AdminCrmPage() {
       ]);
       setQuotes(qData);
       setContacts(cData);
-      setSubscribers(subData);
+      // Strictly isolate Newsletter Subscribers: do NOT include quote requests or contact inquiries
+      setSubscribers(subData.filter((s) => s.source !== "quote_request" && s.source !== "contact"));
       setCampaigns(campData);
       setEmailLogs(logsData);
     } catch (err) {
