@@ -1,1 +1,16 @@
-[]
+[
+  {
+    "id": "log_1794483665779_kzhz8t",
+    "timestamp": "2026-11-12T11:41:05.779Z",
+    "expiresAt": "2026-11-19T11:41:05.779Z",
+    "author": "Mr. David",
+    "page": "/",
+    "summary": "Visual styling & content update on / (1 element(s))",
+    "changes": {
+      "elem_span_3+": {
+        "text": "4+"
+      }
+    },
+    "previousSnapshot": {}
+  }
+]

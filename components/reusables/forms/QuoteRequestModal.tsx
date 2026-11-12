@@ -233,24 +233,38 @@ export default function QuoteRequestModal({
 
     setSubmitting(true);
     try {
-      const res = await submitPublicQuoteRequest({
+      const payload: any = {
         customerName: customerName.trim(),
-        companyName: companyName.trim() || undefined,
         email: email.trim().toLowerCase(),
         phone: phone.trim(),
-        deliveryLocation: deliveryLocation.trim() || undefined,
         urgency,
         preferredContactMethod,
         deliveryTimeline,
         estimatedBudget: `₦${Number(estimatedBudget).toLocaleString()}`,
-        items: validItems.map((item) => ({
-          productName: item.productName.trim(),
-          quantity: Number(item.quantity) || 1,
-          unit: item.unit.trim() || "Units",
-          targetPrice: item.targetPrice ? Number(item.targetPrice) : undefined,
-        })),
-        additionalNotes: additionalNotes.trim() || undefined,
-      });
+        items: validItems.map((item) => {
+          const it: any = {
+            productName: item.productName.trim(),
+            quantity: Number(item.quantity) || 1,
+            unit: item.unit.trim() || "Units",
+          };
+          if (item.targetPrice && Number(item.targetPrice) > 0) {
+            it.targetPrice = Number(item.targetPrice);
+          }
+          return it;
+        }),
+      };
+
+      if (companyName.trim()) {
+        payload.companyName = companyName.trim();
+      }
+      if (deliveryLocation.trim()) {
+        payload.deliveryLocation = deliveryLocation.trim();
+      }
+      if (additionalNotes.trim()) {
+        payload.additionalNotes = additionalNotes.trim();
+      }
+
+      const res = await submitPublicQuoteRequest(payload);
 
       if (res.success && res.quoteNumber) {
         setSubmittedQuoteNumber(res.quoteNumber);

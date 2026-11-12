@@ -24,6 +24,33 @@ import {
 } from "@/types/crm";
 
 // ============================================================================
+// FIRESTORE DATA SANITIZER HELPER
+// Deeply strips any `undefined` values to satisfy Firestore's strict requirement:
+// "Function setDoc() called with invalid data. Unsupported field value: undefined"
+// ============================================================================
+
+export function cleanFirestoreData<T>(obj: T): T {
+  if (obj === null || obj === undefined) {
+    return null as any;
+  }
+  if (Array.isArray(obj)) {
+    return obj
+      .filter((item) => item !== undefined)
+      .map((item) => (typeof item === "object" && item !== null ? cleanFirestoreData(item) : item)) as any;
+  }
+  if (typeof obj === "object" && !(obj instanceof Date)) {
+    const cleaned: Record<string, any> = {};
+    for (const [key, val] of Object.entries(obj)) {
+      if (val !== undefined) {
+        cleaned[key] = typeof val === "object" && val !== null ? cleanFirestoreData(val) : val;
+      }
+    }
+    return cleaned as T;
+  }
+  return obj;
+}
+
+// ============================================================================
 // 1. QUOTE REQUESTS (RFQs)
 // ============================================================================
 
@@ -47,7 +74,7 @@ export async function submitPublicQuoteRequest(
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
     const quoteNumber = `RFQ-${dateYear}-${randomSuffix}`;
 
-    const newQuote: QuoteRequest = {
+    const newQuoteRaw: Record<string, any> = {
       ...data,
       id: quoteId,
       quoteNumber,
@@ -56,11 +83,15 @@ export async function submitPublicQuoteRequest(
       updatedAt: new Date().toISOString(),
     };
 
-    await setDoc(doc(db, "quote_requests", quoteId), newQuote);
+    const cleanQuote = cleanFirestoreData(newQuoteRaw);
+
+    await setDoc(doc(db, "quote_requests", quoteId), cleanQuote);
 
     // Also auto-add lead to newsletter / CRM subscribers if email provided
     if (data.email) {
-      saveNewsletterSubscriberInDb(data.email, data.customerName, "quote_request").catch(() => {});
+      saveNewsletterSubscriberInDb(data.email, data.customerName, "quote_request").catch((e) => {
+        console.warn("Auto-subscribe lead to newsletter error:", e);
+      });
     }
 
     return { success: true, quoteNumber };
@@ -76,10 +107,11 @@ export async function updateQuoteStatusInDb(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const ref = doc(db, "quote_requests", quoteId);
-    await updateDoc(ref, {
+    const cleanUpdates = cleanFirestoreData({
       ...updates,
       updatedAt: new Date().toISOString(),
     });
+    await updateDoc(ref, cleanUpdates);
     return { success: true };
   } catch (err: any) {
     console.error("updateQuoteStatusInDb error:", err);
@@ -128,27 +160,21 @@ export async function saveNewsletterSubscriberInDb(
     // Generate deterministic id based on sanitized email
     const docId = `sub_${cleanEmail.replace(/[^a-z0-9]/g, "_")}`;
     const docRef = doc(db, "newsletter_subscribers", docId);
-    const existingSnap = await getDoc(docRef);
 
-    if (existingSnap.exists()) {
-      // Re-activate if previously unsubscribed
-      await updateDoc(docRef, {
-        status: "active",
-        name: name?.trim() || existingSnap.data()?.name || undefined,
-      });
-      return { success: true, isNew: false };
-    }
-
-    const newSub: NewsletterSubscriber = {
+    const subData: Record<string, any> = {
       id: docId,
       email: cleanEmail,
-      name: name?.trim() || undefined,
       status: "active",
       source,
       subscribedAt: new Date().toISOString(),
     };
+    if (name && name.trim()) {
+      subData.name = name.trim();
+    }
 
-    await setDoc(docRef, newSub);
+    // Set with merge: true works for both new subscribers and re-subscriptions
+    // without requiring read permissions for public visitors
+    await setDoc(docRef, cleanFirestoreData(subData), { merge: true });
     return { success: true, isNew: true };
   } catch (err: any) {
     console.error("saveNewsletterSubscriberInDb error:", err);
@@ -212,7 +238,7 @@ export async function logCrmEmailInDb(
       id: logId,
       sentAt: new Date().toISOString(),
     };
-    await setDoc(doc(db, "crm_email_logs", logId), fullLog);
+    await setDoc(doc(db, "crm_email_logs", logId), cleanFirestoreData(fullLog));
   } catch (err) {
     console.warn("Could not save email log:", err);
   }
@@ -239,7 +265,7 @@ export async function saveCrmCampaignInDb(
       id: campId,
       createdAt: new Date().toISOString(),
     };
-    await setDoc(doc(db, "crm_email_campaigns", campId), data, { merge: true });
+    await setDoc(doc(db, "crm_email_campaigns", campId), cleanFirestoreData(data), { merge: true });
     return { success: true, id: campId };
   } catch (err: any) {
     console.error("saveCrmCampaignInDb error:", err);
@@ -287,10 +313,10 @@ export async function updateContactSubmissionInDb(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const docRef = doc(db, "contact_submissions", submissionId);
-    await updateDoc(docRef, {
+    await updateDoc(docRef, cleanFirestoreData({
       ...updates,
       updatedAt: new Date().toISOString(),
-    });
+    }));
     return { success: true };
   } catch (err: any) {
     console.error("updateContactSubmissionInDb error:", err);
