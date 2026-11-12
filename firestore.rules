@@ -316,8 +316,7 @@ service cloud.firestore {
     // ===============================================================
     match /contact_submissions/{submissionId} {
       allow create: if true;
-      allow read, delete: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageCustomers'));
-      allow update: if isSuperAdmin() || (isSubscriptionOperational() && hasManagerPermission('canManageCustomers'));
+      allow read, update, delete: if isStaff();
     }
 
     // ===============================================================

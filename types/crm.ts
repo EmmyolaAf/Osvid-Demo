@@ -25,6 +25,9 @@ export interface QuoteRequest {
   deliveryAddress?: string;
   state?: string;
   urgency?: "standard" | "urgent" | "immediate" | "normal";
+  preferredContactMethod?: "email" | "phone" | "whatsapp";
+  deliveryTimeline?: string;
+  estimatedBudget?: string | number;
   items: QuoteRequestItem[];
   additionalNotes?: string;
   status: QuoteRequestStatus;
@@ -102,3 +105,21 @@ export interface CrmEmailTemplate {
   defaultSubject: string;
   defaultContent: string;
 }
+
+export type ContactSubmissionStatus = "unread" | "in_progress" | "resolved";
+
+export interface ContactSubmission {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  subject?: string;
+  message: string;
+  status: ContactSubmissionStatus;
+  adminNotes?: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+

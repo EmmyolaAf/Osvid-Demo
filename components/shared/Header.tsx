@@ -28,11 +28,13 @@ import {
 import { CartTrigger } from "../reusables/cart";
 import { useAuth } from "@/contexts/AuthContext";
 import { isSuperAdminEmail, PRIMARY_SUPER_ADMIN_EMAIL } from "@/lib/firebase/auth";
+import QuoteRequestModal from "../reusables/forms/QuoteRequestModal";
 
 const emptySubscribe = () => () => {};
 
 export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isQuoteModalOpen, setIsQuoteModalOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false);
   const pathname = usePathname();
@@ -243,11 +245,13 @@ export default function Header() {
               </Link>
             )}
 
-            <Link href="#getQuote" className="hidden md:block">
-              <Button className="h-10 px-5 rounded-lg font-medium bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-700 hover:to-orange-600 text-white shadow-sm">
-                Get a Quote
-              </Button>
-            </Link>
+            <Button
+              type="button"
+              onClick={() => setIsQuoteModalOpen(true)}
+              className="hidden md:inline-flex h-10 px-5 rounded-lg font-medium bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-700 hover:to-orange-600 text-white shadow-sm cursor-pointer"
+            >
+              Get a Quote
+            </Button>
 
             <CartTrigger />
 
@@ -440,17 +444,30 @@ export default function Header() {
                   </div>
 
                   {/* Get a Quote Action */}
-                  <Link href="#getQuote" onClick={closeMenu} className="block pt-1">
-                    <Button className="w-full h-11 rounded-xl bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-700 hover:to-orange-600 text-white font-bold text-sm shadow-md shadow-orange-600/20">
+                  <div className="pt-1">
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        closeMenu();
+                        setIsQuoteModalOpen(true);
+                      }}
+                      className="w-full h-11 rounded-xl bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-700 hover:to-orange-600 text-white font-bold text-sm shadow-md shadow-orange-600/20 cursor-pointer"
+                    >
                       Get a Quote
                     </Button>
-                  </Link>
+                  </div>
                 </div>
               </div>
             </div>
           </div>,
           document.body
         )}
+
+      {/* Robust RFQ Quote Request Modal */}
+      <QuoteRequestModal
+        isOpen={isQuoteModalOpen}
+        onClose={() => setIsQuoteModalOpen(false)}
+      />
     </>
   );
 }

@@ -10,6 +10,8 @@ import {
   NewsletterSubscriberStatus,
   CrmEmailLog,
   CrmEmailCampaign,
+  ContactSubmission,
+  ContactSubmissionStatus,
 } from "@/types/crm";
 import {
   getQuoteRequestsFromDb,
@@ -23,6 +25,9 @@ import {
   logCrmEmailInDb,
   getCrmCampaignsFromDb,
   saveCrmCampaignInDb,
+  getContactSubmissionsFromDb,
+  updateContactSubmissionInDb,
+  deleteContactSubmissionInDb,
 } from "@/lib/firebase/crm";
 import {
   Mail,
@@ -30,29 +35,24 @@ import {
   FileSpreadsheet,
   Users,
   Search,
-  Filter,
   RefreshCw,
   Plus,
   Trash2,
   CheckCircle2,
   AlertCircle,
   Clock,
-  ExternalLink,
   Download,
   Building2,
   Phone,
   Calendar,
   DollarSign,
-  ChevronRight,
-  Sparkles,
-  ArrowRight,
-  Eye,
-  FileText,
-  BadgePercent,
-  Check,
-  X,
-  Loader2,
   MessageSquare,
+  Loader2,
+  Inbox,
+  Eye,
+  Reply,
+  Edit3,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,8 +62,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { toast } from "sonner";
 
 export default function AdminCrmPage() {
-  const { user, role, isAdmin, isSuperAdmin } = useAuth();
-  const [activeTab, setActiveTab] = useState<"quotes" | "newsletter" | "emails">("quotes");
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<"quotes" | "contacts" | "newsletter" | "emails">("quotes");
 
   // State: Quotes
   const [quotes, setQuotes] = useState<QuoteRequest[]>([]);
@@ -71,6 +71,16 @@ export default function AdminCrmPage() {
   const [quoteSearch, setQuoteSearch] = useState("");
   const [quoteStatusFilter, setQuoteStatusFilter] = useState<string>("all");
   const [selectedQuoteForPricing, setSelectedQuoteForPricing] = useState<QuoteRequest | null>(null);
+
+  // State: Contact Inquiries
+  const [contacts, setContacts] = useState<ContactSubmission[]>([]);
+  const [loadingContacts, setLoadingContacts] = useState(true);
+  const [contactSearch, setContactSearch] = useState("");
+  const [contactStatusFilter, setContactStatusFilter] = useState<string>("all");
+  const [selectedContactForDetail, setSelectedContactForDetail] = useState<ContactSubmission | null>(null);
+  const [editingContactNotes, setEditingContactNotes] = useState("");
+  const [editingContactStatus, setEditingContactStatus] = useState<ContactSubmissionStatus>("unread");
+  const [savingContactChanges, setSavingContactChanges] = useState(false);
 
   // State: Subscribers & Campaigns
   const [subscribers, setSubscribers] = useState<NewsletterSubscriber[]>([]);
@@ -113,18 +123,21 @@ export default function AdminCrmPage() {
   // Load all initial CRM data
   const refreshAllData = async () => {
     setLoadingQuotes(true);
+    setLoadingContacts(true);
     setLoadingSubscribers(true);
     setLoadingCampaigns(true);
     setLoadingLogs(true);
 
     try {
-      const [qData, subData, campData, logsData] = await Promise.all([
+      const [qData, cData, subData, campData, logsData] = await Promise.all([
         getQuoteRequestsFromDb(),
+        getContactSubmissionsFromDb(),
         getNewsletterSubscribersFromDb(),
         getCrmCampaignsFromDb(),
         getCrmEmailLogsFromDb(60),
       ]);
       setQuotes(qData);
+      setContacts(cData);
       setSubscribers(subData);
       setCampaigns(campData);
       setEmailLogs(logsData);
@@ -133,6 +146,7 @@ export default function AdminCrmPage() {
       toast.error("Failed to load some CRM records.");
     } finally {
       setLoadingQuotes(false);
+      setLoadingContacts(false);
       setLoadingSubscribers(false);
       setLoadingCampaigns(false);
       setLoadingLogs(false);
@@ -161,6 +175,25 @@ export default function AdminCrmPage() {
     });
   }, [quotes, quoteSearch, quoteStatusFilter]);
 
+  // Filtered Contacts
+  const filteredContacts = useMemo(() => {
+    return contacts.filter((c) => {
+      const query = contactSearch.toLowerCase().trim();
+      const matchesSearch =
+        !query ||
+        c.name.toLowerCase().includes(query) ||
+        c.email.toLowerCase().includes(query) ||
+        (c.phone && c.phone.toLowerCase().includes(query)) ||
+        (c.subject && c.subject.toLowerCase().includes(query)) ||
+        c.message.toLowerCase().includes(query);
+
+      const matchesStatus =
+        contactStatusFilter === "all" || c.status === contactStatusFilter;
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [contacts, contactSearch, contactStatusFilter]);
+
   // Filtered Subscribers
   const filteredSubscribers = useMemo(() => {
     return subscribers.filter((s) => {
@@ -176,10 +209,14 @@ export default function AdminCrmPage() {
     });
   }, [subscribers, subscriberSearch, subscriberStatusFilter]);
 
-  // Active Subscribers Count
+  // Counts
   const activeSubscribersCount = useMemo(() => {
     return subscribers.filter((s) => s.status === "active").length;
   }, [subscribers]);
+
+  const unreadContactsCount = useMemo(() => {
+    return contacts.filter((c) => c.status === "unread").length;
+  }, [contacts]);
 
   // Handle Quote Status Change
   const handleUpdateQuoteStatus = async (quoteId: string, newStatus: QuoteRequestStatus) => {
@@ -193,7 +230,7 @@ export default function AdminCrmPage() {
       } else {
         toast.error(res.error || "Failed to update status.");
       }
-    } catch (e: any) {
+    } catch {
       toast.error("Failed to update status.");
     }
   };
@@ -209,7 +246,7 @@ export default function AdminCrmPage() {
       } else {
         toast.error(res.error || "Failed to delete.");
       }
-    } catch (e: any) {
+    } catch {
       toast.error("Failed to delete quotation.");
     }
   };
@@ -286,10 +323,8 @@ export default function AdminCrmPage() {
         adminNotes: pricingAdminNotes,
       };
 
-      // 1. Try sending email through the backend API route with auth token
-      let emailSuccess = false;
       try {
-        const resp = await fetch("/api/admin/crm/send-email", {
+        await fetch("/api/admin/crm/send-email", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -300,17 +335,10 @@ export default function AdminCrmPage() {
             ...quotationPayload,
           }),
         });
-
-        if (resp.ok) {
-          emailSuccess = true;
-        } else {
-          console.warn("Backend email dispatch returned non-200. Logging directly.");
-        }
       } catch (networkErr) {
-        console.warn("Network error reaching /api/admin/crm/send-email:", networkErr);
+        console.warn("Backend email dispatch warning:", networkErr);
       }
 
-      // 2. Update quote in Firestore with quotation details & 'quoted' status
       const validUntilDate = new Date();
       validUntilDate.setDate(validUntilDate.getDate() + pricingValidityDays);
 
@@ -334,7 +362,6 @@ export default function AdminCrmPage() {
         })),
       });
 
-      // 3. Log in CRM Email Logs
       await logCrmEmailInDb({
         recipientEmail: selectedQuoteForPricing.email,
         recipientName: selectedQuoteForPricing.customerName,
@@ -349,7 +376,6 @@ export default function AdminCrmPage() {
         `Quotation ${selectedQuoteForPricing.quoteNumber} saved and dispatched to ${selectedQuoteForPricing.email}!`
       );
 
-      // Refresh list
       setQuotes((prev) =>
         prev.map((q) =>
           q.id === selectedQuoteForPricing.id
@@ -374,6 +400,83 @@ export default function AdminCrmPage() {
     }
   };
 
+  // Contact Inquiries: View & Edit Modal Handlers
+  const handleOpenContactDetail = (contact: ContactSubmission) => {
+    setSelectedContactForDetail(contact);
+    setEditingContactNotes(contact.adminNotes || "");
+    setEditingContactStatus(contact.status || "unread");
+
+    // Automatically mark as in_progress if currently unread
+    if (contact.status === "unread") {
+      updateContactSubmissionInDb(contact.id, { status: "in_progress" }).then(() => {
+        setContacts((prev) =>
+          prev.map((c) => (c.id === contact.id ? { ...c, status: "in_progress" } : c))
+        );
+      });
+    }
+  };
+
+  const handleSaveContactChanges = async () => {
+    if (!selectedContactForDetail) return;
+    setSavingContactChanges(true);
+
+    try {
+      const updates: Partial<ContactSubmission> = {
+        status: editingContactStatus,
+        adminNotes: editingContactNotes.trim(),
+        ...(editingContactStatus === "resolved"
+          ? { resolvedAt: new Date().toISOString(), resolvedBy: user?.email || "Admin" }
+          : {}),
+      };
+
+      const res = await updateContactSubmissionInDb(selectedContactForDetail.id, updates);
+      if (res.success) {
+        toast.success("Contact inquiry updated successfully.");
+        setContacts((prev) =>
+          prev.map((c) =>
+            c.id === selectedContactForDetail.id ? { ...c, ...updates } : c
+          )
+        );
+        setSelectedContactForDetail(null);
+      } else {
+        toast.error(res.error || "Failed to update contact inquiry.");
+      }
+    } catch {
+      toast.error("Failed to save changes.");
+    } finally {
+      setSavingContactChanges(false);
+    }
+  };
+
+  const handleDeleteContact = async (contactId: string) => {
+    if (!confirm("Are you sure you want to delete this contact submission?")) return;
+    try {
+      const res = await deleteContactSubmissionInDb(contactId);
+      if (res.success) {
+        setContacts((prev) => prev.filter((c) => c.id !== contactId));
+        toast.success("Contact message deleted.");
+        if (selectedContactForDetail?.id === contactId) {
+          setSelectedContactForDetail(null);
+        }
+      } else {
+        toast.error(res.error || "Failed to delete submission.");
+      }
+    } catch {
+      toast.error("Failed to delete contact submission.");
+    }
+  };
+
+  const handleStartReplyToContact = (contact: ContactSubmission) => {
+    setSelectedContactForDetail(null);
+    setDirectRecipientEmail(contact.email);
+    setDirectRecipientName(contact.name);
+    setDirectSubject(`Re: ${contact.subject || "Your Inquiry to OSVID Chemical Company"}`);
+    setDirectMessage(
+      `Dear ${contact.name},\n\nThank you for contacting OSVID Chemical Company regarding:\n"${contact.message}"\n\n`
+    );
+    setActiveTab("emails");
+  };
+
   // Add Subscriber Manually
   const handleAddSubscriber = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -394,7 +497,7 @@ export default function AdminCrmPage() {
       } else {
         toast.error(res.error || "Failed to add subscriber.");
       }
-    } catch (e: any) {
+    } catch {
       toast.error("Failed to add subscriber.");
     }
   };
@@ -413,7 +516,7 @@ export default function AdminCrmPage() {
       } else {
         toast.error(res.error || "Failed to toggle status.");
       }
-    } catch (e: any) {
+    } catch {
       toast.error("Failed to update subscriber.");
     }
   };
@@ -429,7 +532,7 @@ export default function AdminCrmPage() {
       } else {
         toast.error(res.error || "Failed to delete.");
       }
-    } catch (e: any) {
+    } catch {
       toast.error("Failed to delete subscriber.");
     }
   };
@@ -524,7 +627,6 @@ export default function AdminCrmPage() {
     try {
       const token = await auth.currentUser?.getIdToken();
 
-      // Dispatch via backend API
       try {
         await fetch("/api/admin/crm/send-email", {
           method: "POST",
@@ -545,7 +647,6 @@ export default function AdminCrmPage() {
         console.warn("Backend API dispatch warning:", err);
       }
 
-      // Record campaign in Firestore
       const campaignId = `camp_${Date.now()}`;
       await saveCrmCampaignInDb({
         id: campaignId,
@@ -557,7 +658,6 @@ export default function AdminCrmPage() {
         sentBy: user?.email || "Admin",
       });
 
-      // Log in email audit logs
       await logCrmEmailInDb({
         recipientEmail: `[Broadcast] ${activeSubs.length} Subscribers`,
         subject: broadcastSubject,
@@ -613,7 +713,6 @@ export default function AdminCrmPage() {
         console.warn("API route warning:", err);
       }
 
-      // Record email log in Firestore
       await logCrmEmailInDb({
         recipientEmail: directRecipientEmail.trim().toLowerCase(),
         recipientName: directRecipientName.trim() || undefined,
@@ -642,7 +741,7 @@ export default function AdminCrmPage() {
       {/* Top Banner / CRM Header */}
       <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white rounded-2xl p-6 sm:p-8 shadow-xl border border-slate-700/60 relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-80 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
-        
+
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
           <div>
             <div className="flex items-center gap-2 text-orange-400 font-semibold text-xs tracking-wider uppercase mb-1">
@@ -652,7 +751,7 @@ export default function AdminCrmPage() {
               Customer Relations & Quotations Hub
             </h1>
             <p className="text-slate-300 text-sm mt-1 max-w-2xl">
-              Process wholesale quotation requests (RFQs), publish newsletters to subscribers, and dispatch official communications directly to clients.
+              Process wholesale quotation requests (RFQs), reply to contact inquiries, manage newsletter subscribers, and dispatch official communications.
             </p>
           </div>
 
@@ -669,48 +768,56 @@ export default function AdminCrmPage() {
         </div>
 
         {/* KPI Ribbon */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-700/60">
-          <div className="bg-slate-800/80 rounded-xl p-3.5 border border-slate-700/50">
-            <span className="text-xs text-slate-400 block font-medium">Pending RFQs</span>
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mt-6 pt-6 border-t border-slate-700/60">
+          <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700/50">
+            <span className="text-[11px] text-slate-400 block font-medium">Pending RFQs</span>
             <div className="flex items-baseline gap-2 mt-1">
               <span className="text-2xl font-bold text-orange-400">
                 {quotes.filter((q) => q.status === "new" || q.status === "in_review").length}
               </span>
-              <span className="text-xs text-slate-400">of {quotes.length} total</span>
+              <span className="text-[11px] text-slate-400">of {quotes.length} total</span>
             </div>
           </div>
 
-          <div className="bg-slate-800/80 rounded-xl p-3.5 border border-slate-700/50">
-            <span className="text-xs text-slate-400 block font-medium">Active Subscribers</span>
+          <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700/50">
+            <span className="text-[11px] text-slate-400 block font-medium">Contact Inquiries</span>
+            <div className="flex items-baseline gap-2 mt-1">
+              <span className="text-2xl font-bold text-amber-400">{unreadContactsCount}</span>
+              <span className="text-[11px] text-slate-400">unread ({contacts.length})</span>
+            </div>
+          </div>
+
+          <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700/50">
+            <span className="text-[11px] text-slate-400 block font-medium">Subscribers</span>
             <div className="flex items-baseline gap-2 mt-1">
               <span className="text-2xl font-bold text-emerald-400">{activeSubscribersCount}</span>
-              <span className="text-xs text-slate-400">of {subscribers.length} total</span>
+              <span className="text-[11px] text-slate-400">of {subscribers.length}</span>
             </div>
           </div>
 
-          <div className="bg-slate-800/80 rounded-xl p-3.5 border border-slate-700/50">
-            <span className="text-xs text-slate-400 block font-medium">Newsletter Campaigns</span>
+          <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700/50">
+            <span className="text-[11px] text-slate-400 block font-medium">Campaigns</span>
             <div className="flex items-baseline gap-2 mt-1">
               <span className="text-2xl font-bold text-blue-400">{campaigns.length}</span>
-              <span className="text-xs text-slate-400">broadcasts</span>
+              <span className="text-[11px] text-slate-400">broadcasts</span>
             </div>
           </div>
 
-          <div className="bg-slate-800/80 rounded-xl p-3.5 border border-slate-700/50">
-            <span className="text-xs text-slate-400 block font-medium">Communications Logged</span>
+          <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700/50 col-span-2 lg:col-span-1">
+            <span className="text-[11px] text-slate-400 block font-medium">Email History</span>
             <div className="flex items-baseline gap-2 mt-1">
               <span className="text-2xl font-bold text-purple-400">{emailLogs.length}</span>
-              <span className="text-xs text-slate-400">records</span>
+              <span className="text-[11px] text-slate-400">logged</span>
             </div>
           </div>
         </div>
       </div>
 
       {/* Modern Navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200">
+      <div className="flex items-center gap-1 sm:gap-2 border-b border-slate-200 overflow-x-auto pb-px">
         <button
           onClick={() => setActiveTab("quotes")}
-          className={`flex items-center gap-2 py-3 px-4 font-semibold text-sm border-b-2 transition-all cursor-pointer ${
+          className={`flex items-center gap-2 py-3 px-3.5 font-semibold text-xs sm:text-sm border-b-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
             activeTab === "quotes"
               ? "border-orange-500 text-orange-600 bg-orange-50/50 rounded-t-lg"
               : "border-transparent text-slate-500 hover:text-slate-800"
@@ -718,14 +825,35 @@ export default function AdminCrmPage() {
         >
           <FileSpreadsheet className="w-4 h-4" />
           <span>Quote Requests (RFQs)</span>
-          <span className="ml-1.5 px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700">
+          <span className="ml-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700">
             {quotes.length}
           </span>
         </button>
 
         <button
+          onClick={() => setActiveTab("contacts")}
+          className={`flex items-center gap-2 py-3 px-3.5 font-semibold text-xs sm:text-sm border-b-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+            activeTab === "contacts"
+              ? "border-orange-500 text-orange-600 bg-orange-50/50 rounded-t-lg"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          <Inbox className="w-4 h-4" />
+          <span>Contact Inquiries</span>
+          <span
+            className={`ml-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${
+              unreadContactsCount > 0
+                ? "bg-amber-100 text-amber-800"
+                : "bg-slate-100 text-slate-700"
+            }`}
+          >
+            {contacts.length}
+          </span>
+        </button>
+
+        <button
           onClick={() => setActiveTab("newsletter")}
-          className={`flex items-center gap-2 py-3 px-4 font-semibold text-sm border-b-2 transition-all cursor-pointer ${
+          className={`flex items-center gap-2 py-3 px-3.5 font-semibold text-xs sm:text-sm border-b-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
             activeTab === "newsletter"
               ? "border-orange-500 text-orange-600 bg-orange-50/50 rounded-t-lg"
               : "border-transparent text-slate-500 hover:text-slate-800"
@@ -733,22 +861,22 @@ export default function AdminCrmPage() {
         >
           <Users className="w-4 h-4" />
           <span>Newsletter & Broadcasts</span>
-          <span className="ml-1.5 px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700">
+          <span className="ml-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700">
             {subscribers.length}
           </span>
         </button>
 
         <button
           onClick={() => setActiveTab("emails")}
-          className={`flex items-center gap-2 py-3 px-4 font-semibold text-sm border-b-2 transition-all cursor-pointer ${
+          className={`flex items-center gap-2 py-3 px-3.5 font-semibold text-xs sm:text-sm border-b-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
             activeTab === "emails"
               ? "border-orange-500 text-orange-600 bg-orange-50/50 rounded-t-lg"
               : "border-transparent text-slate-500 hover:text-slate-800"
           }`}
         >
           <Send className="w-4 h-4" />
-          <span>Direct Email & Audit Logs</span>
-          <span className="ml-1.5 px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700">
+          <span>Direct Email & Logs</span>
+          <span className="ml-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700">
             {emailLogs.length}
           </span>
         </button>
@@ -759,7 +887,6 @@ export default function AdminCrmPage() {
       {/* ========================================================================= */}
       {activeTab === "quotes" && (
         <div className="space-y-4">
-          {/* Controls Bar */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
             <div className="flex items-center gap-2 w-full sm:w-auto flex-1 max-w-md">
               <div className="relative w-full">
@@ -791,7 +918,6 @@ export default function AdminCrmPage() {
             </div>
           </div>
 
-          {/* Quotations List */}
           {loadingQuotes ? (
             <div className="py-16 text-center text-slate-400 flex flex-col items-center justify-center gap-3">
               <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
@@ -804,7 +930,7 @@ export default function AdminCrmPage() {
               <p className="text-slate-500 text-sm mt-1 max-w-md mx-auto">
                 {quoteSearch || quoteStatusFilter !== "all"
                   ? "Try clearing filters to see other inquiries."
-                  : "Wholesale quotation requests submitted by customers through the website will appear here for pricing and dispatch."}
+                  : "Wholesale quotation requests submitted by customers through the header 'Get a Quote' button or product pages will appear here for pricing and dispatch."}
               </p>
             </div>
           ) : (
@@ -823,7 +949,6 @@ export default function AdminCrmPage() {
                     key={quote.id}
                     className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:border-slate-300 transition-all space-y-4"
                   >
-                    {/* Header Row */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
                       <div className="flex items-center gap-3">
                         <span className="font-mono font-bold text-orange-600 bg-orange-50 px-2.5 py-1 rounded-md text-sm border border-orange-200">
@@ -841,6 +966,11 @@ export default function AdminCrmPage() {
                             Urgent (48h)
                           </span>
                         )}
+                        {quote.preferredContactMethod && (
+                          <span className="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full capitalize">
+                            Via {quote.preferredContactMethod}
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -849,7 +979,6 @@ export default function AdminCrmPage() {
                       </div>
                     </div>
 
-                    {/* Customer & Company Details */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-3.5 rounded-xl text-xs">
                       <div>
                         <span className="text-slate-400 block font-semibold mb-0.5">Contact Person</span>
@@ -884,7 +1013,7 @@ export default function AdminCrmPage() {
                       <div>
                         <span className="text-slate-400 block font-semibold mb-0.5">Delivery Destination</span>
                         <span className="text-slate-700 font-medium">
-                          {quote.deliveryLocation || "Not specified / Ex-Works pickup"}
+                          {quote.deliveryLocation || "Not specified / Ex-Works"}
                         </span>
                         {quote.grandTotal ? (
                           <span className="block text-emerald-700 font-bold text-sm mt-1">
@@ -894,7 +1023,6 @@ export default function AdminCrmPage() {
                       </div>
                     </div>
 
-                    {/* Requested Items Table */}
                     <div>
                       <span className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
                         Requested Products & Volumes
@@ -935,15 +1063,13 @@ export default function AdminCrmPage() {
                       </div>
                     </div>
 
-                    {/* Additional Notes */}
                     {quote.additionalNotes && (
                       <div className="text-xs bg-amber-50/80 border border-amber-200/60 p-3 rounded-xl text-amber-900">
-                        <span className="font-bold">Customer Notes: </span>
+                        <span className="font-bold">Customer Specifications: </span>
                         {quote.additionalNotes}
                       </div>
                     )}
 
-                    {/* Actions Row */}
                     <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-slate-500 font-semibold">Set Status:</span>
@@ -1010,11 +1136,194 @@ export default function AdminCrmPage() {
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 2: NEWSLETTER ORGANISATION */}
+      {/* TAB 2: CONTACT INQUIRIES & MESSAGES */}
+      {/* ========================================================================= */}
+      {activeTab === "contacts" && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <div className="flex items-center gap-2 w-full sm:w-auto flex-1 max-w-md">
+              <div className="relative w-full">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Input
+                  value={contactSearch}
+                  onChange={(e) => setContactSearch(e.target.value)}
+                  placeholder="Search by name, email, phone, or keyword..."
+                  className="pl-9 rounded-xl border-slate-200 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+              <span className="text-xs font-semibold text-slate-500">Status:</span>
+              {(["all", "unread", "in_progress", "resolved"] as const).map((st) => (
+                <button
+                  key={st}
+                  onClick={() => setContactStatusFilter(st)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-colors cursor-pointer shrink-0 ${
+                    contactStatusFilter === st
+                      ? "bg-slate-900 text-white"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  {st.replace("_", " ")}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {loadingContacts ? (
+            <div className="py-16 text-center text-slate-400 flex flex-col items-center justify-center gap-3">
+              <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
+              <p className="text-sm">Loading contact submissions...</p>
+            </div>
+          ) : filteredContacts.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-sm">
+              <Inbox className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+              <h3 className="text-lg font-bold text-slate-800">No contact inquiries found</h3>
+              <p className="text-slate-500 text-sm mt-1 max-w-md mx-auto">
+                {contactSearch || contactStatusFilter !== "all"
+                  ? "Try clearing filters to view all submissions."
+                  : "Customer inquiries submitted through the Contact page form will appear here in real-time."}
+              </p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                    <tr>
+                      <th className="py-3 px-4">Timestamp</th>
+                      <th className="py-3 px-4">Contact Person</th>
+                      <th className="py-3 px-4">Subject & Inquiry Snippet</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredContacts.map((contact) => {
+                      const statusStyles: Record<ContactSubmissionStatus, string> = {
+                        unread: "bg-amber-100 text-amber-800 border-amber-200",
+                        in_progress: "bg-blue-100 text-blue-800 border-blue-200",
+                        resolved: "bg-emerald-100 text-emerald-800 border-emerald-200",
+                      };
+
+                      return (
+                        <tr key={contact.id} className="hover:bg-slate-50/70 transition-colors">
+                          <td className="py-3 px-4 text-slate-400 whitespace-nowrap">
+                            <div className="flex items-center gap-1.5">
+                              <Calendar className="w-3.5 h-3.5" />
+                              <span>{new Date(contact.createdAt).toLocaleDateString()}</span>
+                            </div>
+                            <span className="text-[11px] text-slate-400 block">
+                              {new Date(contact.createdAt).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                          </td>
+
+                          <td className="py-3 px-4">
+                            <span className="font-bold text-slate-900 block">{contact.name}</span>
+                            <a
+                              href={`mailto:${contact.email}`}
+                              className="text-blue-600 hover:underline block text-[11px]"
+                            >
+                              {contact.email}
+                            </a>
+                            {contact.phone && (
+                              <span className="text-slate-500 text-[11px] block">{contact.phone}</span>
+                            )}
+                          </td>
+
+                          <td className="py-3 px-4 max-w-md">
+                            <span className="font-semibold text-slate-800 block truncate">
+                              {contact.subject || "General Inquiry"}
+                            </span>
+                            <p className="text-slate-500 text-[11px] line-clamp-2 mt-0.5">
+                              {contact.message}
+                            </p>
+                            {contact.adminNotes && (
+                              <span className="inline-block mt-1 text-[10px] font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">
+                                Note: {contact.adminNotes}
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <span
+                              className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                                statusStyles[contact.status]
+                              }`}
+                            >
+                              {contact.status.replace("_", " ")}
+                            </span>
+                          </td>
+
+                          <td className="py-3 px-4 text-right whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleOpenContactDetail(contact)}
+                                className="h-8 text-xs border-slate-200 text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer"
+                              >
+                                <Eye className="w-3.5 h-3.5 mr-1" /> View / Edit
+                              </Button>
+
+                              <Button
+                                size="sm"
+                                onClick={() => handleStartReplyToContact(contact)}
+                                className="h-8 text-xs bg-slate-900 hover:bg-slate-800 text-white rounded-lg cursor-pointer gap-1"
+                              >
+                                <Reply className="w-3.5 h-3.5" /> Reply
+                              </Button>
+
+                              {contact.phone && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    const clean = contact.phone?.replace(/[^0-9]/g, "");
+                                    window.open(
+                                      `https://wa.me/${clean}?text=Hello%20${encodeURIComponent(
+                                        contact.name
+                                      )},%20regarding%20your%20inquiry%20to%20OSVID%20Chemicals...`,
+                                      "_blank"
+                                    );
+                                  }}
+                                  className="h-8 w-8 p-0 text-emerald-600 hover:bg-emerald-50 rounded-lg cursor-pointer"
+                                  title="WhatsApp"
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                </Button>
+                              )}
+
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteContact(contact.id)}
+                                className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 rounded-lg cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 3: NEWSLETTER ORGANISATION */}
       {/* ========================================================================= */}
       {activeTab === "newsletter" && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left Column: Audience & Subscribers List */}
           <div className="lg:col-span-7 space-y-4">
             <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
@@ -1043,7 +1352,6 @@ export default function AdminCrmPage() {
                 </div>
               </div>
 
-              {/* Filters */}
               <div className="flex flex-col sm:flex-row items-center gap-2">
                 <div className="relative flex-1 w-full">
                   <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -1071,7 +1379,6 @@ export default function AdminCrmPage() {
                 </div>
               </div>
 
-              {/* Subscribers Table */}
               {loadingSubscribers ? (
                 <div className="py-12 text-center text-slate-400 flex flex-col items-center justify-center gap-2">
                   <Loader2 className="w-6 h-6 animate-spin text-orange-500" />
@@ -1145,7 +1452,6 @@ export default function AdminCrmPage() {
             </div>
           </div>
 
-          {/* Right Column: Broadcast Composer & History */}
           <div className="lg:col-span-5 space-y-4">
             <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
               <div className="border-b border-slate-100 pb-3">
@@ -1158,7 +1464,6 @@ export default function AdminCrmPage() {
                 </p>
               </div>
 
-              {/* Pre-made Templates */}
               <div>
                 <Label className="text-xs font-semibold text-slate-600 mb-1.5 block">
                   Quick Fill Templates:
@@ -1258,7 +1563,6 @@ export default function AdminCrmPage() {
               </form>
             </div>
 
-            {/* Campaign History */}
             <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
               <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wider">
                 Recent Broadcasts
@@ -1293,11 +1597,10 @@ export default function AdminCrmPage() {
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 3: DIRECT EMAIL & AUDIT LOGS */}
+      {/* TAB 4: DIRECT EMAIL & AUDIT LOGS */}
       {/* ========================================================================= */}
       {activeTab === "emails" && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Direct Email Sender Form */}
           <div className="lg:col-span-5 space-y-4">
             <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
               <div className="border-b border-slate-100 pb-3">
@@ -1382,7 +1685,6 @@ export default function AdminCrmPage() {
             </div>
           </div>
 
-          {/* Audit Logs Table */}
           <div className="lg:col-span-7 space-y-4">
             <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
               <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
@@ -1487,7 +1789,143 @@ export default function AdminCrmPage() {
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL 1: PREPARE & SEND FORMAL QUOTATION */}
+      {/* MODAL 1: VIEW & EDIT CONTACT INQUIRY DETAILS */}
+      {/* ========================================================================= */}
+      {selectedContactForDetail && (
+        <Dialog open={true} onOpenChange={(open) => !open && setSelectedContactForDetail(null)}>
+          <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto bg-white rounded-2xl p-6 border border-slate-200 shadow-2xl">
+            <DialogHeader className="mb-4">
+              <div className="flex items-center gap-2 text-orange-600 font-bold text-xs uppercase tracking-wider">
+                <Inbox className="w-4 h-4" /> Contact Submission Record
+              </div>
+              <DialogTitle className="text-xl font-bold text-slate-900">
+                {selectedContactForDetail.subject || "Storefront Contact Inquiry"}
+              </DialogTitle>
+              <DialogDescription className="text-xs text-slate-500">
+                Received on {new Date(selectedContactForDetail.createdAt).toLocaleString()}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <span className="text-slate-400 block font-semibold">Contact Name</span>
+                  <span className="font-bold text-slate-900 text-sm">{selectedContactForDetail.name}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block font-semibold">Email Address</span>
+                  <a
+                    href={`mailto:${selectedContactForDetail.email}`}
+                    className="font-medium text-blue-600 hover:underline"
+                  >
+                    {selectedContactForDetail.email}
+                  </a>
+                </div>
+                {selectedContactForDetail.phone && (
+                  <div>
+                    <span className="text-slate-400 block font-semibold">Phone / WhatsApp</span>
+                    <a
+                      href={`tel:${selectedContactForDetail.phone}`}
+                      className="font-medium text-slate-800 hover:underline"
+                    >
+                      {selectedContactForDetail.phone}
+                    </a>
+                  </div>
+                )}
+                <div>
+                  <span className="text-slate-400 block font-semibold">Current Status</span>
+                  <span className="capitalize font-bold text-slate-800">
+                    {selectedContactForDetail.status}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-xs font-semibold text-slate-700 mb-1 block">
+                  Customer Message:
+                </Label>
+                <div className="bg-white p-4 rounded-xl border border-slate-200 text-xs text-slate-800 whitespace-pre-wrap leading-relaxed min-h-[100px]">
+                  {selectedContactForDetail.message}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-amber-50/60 p-3.5 rounded-xl border border-amber-200/60">
+                <div>
+                  <Label className="text-xs font-semibold text-amber-950 mb-1 block">
+                    Update Status:
+                  </Label>
+                  <select
+                    value={editingContactStatus}
+                    onChange={(e: any) => setEditingContactStatus(e.target.value)}
+                    className="w-full h-9 rounded-xl border border-amber-300 bg-white px-2.5 text-xs text-slate-800 focus:outline-none"
+                  >
+                    <option value="unread">Unread</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="resolved">Resolved</option>
+                  </select>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <Label className="text-xs font-semibold text-amber-950 mb-1 block">
+                    Staff Internal Follow-up Notes:
+                  </Label>
+                  <Textarea
+                    value={editingContactNotes}
+                    onChange={(e) => setEditingContactNotes(e.target.value)}
+                    placeholder="Record notes on phone call, quotation sent, customer requests..."
+                    className="text-xs rounded-xl bg-white border-amber-300 min-h-[70px]"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleDeleteContact(selectedContactForDetail.id)}
+                  className="text-red-600 hover:text-red-700 hover:bg-red-50 text-xs cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete Submission
+                </Button>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleStartReplyToContact(selectedContactForDetail)}
+                    className="text-xs rounded-xl h-9 cursor-pointer"
+                  >
+                    <Reply className="w-3.5 h-3.5 mr-1" /> Reply via Email
+                  </Button>
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleSaveContactChanges}
+                    disabled={savingContactChanges}
+                    className="bg-slate-900 hover:bg-slate-800 text-white text-xs rounded-xl h-9 px-4 font-semibold cursor-pointer"
+                  >
+                    {savingContactChanges ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-3.5 h-3.5 mr-1" /> Save Changes
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 2: PREPARE & SEND FORMAL QUOTATION */}
       {/* ========================================================================= */}
       {selectedQuoteForPricing && (
         <Dialog open={true} onOpenChange={(open) => !open && setSelectedQuoteForPricing(null)}>
@@ -1506,7 +1944,6 @@ export default function AdminCrmPage() {
             </DialogHeader>
 
             <div className="space-y-4">
-              {/* Product Pricing Matrix */}
               <div className="border border-slate-200 rounded-xl overflow-hidden">
                 <div className="bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700">
                   Itemized Product Pricing
@@ -1546,7 +1983,6 @@ export default function AdminCrmPage() {
                 </table>
               </div>
 
-              {/* Freight, Logistics & Payment Terms */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs">
                 <div>
                   <Label className="text-xs font-semibold text-slate-700 mb-1 block">
@@ -1606,7 +2042,6 @@ export default function AdminCrmPage() {
                 </div>
               </div>
 
-              {/* Total Summary Breakdown */}
               <div className="bg-slate-900 text-white p-4 rounded-xl flex items-center justify-between">
                 <div>
                   <span className="text-xs text-slate-400 block">Subtotal: ₦{quoteSubtotal.toLocaleString()}</span>
@@ -1622,7 +2057,6 @@ export default function AdminCrmPage() {
                 </div>
               </div>
 
-              {/* Modal Actions */}
               <div className="flex items-center justify-end gap-3 pt-2">
                 <Button
                   type="button"
@@ -1656,7 +2090,7 @@ export default function AdminCrmPage() {
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL 2: ADD SUBSCRIBER MANUALLY */}
+      {/* MODAL 3: ADD SUBSCRIBER MANUALLY */}
       {/* ========================================================================= */}
       {isAddSubModalOpen && (
         <Dialog open={true} onOpenChange={(open) => !open && setIsAddSubModalOpen(false)}>

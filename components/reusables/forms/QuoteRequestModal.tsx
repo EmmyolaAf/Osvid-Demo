@@ -7,7 +7,25 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { submitPublicQuoteRequest } from "@/lib/firebase/crm";
-import { Plus, Trash2, Send, CheckCircle2, Loader2, FileSpreadsheet, Building2, User, Mail, Phone, MapPin } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  Send,
+  CheckCircle2,
+  Loader2,
+  FileSpreadsheet,
+  Building2,
+  User,
+  Mail,
+  Phone,
+  MapPin,
+  Calendar,
+  Layers,
+  MessageSquare,
+  HelpCircle,
+  FileText,
+  BadgeCheck,
+} from "lucide-react";
 import { toast } from "sonner";
 
 interface QuoteRequestModalProps {
@@ -21,15 +39,24 @@ export default function QuoteRequestModal({
   onClose,
   prefilledProductName,
 }: QuoteRequestModalProps) {
+  // Client Info
   const [customerName, setCustomerName] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [deliveryLocation, setDeliveryLocation] = useState("");
+  const [preferredContactMethod, setPreferredContactMethod] = useState<"whatsapp" | "email" | "phone">("whatsapp");
+
+  // Procurement Scope
   const [urgency, setUrgency] = useState<"standard" | "urgent" | "immediate">("standard");
+  const [deliveryTimeline, setDeliveryTimeline] = useState("Within 7 days");
+  const [estimatedBudget, setEstimatedBudget] = useState("");
   const [additionalNotes, setAdditionalNotes] = useState("");
 
-  const [items, setItems] = useState<Array<{ productName: string; quantity: number; unit: string; targetPrice?: string }>>([
+  // Product Line Items
+  const [items, setItems] = useState<
+    Array<{ productName: string; quantity: number; unit: string; targetPrice?: string }>
+  >([
     {
       productName: prefilledProductName || "",
       quantity: 1,
@@ -65,13 +92,13 @@ export default function QuoteRequestModal({
     e.preventDefault();
 
     if (!customerName.trim() || !email.trim() || !phone.trim()) {
-      toast.error("Please provide your name, email, and phone number.");
+      toast.error("Please provide your full name, email address, and phone number.");
       return;
     }
 
     const validItems = items.filter((it) => it.productName.trim() && it.quantity > 0);
     if (validItems.length === 0) {
-      toast.error("Please enter at least one product and quantity.");
+      toast.error("Please enter at least one chemical product name and quantity.");
       return;
     }
 
@@ -84,6 +111,9 @@ export default function QuoteRequestModal({
         phone: phone.trim(),
         deliveryLocation: deliveryLocation.trim() || undefined,
         urgency,
+        preferredContactMethod,
+        deliveryTimeline,
+        estimatedBudget: estimatedBudget.trim() || undefined,
         items: validItems.map((item) => ({
           productName: item.productName.trim(),
           quantity: Number(item.quantity) || 1,
@@ -97,11 +127,11 @@ export default function QuoteRequestModal({
         setSubmittedQuoteNumber(res.quoteNumber);
         toast.success(`Quotation request ${res.quoteNumber} submitted successfully!`);
       } else {
-        toast.error(res.error || "Failed to submit request.");
+        toast.error(res.error || "Failed to submit quotation request.");
       }
     } catch (err: any) {
       console.error("Quote request submission error:", err);
-      toast.error("Failed to submit request. Please try again or contact support.");
+      toast.error("Failed to submit request. Please try again or reach us via WhatsApp.");
     } finally {
       setSubmitting(false);
     }
@@ -114,14 +144,23 @@ export default function QuoteRequestModal({
     setEmail("");
     setPhone("");
     setDeliveryLocation("");
+    setDeliveryTimeline("Within 7 days");
+    setEstimatedBudget("");
     setAdditionalNotes("");
-    setItems([{ productName: prefilledProductName || "", quantity: 1, unit: "Drums (200L)", targetPrice: "" }]);
+    setItems([
+      {
+        productName: prefilledProductName || "",
+        quantity: 1,
+        unit: "Drums (200L)",
+        targetPrice: "",
+      },
+    ]);
     onClose();
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleResetAndClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-2xl">
+      <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-2xl">
         {submittedQuoteNumber ? (
           <div className="text-center py-6 space-y-5">
             <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-sm">
@@ -132,7 +171,7 @@ export default function QuoteRequestModal({
                 Quotation Request Submitted!
               </h2>
               <p className="text-slate-600 mt-2 text-sm leading-relaxed max-w-md mx-auto">
-                Thank you, <span className="font-semibold text-slate-800">{customerName}</span>. Your request has been dispatched to OSVID Commercial B2B Desk under reference:
+                Thank you, <span className="font-semibold text-slate-800">{customerName}</span>. Your request has been logged in our Commercial CRM Desk under reference:
               </p>
               <div className="mt-3 inline-block bg-slate-100 border border-slate-300 px-4 py-2 rounded-xl text-lg font-mono font-bold text-orange-600">
                 {submittedQuoteNumber}
@@ -168,105 +207,110 @@ export default function QuoteRequestModal({
           <div>
             <DialogHeader className="mb-5">
               <div className="flex items-center gap-2 text-orange-600 font-bold text-xs uppercase tracking-wider mb-1">
-                <FileSpreadsheet className="w-4 h-4" /> B2B Wholesale Pricing
+                <FileSpreadsheet className="w-4 h-4" /> Official Commercial Quotation
               </div>
               <DialogTitle className="text-2xl font-bold text-slate-900">
-                Request a Commercial Quotation (RFQ)
+                Request a Commercial Wholesale Quote (RFQ)
               </DialogTitle>
-              <DialogDescription className="text-slate-500 text-sm">
-                Get custom factory-direct pricing, bulk container rates, and negotiated freight for industrial manufacturing or wholesale distribution.
+              <DialogDescription className="text-slate-500 text-xs sm:text-sm">
+                Get custom factory-direct pricing, bulk container rates, and negotiated haulage for manufacturing plants, contractors, and wholesale distributors.
               </DialogDescription>
             </DialogHeader>
 
             <form onSubmit={handleSubmit} className="space-y-5">
               {/* Client Info Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1.5">
-                    <User className="w-3.5 h-3.5 text-slate-400" /> Full Name *
-                  </Label>
-                  <Input
-                    required
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="e.g. Alhaji Babatunde"
-                    className="rounded-xl border-slate-200"
-                  />
+              <div className="bg-slate-50/70 p-4 rounded-xl border border-slate-200 space-y-3">
+                <span className="text-xs font-bold text-slate-800 uppercase tracking-wider block">
+                  1. Contact & Business Coordinates
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <Label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+                      <User className="w-3.5 h-3.5 text-slate-400" /> Full Name *
+                    </Label>
+                    <Input
+                      required
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                      placeholder="e.g. Alhaji Babatunde"
+                      className="rounded-xl border-slate-200 text-xs bg-white"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+                      <Building2 className="w-3.5 h-3.5 text-slate-400" /> Company / Factory Name
+                    </Label>
+                    <Input
+                      value={companyName}
+                      onChange={(e) => setCompanyName(e.target.value)}
+                      placeholder="e.g. Apex Industrial Coatings Ltd"
+                      className="rounded-xl border-slate-200 text-xs bg-white"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+                      <Mail className="w-3.5 h-3.5 text-slate-400" /> Business Email *
+                    </Label>
+                    <Input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="procurement@company.com"
+                      className="rounded-xl border-slate-200 text-xs bg-white"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+                      <Phone className="w-3.5 h-3.5 text-slate-400" /> Phone / WhatsApp *
+                    </Label>
+                    <Input
+                      type="tel"
+                      required
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="+234 800 000 0000"
+                      className="rounded-xl border-slate-200 text-xs bg-white"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <Label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1.5">
-                    <Building2 className="w-3.5 h-3.5 text-slate-400" /> Company / Factory Name
-                  </Label>
-                  <Input
-                    value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
-                    placeholder="e.g. Apex Industrial Coatings Ltd"
-                    className="rounded-xl border-slate-200"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1.5">
-                    <Mail className="w-3.5 h-3.5 text-slate-400" /> Business Email *
-                  </Label>
-                  <Input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="procurement@company.com"
-                    className="rounded-xl border-slate-200"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1.5">
-                    <Phone className="w-3.5 h-3.5 text-slate-400" /> Phone / WhatsApp *
-                  </Label>
-                  <Input
-                    type="tel"
-                    required
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+234 800 000 0000"
-                    className="rounded-xl border-slate-200"
-                  />
-                </div>
-              </div>
 
-              {/* Delivery Destination & Urgency */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="sm:col-span-2">
-                  <Label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-slate-400" /> Delivery Destination / State
-                  </Label>
-                  <Input
-                    value={deliveryLocation}
-                    onChange={(e) => setDeliveryLocation(e.target.value)}
-                    placeholder="e.g. Ikeja Industrial Estate, Lagos State"
-                    className="rounded-xl border-slate-200"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs font-semibold text-slate-700 mb-1.5 block">
-                    Procurement Urgency
-                  </Label>
-                  <select
-                    value={urgency}
-                    onChange={(e: any) => setUrgency(e.target.value)}
-                    className="w-full h-9 rounded-xl border border-slate-200 px-3 text-sm bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
-                  >
-                    <option value="standard">Standard (3-7 days)</option>
-                    <option value="urgent">Urgent (48 hours)</option>
-                    <option value="immediate">Immediate Dispatch</option>
-                  </select>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+                  <div>
+                    <Label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+                      <MapPin className="w-3.5 h-3.5 text-slate-400" /> Delivery Destination / State *
+                    </Label>
+                    <Input
+                      required
+                      value={deliveryLocation}
+                      onChange={(e) => setDeliveryLocation(e.target.value)}
+                      placeholder="e.g. Ikeja Industrial Estate, Lagos"
+                      className="rounded-xl border-slate-200 text-xs bg-white"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-semibold text-slate-700 mb-1 block">
+                      Preferred Response Channel
+                    </Label>
+                    <select
+                      value={preferredContactMethod}
+                      onChange={(e: any) => setPreferredContactMethod(e.target.value)}
+                      className="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs bg-white text-slate-800 focus:outline-none"
+                    >
+                      <option value="whatsapp">WhatsApp Message</option>
+                      <option value="email">Official Email</option>
+                      <option value="phone">Direct Phone Call</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
               {/* Line Items Builder */}
-              <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/60 space-y-3">
+              <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/70 space-y-3">
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                    Chemical Products & Quantities
-                  </Label>
+                  <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                    2. Chemical Requirements & Quantities *
+                  </span>
                   <Button
                     type="button"
                     variant="ghost"
@@ -283,10 +327,10 @@ export default function QuoteRequestModal({
                     key={idx}
                     className="grid grid-cols-12 gap-2 items-center bg-white p-2.5 rounded-lg border border-slate-200 shadow-sm"
                   >
-                    <div className="col-span-6 sm:col-span-6">
+                    <div className="col-span-5 sm:col-span-5">
                       <Input
                         required
-                        placeholder="Product Name or SKU"
+                        placeholder="e.g. Industrial Resin / Caustic Soda"
                         value={item.productName}
                         onChange={(e) => handleItemChange(idx, "productName", e.target.value)}
                         className="h-8 text-xs rounded-lg"
@@ -303,7 +347,7 @@ export default function QuoteRequestModal({
                         className="h-8 text-xs rounded-lg"
                       />
                     </div>
-                    <div className="col-span-2 sm:col-span-3">
+                    <div className="col-span-3 sm:col-span-3">
                       <select
                         value={item.unit}
                         onChange={(e) => handleItemChange(idx, "unit", e.target.value)}
@@ -314,9 +358,9 @@ export default function QuoteRequestModal({
                         <option value="Containers (4L)">Containers (4L)</option>
                         <option value="IBC Totes (1000L)">IBC Totes (1000L)</option>
                         <option value="Bags (25kg / 50kg)">Bags (25/50kg)</option>
-                        <option value="Metric Tonnes (MT)">Metric Tonnes</option>
+                        <option value="Metric Tonnes (MT)">Metric Tonnes (MT)</option>
                         <option value="Litres">Litres</option>
-                        <option value="Pieces">Pieces</option>
+                        <option value="Pieces / Units">Pieces / Units</option>
                       </select>
                     </div>
                     <div className="col-span-1 flex justify-end">
@@ -335,16 +379,58 @@ export default function QuoteRequestModal({
                 ))}
               </div>
 
-              {/* Additional notes */}
+              {/* Timeline & Urgency */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50/70 p-4 rounded-xl border border-slate-200">
+                <div>
+                  <Label className="text-xs font-semibold text-slate-700 mb-1 block">
+                    Procurement Urgency
+                  </Label>
+                  <select
+                    value={urgency}
+                    onChange={(e: any) => setUrgency(e.target.value)}
+                    className="w-full h-9 rounded-xl border border-slate-200 px-2.5 text-xs bg-white text-slate-800"
+                  >
+                    <option value="standard">Standard (3-7 days)</option>
+                    <option value="urgent">Urgent (48 hours)</option>
+                    <option value="immediate">Immediate Dispatch</option>
+                  </select>
+                </div>
+
+                <div>
+                  <Label className="text-xs font-semibold text-slate-700 mb-1 block">
+                    Required Delivery Timeline
+                  </Label>
+                  <Input
+                    value={deliveryTimeline}
+                    onChange={(e) => setDeliveryTimeline(e.target.value)}
+                    placeholder="e.g. Within 10 days"
+                    className="h-9 text-xs bg-white rounded-xl"
+                  />
+                </div>
+
+                <div>
+                  <Label className="text-xs font-semibold text-slate-700 mb-1 block">
+                    Target Budget (₦ Optional)
+                  </Label>
+                  <Input
+                    value={estimatedBudget}
+                    onChange={(e) => setEstimatedBudget(e.target.value)}
+                    placeholder="e.g. ₦1,500,000"
+                    className="h-9 text-xs bg-white rounded-xl"
+                  />
+                </div>
+              </div>
+
+              {/* Technical Specifications / Additional Notes */}
               <div>
-                <Label className="text-xs font-semibold text-slate-700 mb-1.5 block">
-                  Technical Specifications or Notes (Optional)
+                <Label className="text-xs font-semibold text-slate-700 mb-1 block">
+                  Technical Specifications, Formulation Purity or Notes
                 </Label>
                 <Textarea
                   value={additionalNotes}
                   onChange={(e) => setAdditionalNotes(e.target.value)}
-                  placeholder="Specify concentration, packaging preferences, desired delivery schedule, payment terms..."
-                  className="rounded-xl border-slate-200 text-xs min-h-[70px]"
+                  placeholder="Specify chemical concentration, required certificates (COA/MSDS), packaging preferences, batch frequencies..."
+                  className="rounded-xl border-slate-200 text-xs min-h-[75px]"
                 />
               </div>
 
@@ -366,7 +452,7 @@ export default function QuoteRequestModal({
                 >
                   {submitting ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" /> Submitting RFQ...
+                      <Loader2 className="w-4 h-4 animate-spin" /> Transmitting RFQ...
                     </>
                   ) : (
                     <>

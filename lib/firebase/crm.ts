@@ -19,6 +19,8 @@ import {
   NewsletterSubscriberStatus,
   CrmEmailLog,
   CrmEmailCampaign,
+  ContactSubmission,
+  ContactSubmissionStatus,
 } from "@/types/crm";
 
 // ============================================================================
@@ -244,3 +246,69 @@ export async function saveCrmCampaignInDb(
     return { success: false, error: err?.message || "Failed to save email campaign." };
   }
 }
+
+// ============================================================================
+// 4. CONTACT INQUIRIES & SUBMISSIONS
+// ============================================================================
+
+export async function getContactSubmissionsFromDb(): Promise<ContactSubmission[]> {
+  try {
+    const q = query(
+      collection(db, "contact_submissions"),
+      orderBy("createdAt", "desc")
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        name: data.name || "Anonymous",
+        email: data.email || "",
+        phone: data.phone || "",
+        subject: data.subject || "Contact Inquiry",
+        message: data.message || "",
+        status: (data.status as ContactSubmissionStatus) || "unread",
+        adminNotes: data.adminNotes || "",
+        resolvedAt: data.resolvedAt || undefined,
+        resolvedBy: data.resolvedBy || undefined,
+        createdAt: data.createdAt || (data.timestamp ? new Date(data.timestamp.toMillis ? data.timestamp.toMillis() : Date.now()).toISOString() : new Date().toISOString()),
+        updatedAt: data.updatedAt || undefined,
+      };
+    });
+  } catch (error) {
+    console.error("Error fetching contact submissions:", error);
+    return [];
+  }
+}
+
+export async function updateContactSubmissionInDb(
+  submissionId: string,
+  updates: Partial<ContactSubmission>
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const docRef = doc(db, "contact_submissions", submissionId);
+    await updateDoc(docRef, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
+    return { success: true };
+  } catch (err: any) {
+    console.error("updateContactSubmissionInDb error:", err);
+    return { success: false, error: err?.message || "Failed to update contact inquiry." };
+  }
+}
+
+export async function deleteContactSubmissionInDb(
+  submissionId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const docRef = doc(db, "contact_submissions", submissionId);
+    await deleteDoc(docRef);
+    return { success: true };
+  } catch (err: any) {
+    console.error("deleteContactSubmissionInDb error:", err);
+    return { success: false, error: err?.message || "Failed to delete contact inquiry." };
+  }
+}
+
+
