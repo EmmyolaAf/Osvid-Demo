@@ -55,7 +55,7 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="w-full max-w-md bg-white border border-slate-200/90 p-6 sm:p-10 rounded-3xl shadow-xl shadow-slate-200/50 text-slate-800 my-4 mx-auto">
+    <div className="w-full max-w-md bg-white border border-slate-200/90 p-6 sm:p-10 rounded-xl shadow-xl shadow-slate-200/50 text-slate-800 my-4 mx-auto">
       {/* Brand Logo & Header */}
       <div className="text-center mb-8 flex flex-col items-center">
         <Link href="/" className="inline-block mb-4 hover:opacity-90 transition-opacity">
@@ -172,7 +172,7 @@ export default function RegisterPage() {
         <Button
           type="submit"
           disabled={loading}
-          className="w-full h-11 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold rounded-xl shadow-lg shadow-orange-600/25 transition-all flex items-center justify-center gap-2 mt-4"
+          className="w-full h-10 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg shadow-sm transition-colors flex items-center justify-center gap-2 mt-4 text-xs sm:text-sm cursor-pointer"
         >
           {loading ? (
             <Loader2 className="w-5 h-5 animate-spin" />

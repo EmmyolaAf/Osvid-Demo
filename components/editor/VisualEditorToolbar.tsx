@@ -378,16 +378,16 @@ function VisualEditorToolbarInner() {
             size="sm"
             onClick={() => setIsConfirmModalOpen(true)}
             disabled={pendingCount === 0}
-            className={`h-8 px-3 rounded-xl font-bold text-xs gap-1.5 shrink-0 transition-all cursor-pointer ${
+            className={`h-8 px-3 rounded-lg font-semibold text-xs gap-1.5 shrink-0 transition-colors cursor-pointer ${
               pendingCount > 0
-                ? "bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white shadow-md shadow-orange-600/30 animate-pulse"
+                ? "bg-orange-600 hover:bg-orange-700 text-white shadow-sm"
                 : "bg-slate-800 text-slate-400 hover:bg-slate-700"
             }`}
           >
             <Save size={13} />
             <span>Save to Codebase</span>
             {pendingCount > 0 && (
-              <span className="ml-1 px-1.5 py-0.2 rounded-full bg-white text-orange-600 text-[10px] font-black">
+              <span className="ml-1 px-1.5 py-0.2 rounded-full bg-white text-orange-600 text-[10px] font-bold">
                 {pendingCount}
               </span>
             )}
@@ -421,7 +421,7 @@ function VisualEditorToolbarInner() {
               setIsEditMode(true);
               setIsSelectMode(true);
             }}
-            className="bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-orange-600/30 gap-1.5 h-9 cursor-pointer"
+            className="bg-orange-600 hover:bg-orange-700 text-white font-semibold text-xs rounded-lg shadow-sm gap-1.5 h-8 sm:h-9 px-3 cursor-pointer transition-colors"
           >
             <Edit3 size={14} />
             <span>Click to Edit Page</span>
@@ -460,7 +460,7 @@ function VisualEditorToolbarInner() {
       {/* DOCKED / FLOATING VISUAL ELEMENT INSPECTOR */}
       {/* ============================================================ */}
       {isEditMode && selectedElement && (
-        <aside className="fixed top-20 right-2 sm:right-4 z-[99999] w-88 max-w-[calc(100vw-1rem)] sm:max-w-[92vw] bg-white border border-slate-200 rounded-2xl sm:rounded-3xl shadow-2xl p-4 sm:p-5 text-slate-800 animate-in slide-in-from-right duration-200 flex flex-col gap-4 max-h-[85vh] overflow-y-auto">
+        <aside className="fixed top-20 right-2 sm:right-4 z-[99999] w-88 max-w-[calc(100vw-1rem)] sm:max-w-[92vw] bg-white border border-slate-200 rounded-xl shadow-2xl p-4 sm:p-5 text-slate-800 animate-in slide-in-from-right duration-200 flex flex-col gap-4 max-h-[85vh] overflow-y-auto no-scrollbar">
           {/* Header */}
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
             <div className="flex items-center gap-2">
@@ -644,7 +644,7 @@ function VisualEditorToolbarInner() {
       {/* SAVE TO CODEBASE CONFIRMATION MODAL WITH 1-WEEK WARNING */}
       {/* ============================================================ */}
       <Dialog open={isConfirmModalOpen} onOpenChange={setIsConfirmModalOpen}>
-        <DialogContent data-no-edit="true" className="max-w-lg rounded-3xl p-6 sm:p-8 bg-white border border-slate-200 text-slate-800">
+        <DialogContent data-no-edit="true" className="max-w-lg rounded-xl p-6 sm:p-8 bg-white border border-slate-200 text-slate-800">
           <DialogHeader>
             <div className="w-12 h-12 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center mb-3">
               <Save size={24} />
@@ -708,7 +708,7 @@ function VisualEditorToolbarInner() {
             <Button
               onClick={handleConfirmSave}
               disabled={saving}
-              className="rounded-xl text-xs font-bold h-10 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 text-white shadow-md shadow-orange-600/20 cursor-pointer"
+              className="rounded-lg text-xs font-semibold h-9 px-4 bg-orange-600 hover:bg-orange-700 text-white shadow-sm cursor-pointer transition-colors"
             >
               {saving ? <Loader2 size={16} className="animate-spin mr-1.5" /> : <Save size={16} className="mr-1.5" />}
               <span>Confirm &amp; Write to Codebase</span>

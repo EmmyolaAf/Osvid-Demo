@@ -31,6 +31,7 @@ import {
   AlertTriangle,
   ChevronDown,
   Mail,
+  User,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
@@ -128,6 +129,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               badge: "Executive",
               accent: true,
             },
+            {
+              title: "Profile & Settings",
+              href: "/dashboard/profile",
+              icon: User,
+              allowed: true,
+            },
           ],
         },
       ]
@@ -221,6 +228,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             },
           ],
         },
+        {
+          sectionTitle: "Account",
+          items: [
+            {
+              title: "Profile & Settings",
+              href: "/dashboard/profile",
+              icon: User,
+              allowed: true,
+            },
+          ],
+        },
       ];
 
   const getRoleBadge = () => {
@@ -290,7 +308,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             }`}
           >
             {/* Scrollable Nav Content */}
-            <div className="p-4 overflow-y-auto flex-1 overscroll-contain">
+            <div className="p-4 overflow-y-auto no-scrollbar flex-1 overscroll-contain">
               {/* Brand Header */}
               <div className="flex items-center justify-between mb-5 px-1.5">
                 <Link href="/dashboard" onClick={() => setSidebarOpen(false)} className="flex items-center">
@@ -312,19 +330,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               </div>
 
               {/* User Profile Card - Flat & Elegant */}
-              <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-3 mb-5">
+              <Link
+                href="/dashboard/profile"
+                onClick={() => setSidebarOpen(false)}
+                className="block bg-slate-50 hover:bg-slate-100/80 border border-slate-200/90 rounded-xl p-3 mb-5 transition-colors group cursor-pointer"
+                title="View & Edit Profile"
+              >
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl font-bold flex items-center justify-center text-xs bg-slate-900 text-white shrink-0 shadow-xs">
+                  <div className="w-8 h-8 rounded-lg font-bold flex items-center justify-center text-xs bg-slate-900 text-white shrink-0 shadow-xs group-hover:bg-orange-600 transition-colors">
                     {userProfile?.displayName?.charAt(0).toUpperCase() || "A"}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold text-slate-900 truncate">
+                    <p className="text-xs font-bold text-slate-900 truncate group-hover:text-orange-600 transition-colors">
                       {userProfile?.displayName || "Operations User"}
                     </p>
                     <p className="text-[11px] text-slate-400 truncate">
                       {user?.email}
                     </p>
                   </div>
+                  <ChevronRight size={14} className="text-slate-400 group-hover:text-slate-700 transition-colors shrink-0" />
                 </div>
                 <div className="mt-2.5 pt-2 border-t border-slate-200 flex items-center justify-between">
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${roleInfo.bg} flex items-center gap-1 truncate max-w-[120px]`}>
@@ -336,7 +360,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     Online
                   </span>
                 </div>
-              </div>
+              </Link>
 
               {/* Grouped Navigation */}
               <div className="space-y-4">

@@ -43,7 +43,7 @@ export default function Header() {
     setPrevPathname(pathname);
     setIsMenuOpen(false);
   }
-  const { user, userProfile, isStaff, isSuperAdmin, role, logout } = useAuth();
+  const { user, userProfile, isStaff, isSuperAdmin, isAdmin, role, logout } = useAuth();
 
   const isSuperAdminUser = Boolean(
     isSuperAdmin ||
@@ -52,6 +52,16 @@ export default function Header() {
     isSuperAdminEmail(user?.email) ||
     isSuperAdminEmail(userProfile?.email) ||
     user?.email?.toLowerCase() === PRIMARY_SUPER_ADMIN_EMAIL.toLowerCase()
+  );
+
+  const isManagerOrAdmin = Boolean(
+    isSuperAdminUser ||
+    isAdmin ||
+    role === "admin" ||
+    role === "manager" ||
+    userProfile?.role === "admin" ||
+    userProfile?.role === "manager" ||
+    isStaff
   );
 
   const dashboardHref = isSuperAdminUser ? "/dashboard/super-admin" : "/dashboard";
@@ -198,72 +208,66 @@ export default function Header() {
           </nav>
 
           {/* Right Side Actions */}
-          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
-            {user ? (
-              <div className="flex items-center gap-2">
-                {isStaff || isSuperAdminUser ? (
-                  <Link href={dashboardHref} className="hidden sm:block">
-                    <Button
-                      size="sm"
-                      className="h-9 px-3.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-1.5 shadow-sm"
-                    >
-                      <LayoutDashboard size={14} />
-                      <span>Dashboard</span>
-                    </Button>
-                  </Link>
-                ) : (
-                  <Link href="/account/orders" className="hidden sm:block">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-9 px-3 rounded-lg text-xs font-semibold text-slate-700 hover:text-orange-600 flex items-center gap-1.5"
-                    >
-                      <ShoppingBag size={14} />
-                      <span>Orders</span>
-                    </Button>
-                  </Link>
-                )}
-
-                <Link
-                  href={isStaff || isSuperAdminUser ? dashboardHref : "/account"}
-                  className="w-9 h-9 rounded-full bg-gradient-to-tr from-orange-600 to-amber-500 text-white font-bold flex items-center justify-center text-xs shadow-sm hover:scale-105 transition-transform"
-                  title={isStaff || isSuperAdminUser ? "Admin Dashboard" : "My Account"}
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+            {/* Button 1: Dashboard (if Admin/Manager) or Account (if Customer/Guest) */}
+            {isManagerOrAdmin ? (
+              <Link href={dashboardHref} className="hidden sm:inline-block">
+                <Button
+                  size="sm"
+                  className="h-9 px-3.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-1.5 shadow-sm transition-colors"
                 >
-                  {userProfile?.displayName?.charAt(0).toUpperCase() || (isSuperAdminUser ? "S" : "U")}
-                </Link>
-              </div>
+                  <LayoutDashboard size={14} />
+                  <span>Dashboard</span>
+                </Button>
+              </Link>
             ) : (
-              <Link href="/login" className="hidden sm:block">
+              <Link href={user ? "/account" : "/login"} className="hidden sm:inline-block">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-9 px-3.5 rounded-lg text-xs font-semibold border-slate-200 text-slate-700 hover:text-orange-600 hover:border-orange-500 flex items-center gap-1.5"
+                  className="h-9 px-3.5 rounded-lg text-xs font-semibold border-slate-300 text-slate-800 hover:text-orange-600 hover:border-orange-500 bg-white flex items-center gap-1.5 shadow-sm transition-colors"
                 >
-                  <LogIn size={14} />
-                  <span>Sign In</span>
+                  <User size={14} />
+                  <span>Account</span>
                 </Button>
               </Link>
             )}
 
+            {/* Button 2: Get a Quote */}
             <Button
               type="button"
               onClick={() => setIsQuoteModalOpen(true)}
-              className="hidden md:inline-flex h-10 px-5 rounded-lg font-medium bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-700 hover:to-orange-600 text-white shadow-sm cursor-pointer"
+              size="sm"
+              className="h-9 px-4 rounded-lg text-xs sm:text-sm font-semibold bg-orange-600 hover:bg-orange-700 text-white shadow-sm cursor-pointer transition-colors"
             >
               Get a Quote
             </Button>
 
-            <CartTrigger />
+            {/* Account Icon */}
+            <Link
+              href={isManagerOrAdmin ? "/dashboard/profile" : (user ? "/account" : "/login")}
+              className="w-9 h-9 rounded-full bg-slate-100 hover:bg-orange-100 border border-slate-200 text-slate-700 hover:text-orange-600 flex items-center justify-center transition-colors shadow-sm"
+              title={isManagerOrAdmin ? "Admin Profile" : (user ? "My Account" : "Sign In")}
+              aria-label="Account profile"
+            >
+              {userProfile?.displayName ? (
+                <span className="text-xs font-bold text-slate-900">
+                  {userProfile.displayName.charAt(0).toUpperCase()}
+                </span>
+              ) : (
+                <User size={16} />
+              )}
+            </Link>
 
             {/* Mobile Menu Hamburger Trigger */}
             <button
               onClick={toggleMenu}
               type="button"
-              className="lg:hidden p-2.5 rounded-xl bg-slate-50 hover:bg-orange-50 text-slate-700 hover:text-orange-600 transition-colors border border-slate-200/80 active:scale-95"
+              className="lg:hidden p-2 rounded-lg bg-slate-50 hover:bg-orange-50 text-slate-700 hover:text-orange-600 transition-colors border border-slate-200 active:scale-95"
               aria-label="Toggle navigation menu"
               aria-expanded={isMenuOpen}
             >
-              <Menu size={24} />
+              <Menu size={20} />
             </button>
           </div>
         </div>
@@ -320,7 +324,7 @@ export default function Header() {
               </div>
 
               {/* Drawer Scrollable Content Area */}
-              <div className="overflow-y-auto flex-1 overscroll-contain flex flex-col justify-between">
+              <div className="overflow-y-auto no-scrollbar flex-1 overscroll-contain flex flex-col justify-between">
                 {/* Navigation Links */}
                 <div className="p-4 space-y-1">
                   {(isStaff || isSuperAdminUser) && (
@@ -371,7 +375,7 @@ export default function Header() {
                     <div className="space-y-2">
                       <div className="bg-white border border-slate-200 p-3 rounded-2xl flex items-center justify-between shadow-xs">
                         <div className="flex items-center gap-2.5 overflow-hidden">
-                          <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-orange-600 to-amber-500 text-white font-bold flex items-center justify-center text-xs shadow-xs shrink-0">
+                          <div className="w-9 h-9 rounded-full bg-slate-800 text-white font-bold flex items-center justify-center text-xs shadow-xs shrink-0">
                             {userProfile?.displayName?.charAt(0).toUpperCase() || (isSuperAdminUser ? "S" : "U")}
                           </div>
                           <div className="overflow-hidden min-w-0">
@@ -451,7 +455,7 @@ export default function Header() {
                         closeMenu();
                         setIsQuoteModalOpen(true);
                       }}
-                      className="w-full h-11 rounded-xl bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-700 hover:to-orange-600 text-white font-bold text-sm shadow-md shadow-orange-600/20 cursor-pointer"
+                      className="w-full h-10 rounded-lg bg-orange-600 hover:bg-orange-700 text-white font-semibold text-xs sm:text-sm shadow-sm cursor-pointer transition-colors"
                     >
                       Get a Quote
                     </Button>

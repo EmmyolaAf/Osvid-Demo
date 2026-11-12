@@ -1467,7 +1467,7 @@ export function ProductFormModal({
                       <Button
                         type="button"
                         onClick={handleGenerateCartesianMatrix}
-                        className="h-9 rounded-xl bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 text-white text-xs font-bold gap-1.5 shadow-sm"
+                        className="h-9 rounded-lg bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold gap-1.5 shadow-sm transition-colors"
                       >
                         <Wand2 size={13} /> Generate Cartesian Matrix Permutations
                       </Button>

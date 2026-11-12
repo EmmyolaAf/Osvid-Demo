@@ -13,7 +13,7 @@ export default function ContactPageClient() {
   return (
     <>
       {/* Commercial RFQ Highlight Hero Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white rounded-3xl p-6 sm:p-10 mb-12 shadow-xl border border-slate-700/60 flex flex-col md:flex-row items-center justify-between gap-6">
+      <div className="bg-slate-900 text-white rounded-xl p-5 sm:p-8 mb-8 sm:mb-12 shadow-md border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="space-y-2 max-w-2xl">
           <div className="flex items-center gap-2 text-orange-400 font-bold text-xs uppercase tracking-wider">
             <FileSpreadsheet className="w-4 h-4" /> B2B Commercial Procurement
@@ -53,7 +53,7 @@ export default function ContactPageClient() {
         </div>
 
         {/* Right Side: Company Info & Locations */}
-        <div className="flex flex-col gap-8 bg-slate-50/70 p-6 sm:p-8 rounded-3xl border border-slate-200">
+        <div className="flex flex-col gap-8 bg-slate-50/70 p-6 sm:p-8 rounded-xl border border-slate-200">
           <div>
             <h3 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2">
               <Building2 className="w-5 h-5 text-orange-600" /> Head Office & Blending Facility

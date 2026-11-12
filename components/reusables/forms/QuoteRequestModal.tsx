@@ -303,7 +303,7 @@ export default function QuoteRequestModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleResetAndClose()}>
-      <DialogContent data-no-edit="true" className="max-w-2xl w-[96vw] sm:w-full max-h-[92vh] overflow-y-auto bg-white rounded-2xl sm:rounded-3xl p-3.5 sm:p-7 border border-slate-200 shadow-2xl">
+      <DialogContent data-no-edit="true" className="max-w-2xl w-[96vw] sm:w-full max-h-[92vh] overflow-y-auto no-scrollbar bg-white rounded-xl p-3.5 sm:p-7 border border-slate-200 shadow-2xl">
         {submittedQuoteNumber ? (
           <div className="text-center py-6 space-y-5">
             <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-sm">

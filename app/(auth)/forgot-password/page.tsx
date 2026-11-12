@@ -37,7 +37,7 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="w-full max-w-md bg-white border border-slate-200/80 p-8 sm:p-10 rounded-3xl shadow-xl shadow-slate-200/50 text-slate-800">
+    <div className="w-full max-w-md bg-white border border-slate-200/80 p-8 sm:p-10 rounded-xl shadow-xl shadow-slate-200/50 text-slate-800">
       <div className="text-center mb-7">
         <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-600 mb-3 shadow-md shadow-orange-600/20">
           <KeyRound className="w-6 h-6 text-white" />
@@ -85,7 +85,7 @@ export default function ForgotPasswordPage() {
           <Button
             type="submit"
             disabled={loading}
-            className="w-full h-11 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-bold rounded-xl shadow-lg shadow-orange-600/25 transition-all flex items-center justify-center gap-2 mt-2"
+            className="w-full h-10 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg shadow-sm transition-colors flex items-center justify-center gap-2 mt-2 text-xs sm:text-sm cursor-pointer"
           >
             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <span>Send Reset Link</span>}
           </Button>
