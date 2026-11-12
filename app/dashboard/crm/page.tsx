@@ -70,6 +70,7 @@ export default function AdminCrmPage() {
   const [loadingQuotes, setLoadingQuotes] = useState(true);
   const [quoteSearch, setQuoteSearch] = useState("");
   const [quoteStatusFilter, setQuoteStatusFilter] = useState<string>("all");
+  const [selectedQuoteForDetail, setSelectedQuoteForDetail] = useState<QuoteRequest | null>(null);
   const [selectedQuoteForPricing, setSelectedQuoteForPricing] = useState<QuoteRequest | null>(null);
 
   // State: Contact Inquiries
@@ -227,6 +228,9 @@ export default function AdminCrmPage() {
         setQuotes((prev) =>
           prev.map((q) => (q.id === quoteId ? { ...q, status: newStatus } : q))
         );
+        setSelectedQuoteForDetail((prev) =>
+          prev && prev.id === quoteId ? { ...prev, status: newStatus } : prev
+        );
         toast.success(`Quote status updated to "${newStatus}".`);
       } else {
         toast.error(res.error || "Failed to update status.");
@@ -243,6 +247,9 @@ export default function AdminCrmPage() {
       const res = await deleteQuoteRequestInDb(quoteId);
       if (res.success) {
         setQuotes((prev) => prev.filter((q) => q.id !== quoteId));
+        if (selectedQuoteForDetail?.id === quoteId) {
+          setSelectedQuoteForDetail(null);
+        }
         toast.success("Quotation request removed.");
       } else {
         toast.error(res.error || "Failed to delete.");
@@ -935,202 +942,181 @@ export default function AdminCrmPage() {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-4">
-              {filteredQuotes.map((quote) => {
-                const statusColors: Record<QuoteRequestStatus, string> = {
-                  new: "bg-orange-100 text-orange-700 border-orange-200",
-                  in_review: "bg-blue-100 text-blue-700 border-blue-200",
-                  quoted: "bg-purple-100 text-purple-700 border-purple-200",
-                  accepted: "bg-emerald-100 text-emerald-700 border-emerald-200",
-                  declined: "bg-rose-100 text-rose-700 border-rose-200",
-                };
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs min-w-[760px]">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                    <tr>
+                      <th className="py-3 px-4">Quote # &amp; Date</th>
+                      <th className="py-3 px-4">Customer &amp; Company</th>
+                      <th className="py-3 px-4">Requested Chemicals</th>
+                      <th className="py-3 px-4">Destination &amp; Budget</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredQuotes.map((quote) => {
+                      const statusColors: Record<QuoteRequestStatus, string> = {
+                        new: "bg-orange-100 text-orange-700 border-orange-200",
+                        in_review: "bg-blue-100 text-blue-700 border-blue-200",
+                        quoted: "bg-purple-100 text-purple-700 border-purple-200",
+                        accepted: "bg-emerald-100 text-emerald-700 border-emerald-200",
+                        declined: "bg-rose-100 text-rose-700 border-rose-200",
+                      };
 
-                return (
-                  <div
-                    key={quote.id}
-                    className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:border-slate-300 transition-all space-y-4"
-                  >
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                      <div className="flex items-center gap-3">
-                        <span className="font-mono font-bold text-orange-600 bg-orange-50 px-2.5 py-1 rounded-md text-sm border border-orange-200">
-                          {quote.quoteNumber}
-                        </span>
-                        <span
-                          className={`text-xs px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider border ${
-                            statusColors[quote.status]
-                          }`}
+                      return (
+                        <tr
+                          key={quote.id}
+                          onClick={() => setSelectedQuoteForDetail(quote)}
+                          className="hover:bg-slate-50/70 transition-colors cursor-pointer group"
                         >
-                          {quote.status.replace("_", " ")}
-                        </span>
-                        {quote.urgency === "urgent" && (
-                          <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold">
-                            Urgent (48h)
-                          </span>
-                        )}
-                        {quote.preferredContactMethod && (
-                          <span className="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full capitalize">
-                            Via {quote.preferredContactMethod}
-                          </span>
-                        )}
-                      </div>
+                          {/* Quote # & Date */}
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            <span className="font-mono font-bold text-orange-600 bg-orange-50 px-2.5 py-1 rounded-md text-xs border border-orange-200 group-hover:bg-orange-100 transition-colors">
+                              {quote.quoteNumber}
+                            </span>
+                            <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-1.5">
+                              <Calendar className="w-3.5 h-3.5" />
+                              <span>{new Date(quote.createdAt).toLocaleDateString()}</span>
+                              <span className="text-[10px] text-slate-400">
+                                {new Date(quote.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                              </span>
+                            </div>
+                          </td>
 
-                      <div className="flex items-center gap-2 text-xs text-slate-500">
-                        <Calendar className="w-3.5 h-3.5" />
-                        <span>{new Date(quote.createdAt).toLocaleString()}</span>
-                      </div>
-                    </div>
+                          {/* Customer & Company */}
+                          <td className="py-3.5 px-4">
+                            <span className="font-bold text-slate-900 block text-xs">{quote.customerName}</span>
+                            {quote.companyName && (
+                              <span className="text-slate-600 text-[11px] flex items-center gap-1 mt-0.5 font-medium">
+                                <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                <span className="truncate max-w-[160px]">{quote.companyName}</span>
+                              </span>
+                            )}
+                            <div className="flex items-center gap-2 mt-1 text-[11px]">
+                              <span className="text-blue-600 font-medium truncate max-w-[150px]">{quote.email}</span>
+                              {quote.phone && <span className="text-slate-500">• {quote.phone}</span>}
+                            </div>
+                          </td>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-3.5 rounded-xl text-xs">
-                      <div>
-                        <span className="text-slate-400 block font-semibold mb-0.5">Contact Person</span>
-                        <span className="font-bold text-slate-800 text-sm">{quote.customerName}</span>
-                        {quote.companyName && (
-                          <span className="block text-slate-600 mt-0.5">
-                            <Building2 className="w-3 h-3 inline mr-1 text-slate-400" />
-                            {quote.companyName}
-                          </span>
-                        )}
-                      </div>
+                          {/* Requested Chemicals Summary */}
+                          <td className="py-3.5 px-4 max-w-xs">
+                            <div className="space-y-1">
+                              {quote.items && quote.items.length > 0 ? (
+                                <>
+                                  <div className="font-semibold text-slate-800 line-clamp-1">
+                                    {quote.items[0].productName}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                                    <span>{quote.items[0].quantity} {quote.items[0].unit}</span>
+                                    {quote.items.length > 1 && (
+                                      <span className="text-[10px] text-orange-700 bg-orange-50 px-1.5 py-0.5 rounded font-bold border border-orange-200">
+                                        +{quote.items.length - 1} more
+                                      </span>
+                                    )}
+                                  </div>
+                                </>
+                              ) : (
+                                <span className="text-slate-400 italic">No products listed</span>
+                              )}
+                            </div>
+                            {quote.urgency === "urgent" && (
+                              <span className="inline-block mt-1 text-[10px] bg-red-100 text-red-700 font-bold px-1.5 py-0.5 rounded">
+                                Urgent (48h)
+                              </span>
+                            )}
+                          </td>
 
-                      <div>
-                        <span className="text-slate-400 block font-semibold mb-0.5">Contact Coordinates</span>
-                        <a
-                          href={`mailto:${quote.email}`}
-                          className="text-blue-600 hover:underline block font-medium"
-                        >
-                          {quote.email}
-                        </a>
-                        {quote.phone && (
-                          <a
-                            href={`tel:${quote.phone}`}
-                            className="text-slate-700 hover:underline block mt-0.5"
-                          >
-                            <Phone className="w-3 h-3 inline mr-1 text-slate-400" />
-                            {quote.phone}
-                          </a>
-                        )}
-                      </div>
+                          {/* Destination & Budget */}
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            <span className="text-slate-700 font-medium block truncate max-w-[140px]">
+                              {quote.deliveryLocation || "Lagos / Ex-Works"}
+                            </span>
+                            <div className="mt-1">
+                              {quote.estimatedBudget ? (
+                                <span className="text-[11px] font-semibold text-slate-500 block">
+                                  Budget: <strong className="text-slate-800">{quote.estimatedBudget}</strong>
+                                </span>
+                              ) : null}
+                              {quote.grandTotal ? (
+                                <span className="text-[11px] font-bold text-emerald-700 block">
+                                  Quoted: ₦{quote.grandTotal.toLocaleString()}
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
 
-                      <div>
-                        <span className="text-slate-400 block font-semibold mb-0.5">Delivery Destination</span>
-                        <span className="text-slate-700 font-medium">
-                          {quote.deliveryLocation || "Not specified / Ex-Works"}
-                        </span>
-                        {quote.grandTotal ? (
-                          <span className="block text-emerald-700 font-bold text-sm mt-1">
-                            Quoted: ₦{quote.grandTotal.toLocaleString()}
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
+                          {/* Status */}
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            <span
+                              className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                                statusColors[quote.status]
+                              }`}
+                            >
+                              {quote.status.replace("_", " ")}
+                            </span>
+                          </td>
 
-                    <div>
-                      <span className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-2">
-                        Requested Products & Volumes
-                      </span>
-                      <div className="border border-slate-200 rounded-xl overflow-x-auto">
-                        <table className="w-full text-left text-xs min-w-[500px]">
-                          <thead className="bg-slate-100/70 border-b border-slate-200 text-slate-600">
-                            <tr>
-                              <th className="py-2 px-3 font-semibold">Product Description</th>
-                              <th className="py-2 px-3 font-semibold">Requested Qty</th>
-                              <th className="py-2 px-3 font-semibold">Packaging Unit</th>
-                              <th className="py-2 px-3 font-semibold">Quoted Unit Price</th>
-                              <th className="py-2 px-3 font-semibold text-right">Line Total</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {quote.items.map((item, idx) => (
-                              <tr key={idx} className="hover:bg-slate-50/50">
-                                <td className="py-2 px-3 font-medium text-slate-800">{item.productName}</td>
-                                <td className="py-2 px-3 text-slate-700 font-semibold">{item.quantity}</td>
-                                <td className="py-2 px-3 text-slate-600">{item.unit}</td>
-                                <td className="py-2 px-3 text-slate-700">
-                                  {item.quotedUnitPrice
-                                    ? `₦${item.quotedUnitPrice.toLocaleString()}`
-                                    : item.targetPrice
-                                    ? `Target: ₦${item.targetPrice.toLocaleString()}`
-                                    : "Pending pricing"}
-                                </td>
-                                <td className="py-2 px-3 text-right font-bold text-slate-800">
-                                  {item.quotedLineTotal
-                                    ? `₦${item.quotedLineTotal.toLocaleString()}`
-                                    : "—"}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
+                          {/* Actions */}
+                          <td className="py-3.5 px-4 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setSelectedQuoteForDetail(quote)}
+                                className="h-8 text-xs border-slate-200 text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer"
+                              >
+                                <Eye className="w-3.5 h-3.5 mr-1" /> View Details
+                              </Button>
 
-                    {quote.additionalNotes && (
-                      <div className="text-xs bg-amber-50/80 border border-amber-200/60 p-3 rounded-xl text-amber-900">
-                        <span className="font-bold">Customer Specifications: </span>
-                        {quote.additionalNotes}
-                      </div>
-                    )}
+                              <Button
+                                size="sm"
+                                onClick={() => handleOpenPricingModal(quote)}
+                                className="h-8 text-xs bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg gap-1 cursor-pointer shadow-sm"
+                                title="Prepare & Send Official Proforma Quotation"
+                              >
+                                <DollarSign className="w-3.5 h-3.5" />
+                                {quote.status === "quoted" ? "Revise" : "Price"}
+                              </Button>
 
-                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-500 font-semibold">Set Status:</span>
-                        <select
-                          value={quote.status}
-                          onChange={(e) =>
-                            handleUpdateQuoteStatus(quote.id, e.target.value as QuoteRequestStatus)
-                          }
-                          className="h-8 text-xs rounded-lg border border-slate-200 bg-white px-2 font-medium text-slate-700 focus:outline-none"
-                        >
-                          <option value="new">New</option>
-                          <option value="in_review">In Review</option>
-                          <option value="quoted">Quoted</option>
-                          <option value="accepted">Accepted</option>
-                          <option value="declined">Declined</option>
-                        </select>
-                      </div>
+                              {quote.phone && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    const cleanPhone = quote.phone?.replace(/[^0-9]/g, "");
+                                    window.open(
+                                      `https://wa.me/${cleanPhone}?text=Hello%20${encodeURIComponent(
+                                        quote.customerName
+                                      )},%20regarding%20your%20OSVID%20quotation%20request%20${quote.quoteNumber}...`,
+                                      "_blank"
+                                    );
+                                  }}
+                                  className="h-8 w-8 p-0 text-emerald-600 hover:bg-emerald-50 rounded-lg cursor-pointer"
+                                  title="WhatsApp Client"
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                </Button>
+                              )}
 
-                      <div className="flex items-center gap-2">
-                        {quote.phone && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              const cleanPhone = quote.phone?.replace(/[^0-9]/g, "");
-                              window.open(
-                                `https://wa.me/${cleanPhone}?text=Hello%20${encodeURIComponent(
-                                  quote.customerName
-                                )},%20regarding%20your%20OSVID%20quotation%20request%20${quote.quoteNumber}...`,
-                                "_blank"
-                              );
-                            }}
-                            className="h-8 text-xs border-emerald-600 text-emerald-700 hover:bg-emerald-50 rounded-lg cursor-pointer"
-                          >
-                            <MessageSquare className="w-3.5 h-3.5 mr-1" /> WhatsApp
-                          </Button>
-                        )}
-
-                        <Button
-                          size="sm"
-                          onClick={() => handleOpenPricingModal(quote)}
-                          className="h-8 text-xs bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg gap-1.5 cursor-pointer shadow-sm"
-                        >
-                          <DollarSign className="w-3.5 h-3.5" />
-                          {quote.status === "quoted" ? "Revise Quotation" : "Prepare & Send Quotation"}
-                        </Button>
-
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDeleteQuote(quote.id)}
-                          className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 rounded-lg cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteQuote(quote.id)}
+                                className="h-8 w-8 p-0 text-slate-400 hover:text-red-600 rounded-lg cursor-pointer"
+                                title="Delete Quote Request"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
@@ -1917,6 +1903,240 @@ export default function AdminCrmPage() {
                         <Check className="w-3.5 h-3.5 mr-1" /> Save Changes
                       </>
                     )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 1B: VIEW & MANAGE QUOTATION REQUEST DETAILS */}
+      {/* ========================================================================= */}
+      {selectedQuoteForDetail && (
+        <Dialog open={true} onOpenChange={(open) => !open && setSelectedQuoteForDetail(null)}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-white rounded-2xl p-6 border border-slate-200 shadow-2xl">
+            <DialogHeader className="mb-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono font-bold text-orange-600 bg-orange-50 px-2.5 py-1 rounded-md text-xs border border-orange-200">
+                  {selectedQuoteForDetail.quoteNumber}
+                </span>
+                <span
+                  className={`text-xs px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider border ${
+                    selectedQuoteForDetail.status === "new"
+                      ? "bg-orange-100 text-orange-700 border-orange-200"
+                      : selectedQuoteForDetail.status === "in_review"
+                      ? "bg-blue-100 text-blue-700 border-blue-200"
+                      : selectedQuoteForDetail.status === "quoted"
+                      ? "bg-purple-100 text-purple-700 border-purple-200"
+                      : selectedQuoteForDetail.status === "accepted"
+                      ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                      : "bg-rose-100 text-rose-700 border-rose-200"
+                  }`}
+                >
+                  {selectedQuoteForDetail.status.replace("_", " ")}
+                </span>
+              </div>
+              <DialogTitle className="text-xl font-bold text-slate-900 mt-2">
+                Quotation Request Details
+              </DialogTitle>
+              <DialogDescription className="text-xs text-slate-500">
+                Submitted on {new Date(selectedQuoteForDetail.createdAt).toLocaleString()}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 text-xs">
+              {/* Client & Business Coordinates */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                <span className="font-bold text-slate-800 uppercase tracking-wider text-[11px] block">
+                  1. Contact &amp; Business Coordinates
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <span className="text-slate-400 block font-semibold mb-0.5">Customer Name</span>
+                    <span className="font-bold text-slate-900 text-sm">{selectedQuoteForDetail.customerName}</span>
+                    {selectedQuoteForDetail.companyName && (
+                      <span className="text-slate-600 block text-xs mt-0.5">
+                        <Building2 className="w-3.5 h-3.5 inline mr-1 text-slate-400" />
+                        {selectedQuoteForDetail.companyName}
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <span className="text-slate-400 block font-semibold mb-0.5">Contact Coordinates</span>
+                    <a
+                      href={`mailto:${selectedQuoteForDetail.email}`}
+                      className="text-blue-600 hover:underline block font-semibold"
+                    >
+                      {selectedQuoteForDetail.email}
+                    </a>
+                    {selectedQuoteForDetail.phone && (
+                      <a
+                        href={`tel:${selectedQuoteForDetail.phone}`}
+                        className="text-slate-700 hover:underline block mt-0.5"
+                      >
+                        <Phone className="w-3.5 h-3.5 inline mr-1 text-slate-400" />
+                        {selectedQuoteForDetail.phone}
+                      </a>
+                    )}
+                  </div>
+
+                  <div>
+                    <span className="text-slate-400 block font-semibold mb-0.5">Delivery Destination</span>
+                    <span className="text-slate-800 font-semibold">
+                      {selectedQuoteForDetail.deliveryLocation || "Not specified / Ex-Works"}
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className="text-slate-400 block font-semibold mb-0.5">Channel &amp; Urgency</span>
+                    <span className="text-slate-800 font-semibold capitalize">
+                      Via {selectedQuoteForDetail.preferredContactMethod || "Email"} • {selectedQuoteForDetail.urgency}
+                    </span>
+                    {selectedQuoteForDetail.deliveryTimeline && (
+                      <span className="text-slate-500 block text-[11px] mt-0.5">
+                        Timeline: {selectedQuoteForDetail.deliveryTimeline}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {selectedQuoteForDetail.estimatedBudget && (
+                  <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between">
+                    <span className="text-slate-500 font-semibold">Target Budget:</span>
+                    <strong className="text-orange-600 font-bold text-sm">
+                      {selectedQuoteForDetail.estimatedBudget}
+                    </strong>
+                  </div>
+                )}
+              </div>
+
+              {/* Chemical Line Items */}
+              <div className="space-y-2">
+                <span className="font-bold text-slate-800 uppercase tracking-wider text-[11px] block">
+                  2. Chemical Requirements &amp; Quantities
+                </span>
+                <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                  <table className="w-full text-left text-xs min-w-[450px]">
+                    <thead className="bg-slate-100/70 border-b border-slate-200 text-slate-600">
+                      <tr>
+                        <th className="py-2.5 px-3 font-semibold">Product Description</th>
+                        <th className="py-2.5 px-3 font-semibold">Qty</th>
+                        <th className="py-2.5 px-3 font-semibold">Unit</th>
+                        <th className="py-2.5 px-3 font-semibold">Target Price</th>
+                        <th className="py-2.5 px-3 font-semibold text-right">Quoted Price</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {(selectedQuoteForDetail.items || []).map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50">
+                          <td className="py-2.5 px-3 font-medium text-slate-900">{item.productName}</td>
+                          <td className="py-2.5 px-3 text-slate-800 font-bold">{item.quantity}</td>
+                          <td className="py-2.5 px-3 text-slate-600">{item.unit}</td>
+                          <td className="py-2.5 px-3 text-slate-600">
+                            {item.targetPrice ? `₦${item.targetPrice.toLocaleString()}` : "—"}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-slate-900">
+                            {item.quotedUnitPrice
+                              ? `₦${item.quotedUnitPrice.toLocaleString()}`
+                              : "Pending Pricing"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Technical Specifications & Notes */}
+              {selectedQuoteForDetail.additionalNotes && (
+                <div className="bg-amber-50/80 border border-amber-200/70 p-3.5 rounded-xl space-y-1">
+                  <span className="font-bold text-amber-900 uppercase tracking-wider text-[10px] block">
+                    Technical Specifications / Formulation Purity Notes:
+                  </span>
+                  <p className="text-amber-950 text-xs leading-relaxed">
+                    {selectedQuoteForDetail.additionalNotes}
+                  </p>
+                </div>
+              )}
+
+              {/* Status Update Control */}
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
+                <span className="text-xs font-semibold text-slate-700">Update Lead Status:</span>
+                <select
+                  value={selectedQuoteForDetail.status}
+                  onChange={(e) =>
+                    handleUpdateQuoteStatus(selectedQuoteForDetail.id, e.target.value as QuoteRequestStatus)
+                  }
+                  className="h-8 text-xs rounded-lg border border-slate-300 bg-white px-2.5 font-medium text-slate-800 focus:outline-none cursor-pointer"
+                >
+                  <option value="new">New Lead</option>
+                  <option value="in_review">In Review</option>
+                  <option value="quoted">Quoted</option>
+                  <option value="accepted">Accepted / Won</option>
+                  <option value="declined">Declined / Lost</option>
+                </select>
+              </div>
+
+              {/* Modal Actions */}
+              <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleDeleteQuote(selectedQuoteForDetail.id)}
+                  className="h-9 text-xs border-red-200 text-red-600 hover:bg-red-50 rounded-xl cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete Quote
+                </Button>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setDirectRecipientEmail(selectedQuoteForDetail.email);
+                      setDirectRecipientName(selectedQuoteForDetail.customerName);
+                      setDirectSubject(`Regarding Quote Request ${selectedQuoteForDetail.quoteNumber} - OSVID Chemicals`);
+                      setActiveTab("emails");
+                      setSelectedQuoteForDetail(null);
+                    }}
+                    className="h-9 text-xs border-slate-200 text-slate-700 hover:bg-slate-100 rounded-xl cursor-pointer"
+                  >
+                    <Reply className="w-3.5 h-3.5 mr-1" /> Send Email
+                  </Button>
+
+                  {selectedQuoteForDetail.phone && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const cleanPhone = selectedQuoteForDetail.phone?.replace(/[^0-9]/g, "");
+                        window.open(
+                          `https://wa.me/${cleanPhone}?text=Hello%20${encodeURIComponent(
+                            selectedQuoteForDetail.customerName
+                          )},%20regarding%20your%20OSVID%20quotation%20request%20${selectedQuoteForDetail.quoteNumber}...`,
+                          "_blank"
+                        );
+                      }}
+                      className="h-9 text-xs border-emerald-600 text-emerald-700 hover:bg-emerald-50 rounded-xl cursor-pointer"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5 mr-1" /> WhatsApp
+                    </Button>
+                  )}
+
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const quoteToPrice = selectedQuoteForDetail;
+                      setSelectedQuoteForDetail(null);
+                      handleOpenPricingModal(quoteToPrice);
+                    }}
+                    className="h-9 text-xs bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-xl gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <DollarSign className="w-3.5 h-3.5" />
+                    {selectedQuoteForDetail.status === "quoted" ? "Revise Proforma Quote" : "Prepare Formal Proforma Quote"}
                   </Button>
                 </div>
               </div>
