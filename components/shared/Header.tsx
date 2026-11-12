@@ -107,8 +107,8 @@ export default function Header() {
   return (
     <>
       {/* Top Bar */}
-      <div className="bg-osvid-lime text-gray-100 py-2">
-        <div className="px-4 container md:px-12 flex items-center justify-between gap-4 mx-auto">
+      <div className="bg-osvid-lime text-gray-100 py-2 w-full">
+        <div className="w-full px-2 sm:px-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             {Object.entries(companyData.socialMedia).map(
               ([platform, username]) => {
@@ -159,7 +159,7 @@ export default function Header() {
           isScrolled ? "bg-white/95 backdrop-blur-md shadow-sm" : "bg-white"
         }`}
       >
-        <div className="container px-4 md:px-12 flex items-center justify-between py-3 mx-auto">
+        <div className="w-full px-2 sm:px-4 flex items-center justify-between py-2 sm:py-2.5">
           {/* Logo */}
           <Link href="/" className="flex items-center">
             <Image

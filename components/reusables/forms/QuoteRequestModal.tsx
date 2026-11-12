@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import CustomSelect, { CustomSelectOption } from "@/components/ui/custom-select";
 import { submitPublicQuoteRequest } from "@/lib/firebase/crm";
+import { getProducts } from "@/lib/firebase/storefront";
 import {
   Plus,
   Trash2,
@@ -34,6 +36,44 @@ interface QuoteRequestModalProps {
   prefilledProductName?: string;
 }
 
+const DEFAULT_CHEMICAL_OPTIONS: CustomSelectOption[] = [
+  { value: "OSVID Bond Glue Heavy-Duty", label: "OSVID Bond Glue Heavy-Duty", description: "Industrial High-Tensile Adhesive" },
+  { value: "Caustic Soda Flakes (NaOH 99%)", label: "Caustic Soda Flakes (NaOH 99%)", description: "Technical / Industrial Grade" },
+  { value: "Industrial Resin & Polymer Binder", label: "Industrial Resin & Polymer Binder", description: "High-Strength Emulsion" },
+  { value: "Hydrated Lime / Calcium Hydroxide", label: "Hydrated Lime / Calcium Hydroxide", description: "Construction & Industrial Grade" },
+  { value: "Sulfuric Acid Technical Grade", label: "Sulfuric Acid Technical Grade", description: "Bulk Liquid Acid" },
+  { value: "Hydrochloric Acid (HCl 33%)", label: "Hydrochloric Acid (HCl 33%)", description: "Industrial Pickling & Processing" },
+  { value: "Sodium Hypochlorite (Bleach 15%)", label: "Sodium Hypochlorite (Bleach 15%)", description: "Water Treatment & Disinfection" },
+  { value: "Degreaser & Industrial Solvent", label: "Degreaser & Industrial Solvent", description: "Heavy Machinery Cleaning" },
+  { value: "Liquid Chlorine", label: "Liquid Chlorine", description: "Water Treatment Biocide" },
+  { value: "Nitric Acid 68%", label: "Nitric Acid 68%", description: "Industrial Technical Formulation" },
+  { value: "Poly Aluminium Chloride (PAC)", label: "Poly Aluminium Chloride (PAC)", description: "Water Flocculant & Coagulant" },
+  { value: "Custom Chemical Formulation / Other", label: "Custom Chemical Formulation / Other", description: "Provide details in Technical Specifications" },
+];
+
+const PACKAGING_UNITS: CustomSelectOption[] = [
+  { value: "Drums (200L)", label: "Drums (200L)" },
+  { value: "Kegs (25L)", label: "Kegs (25L)" },
+  { value: "Containers (4L)", label: "Containers (4L)" },
+  { value: "IBC Totes (1000L)", label: "IBC Totes (1000L)" },
+  { value: "Bags (25kg / 50kg)", label: "Bags (25kg / 50kg)" },
+  { value: "Metric Tonnes (MT)", label: "Metric Tonnes (MT)" },
+  { value: "Litres", label: "Litres" },
+  { value: "Pieces / Units", label: "Pieces / Units" },
+];
+
+const CONTACT_CHANNELS: CustomSelectOption[] = [
+  { value: "whatsapp", label: "WhatsApp Message" },
+  { value: "email", label: "Official Business Email" },
+  { value: "phone", label: "Direct Phone Call" },
+];
+
+const URGENCY_OPTIONS: CustomSelectOption[] = [
+  { value: "standard", label: "Standard (3-7 days)" },
+  { value: "urgent", label: "Urgent (48 hours)" },
+  { value: "immediate", label: "Immediate Dispatch" },
+];
+
 export default function QuoteRequestModal({
   isOpen,
   onClose,
@@ -55,23 +95,88 @@ export default function QuoteRequestModal({
 
   // Product Line Items
   const [items, setItems] = useState<
-    Array<{ productName: string; quantity: number; unit: string; targetPrice?: string }>
+    Array<{ productName: string; quantity: string; unit: string; targetPrice?: string }>
   >([
     {
-      productName: prefilledProductName || "",
-      quantity: 1,
+      productName: prefilledProductName || DEFAULT_CHEMICAL_OPTIONS[0].value,
+      quantity: "1",
       unit: "Drums (200L)",
       targetPrice: "",
     },
   ]);
 
+  // Product options catalog
+  const [productOptions, setProductOptions] = useState<CustomSelectOption[]>(DEFAULT_CHEMICAL_OPTIONS);
   const [submitting, setSubmitting] = useState(false);
   const [submittedQuoteNumber, setSubmittedQuoteNumber] = useState<string | null>(null);
+
+  // Fetch live store products on mount to merge with defaults
+  useEffect(() => {
+    let isMounted = true;
+    async function loadCatalog() {
+      try {
+        const res = await getProducts();
+        if (isMounted && res.success && res.data && res.data.length > 0) {
+          const fetchedOptions: CustomSelectOption[] = res.data.map((p) => ({
+            value: p.name,
+            label: p.name,
+            description: p.category || (p.price ? `₦${p.price.toLocaleString()}` : undefined),
+          }));
+
+          // Merge without duplicates
+          const seen = new Set<string>();
+          const merged: CustomSelectOption[] = [];
+
+          for (const opt of [...fetchedOptions, ...DEFAULT_CHEMICAL_OPTIONS]) {
+            if (!seen.has(opt.value.toLowerCase())) {
+              seen.add(opt.value.toLowerCase());
+              merged.push(opt);
+            }
+          }
+
+          // Ensure prefilled product is included if present
+          if (prefilledProductName && !seen.has(prefilledProductName.toLowerCase())) {
+            merged.unshift({
+              value: prefilledProductName,
+              label: prefilledProductName,
+              description: "Selected Product",
+            });
+          }
+
+          setProductOptions(merged);
+        }
+      } catch (e) {
+        console.error("Error loading product catalog for RFQ modal:", e);
+      }
+    }
+    loadCatalog();
+    return () => {
+      isMounted = false;
+    };
+  }, [prefilledProductName]);
+
+  // Update initial line item if prefilledProductName is provided
+  useEffect(() => {
+    if (prefilledProductName) {
+      setItems((prev) => {
+        const copy = [...prev];
+        if (copy.length > 0) {
+          copy[0] = { ...copy[0], productName: prefilledProductName };
+        }
+        return copy;
+      });
+    }
+  }, [prefilledProductName]);
 
   const handleAddItem = () => {
     setItems((prev) => [
       ...prev,
-      { productName: "", quantity: 1, unit: "Drums (200L)", targetPrice: "" },
+      {
+        productName: productOptions[0]?.value || DEFAULT_CHEMICAL_OPTIONS[0].value,
+        quantity: "1",
+        unit: "Drums (200L)",
+        targetPrice: "",
+      },
     ]);
   };
 
@@ -88,6 +193,24 @@ export default function QuoteRequestModal({
     });
   };
 
+  // Quantity change with strictly numbers only
+  const handleQuantityChange = (index: number, rawVal: string) => {
+    const digitsOnly = rawVal.replace(/[^0-9]/g, "");
+    handleItemChange(index, "quantity", digitsOnly);
+  };
+
+  // Phone change with strictly numbers and valid phone symbols
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const sanitized = e.target.value.replace(/[^0-9+\s\-()]/g, "");
+    setPhone(sanitized);
+  };
+
+  // Budget change with strictly numbers only
+  const handleBudgetChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const digitsOnly = e.target.value.replace(/[^0-9]/g, "");
+    setEstimatedBudget(digitsOnly);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -96,9 +219,15 @@ export default function QuoteRequestModal({
       return;
     }
 
-    const validItems = items.filter((it) => it.productName.trim() && it.quantity > 0);
+    // Target Budget is strictly mandatory
+    if (!estimatedBudget.trim() || Number(estimatedBudget) <= 0) {
+      toast.error("Target Budget (₦) is mandatory. Please enter a valid amount (numbers only).");
+      return;
+    }
+
+    const validItems = items.filter((it) => it.productName.trim() && Number(it.quantity) > 0);
     if (validItems.length === 0) {
-      toast.error("Please enter at least one chemical product name and quantity.");
+      toast.error("Please select at least one chemical product and enter a valid quantity (numbers only).");
       return;
     }
 
@@ -113,7 +242,7 @@ export default function QuoteRequestModal({
         urgency,
         preferredContactMethod,
         deliveryTimeline,
-        estimatedBudget: estimatedBudget.trim() || undefined,
+        estimatedBudget: `₦${Number(estimatedBudget).toLocaleString()}`,
         items: validItems.map((item) => ({
           productName: item.productName.trim(),
           quantity: Number(item.quantity) || 1,
@@ -149,8 +278,8 @@ export default function QuoteRequestModal({
     setAdditionalNotes("");
     setItems([
       {
-        productName: prefilledProductName || "",
-        quantity: 1,
+        productName: prefilledProductName || productOptions[0]?.value || DEFAULT_CHEMICAL_OPTIONS[0].value,
+        quantity: "1",
         unit: "Drums (200L)",
         targetPrice: "",
       },
@@ -160,7 +289,7 @@ export default function QuoteRequestModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleResetAndClose()}>
-      <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto bg-white rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-2xl">
+      <DialogContent data-no-edit="true" className="max-w-2xl max-h-[92vh] overflow-y-auto bg-white rounded-2xl p-5 sm:p-7 border border-slate-200 shadow-2xl">
         {submittedQuoteNumber ? (
           <div className="text-center py-6 space-y-5">
             <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-sm">
@@ -262,13 +391,13 @@ export default function QuoteRequestModal({
                   </div>
                   <div>
                     <Label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
-                      <Phone className="w-3.5 h-3.5 text-slate-400" /> Phone / WhatsApp *
+                      <Phone className="w-3.5 h-3.5 text-slate-400" /> Phone / WhatsApp (Numbers &amp; Symbols Only) *
                     </Label>
                     <Input
                       type="tel"
                       required
                       value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
+                      onChange={handlePhoneChange}
                       placeholder="+234 800 000 0000"
                       className="rounded-xl border-slate-200 text-xs bg-white"
                     />
@@ -292,15 +421,12 @@ export default function QuoteRequestModal({
                     <Label className="text-xs font-semibold text-slate-700 mb-1 block">
                       Preferred Response Channel
                     </Label>
-                    <select
+                    <CustomSelect
                       value={preferredContactMethod}
-                      onChange={(e: any) => setPreferredContactMethod(e.target.value)}
-                      className="w-full h-9 rounded-xl border border-slate-200 px-3 text-xs bg-white text-slate-800 focus:outline-none"
-                    >
-                      <option value="whatsapp">WhatsApp Message</option>
-                      <option value="email">Official Email</option>
-                      <option value="phone">Direct Phone Call</option>
-                    </select>
+                      onChange={(val) => setPreferredContactMethod(val as any)}
+                      options={CONTACT_CHANNELS}
+                      size="md"
+                    />
                   </div>
                 </div>
               </div>
@@ -325,52 +451,65 @@ export default function QuoteRequestModal({
                 {items.map((item, idx) => (
                   <div
                     key={idx}
-                    className="grid grid-cols-12 gap-2 items-center bg-white p-2.5 rounded-lg border border-slate-200 shadow-sm"
+                    className="grid grid-cols-12 gap-2 items-center bg-white p-3 rounded-xl border border-slate-200 shadow-xs"
                   >
-                    <div className="col-span-5 sm:col-span-5">
-                      <Input
-                        required
-                        placeholder="e.g. Industrial Resin / Caustic Soda"
+                    {/* Custom Product Select Dropdown */}
+                    <div className="col-span-12 sm:col-span-5">
+                      <Label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block sm:hidden">
+                        Select Product / Chemical *
+                      </Label>
+                      <CustomSelect
                         value={item.productName}
-                        onChange={(e) => handleItemChange(idx, "productName", e.target.value)}
-                        className="h-8 text-xs rounded-lg"
+                        onChange={(val) => handleItemChange(idx, "productName", val)}
+                        options={productOptions}
+                        searchable={true}
+                        searchPlaceholder="Search chemicals..."
+                        placeholder="Select Chemical Product"
+                        size="sm"
                       />
                     </div>
-                    <div className="col-span-3 sm:col-span-2">
+
+                    {/* Numeric Quantity Only */}
+                    <div className="col-span-5 sm:col-span-2">
+                      <Label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block sm:hidden">
+                        Qty (Numbers) *
+                      </Label>
                       <Input
-                        type="number"
-                        min="1"
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
                         required
                         placeholder="Qty"
                         value={item.quantity}
-                        onChange={(e) => handleItemChange(idx, "quantity", e.target.value)}
-                        className="h-8 text-xs rounded-lg"
+                        onChange={(e) => handleQuantityChange(idx, e.target.value)}
+                        className="h-8 text-xs rounded-lg border-slate-200 bg-white"
                       />
                     </div>
-                    <div className="col-span-3 sm:col-span-3">
-                      <select
+
+                    {/* Custom Packaging Unit Dropdown */}
+                    <div className="col-span-5 sm:col-span-4">
+                      <Label className="text-[10px] uppercase font-bold text-slate-500 mb-1 block sm:hidden">
+                        Packaging Unit
+                      </Label>
+                      <CustomSelect
                         value={item.unit}
-                        onChange={(e) => handleItemChange(idx, "unit", e.target.value)}
-                        className="w-full h-8 rounded-lg border border-slate-200 text-xs px-2 bg-white text-slate-700"
-                      >
-                        <option value="Drums (200L)">Drums (200L)</option>
-                        <option value="Kegs (25L)">Kegs (25L)</option>
-                        <option value="Containers (4L)">Containers (4L)</option>
-                        <option value="IBC Totes (1000L)">IBC Totes (1000L)</option>
-                        <option value="Bags (25kg / 50kg)">Bags (25/50kg)</option>
-                        <option value="Metric Tonnes (MT)">Metric Tonnes (MT)</option>
-                        <option value="Litres">Litres</option>
-                        <option value="Pieces / Units">Pieces / Units</option>
-                      </select>
+                        onChange={(val) => handleItemChange(idx, "unit", val)}
+                        options={PACKAGING_UNITS}
+                        placeholder="Packaging Unit"
+                        size="sm"
+                      />
                     </div>
-                    <div className="col-span-1 flex justify-end">
+
+                    {/* Remove Action */}
+                    <div className="col-span-2 sm:col-span-1 flex justify-end">
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
                         disabled={items.length <= 1}
                         onClick={() => handleRemoveItem(idx)}
-                        className="h-7 w-7 p-0 text-slate-400 hover:text-red-500 cursor-pointer disabled:opacity-30"
+                        className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 cursor-pointer disabled:opacity-30"
+                        title="Remove product"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </Button>
@@ -385,15 +524,12 @@ export default function QuoteRequestModal({
                   <Label className="text-xs font-semibold text-slate-700 mb-1 block">
                     Procurement Urgency
                   </Label>
-                  <select
+                  <CustomSelect
                     value={urgency}
-                    onChange={(e: any) => setUrgency(e.target.value)}
-                    className="w-full h-9 rounded-xl border border-slate-200 px-2.5 text-xs bg-white text-slate-800"
-                  >
-                    <option value="standard">Standard (3-7 days)</option>
-                    <option value="urgent">Urgent (48 hours)</option>
-                    <option value="immediate">Immediate Dispatch</option>
-                  </select>
+                    onChange={(val) => setUrgency(val as any)}
+                    options={URGENCY_OPTIONS}
+                    size="md"
+                  />
                 </div>
 
                 <div>
@@ -404,20 +540,32 @@ export default function QuoteRequestModal({
                     value={deliveryTimeline}
                     onChange={(e) => setDeliveryTimeline(e.target.value)}
                     placeholder="e.g. Within 10 days"
-                    className="h-9 text-xs bg-white rounded-xl"
+                    className="h-9 text-xs bg-white rounded-xl border-slate-200"
                   />
                 </div>
 
                 <div>
                   <Label className="text-xs font-semibold text-slate-700 mb-1 block">
-                    Target Budget (₦ Optional)
+                    Target Budget (₦) <span className="text-red-500 font-bold">* Mandatory</span>
                   </Label>
-                  <Input
-                    value={estimatedBudget}
-                    onChange={(e) => setEstimatedBudget(e.target.value)}
-                    placeholder="e.g. ₦1,500,000"
-                    className="h-9 text-xs bg-white rounded-xl"
-                  />
+                  <div className="relative flex items-center">
+                    <span className="absolute left-3 text-xs font-bold text-slate-400 pointer-events-none">₦</span>
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      required
+                      value={estimatedBudget}
+                      onChange={handleBudgetChange}
+                      placeholder="e.g. 1500000"
+                      className="h-9 text-xs pl-7 bg-white rounded-xl border-slate-200 font-medium"
+                    />
+                  </div>
+                  {estimatedBudget && (
+                    <span className="text-[11px] text-emerald-600 font-semibold block mt-0.5">
+                      ₦{Number(estimatedBudget).toLocaleString()}
+                    </span>
+                  )}
                 </div>
               </div>
 

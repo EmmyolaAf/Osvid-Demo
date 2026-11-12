@@ -125,14 +125,29 @@ function VisualEditorToolbarInner() {
 
   // Hover and selection interaction
   useEffect(() => {
-    if (!isEditMode || !isSelectMode) {
+    if (!isEditMode || !isSelectMode || isConfirmModalOpen) {
       setHoveredElement(null);
       return;
     }
 
+    const isExcluded = (target: HTMLElement | null) => {
+      if (!target) return true;
+      if (isConfirmModalOpen) return true;
+      if (
+        target.closest("#osvid-visual-builder-root") ||
+        target.closest("[role='dialog']") ||
+        target.closest("[role='alertdialog']") ||
+        target.closest("[data-no-edit]") ||
+        target.closest("[data-radix-portal]")
+      ) {
+        return true;
+      }
+      return false;
+    };
+
     const handleMouseOver = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (!target || target.closest("#osvid-visual-builder-root")) return;
+      if (isExcluded(target)) return;
 
       // Check if target is a relevant text/button/card element
       const isCandidate =
@@ -157,7 +172,7 @@ function VisualEditorToolbarInner() {
 
     const handleMouseOut = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (!target || target.closest("#osvid-visual-builder-root")) return;
+      if (isExcluded(target)) return;
       target.style.outline = "";
       target.style.outlineOffset = "";
       setHoveredElement(null);
@@ -165,7 +180,7 @@ function VisualEditorToolbarInner() {
 
     const handleClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (!target || target.closest("#osvid-visual-builder-root")) return;
+      if (isExcluded(target)) return;
 
       const isCandidate =
         target.hasAttribute("data-editable-id") ||
@@ -215,7 +230,7 @@ function VisualEditorToolbarInner() {
       document.removeEventListener("mouseout", handleMouseOut);
       document.removeEventListener("click", handleClick, true);
     };
-  }, [isEditMode, isSelectMode]);
+  }, [isEditMode, isSelectMode, isConfirmModalOpen]);
 
   // Realtime live DOM updates when inspector form changes
   const updateSelectedDOM = (updates: Partial<ElementStyleOverride>) => {
@@ -599,7 +614,7 @@ function VisualEditorToolbarInner() {
       {/* SAVE TO CODEBASE CONFIRMATION MODAL WITH 1-WEEK WARNING */}
       {/* ============================================================ */}
       <Dialog open={isConfirmModalOpen} onOpenChange={setIsConfirmModalOpen}>
-        <DialogContent className="max-w-lg rounded-3xl p-6 sm:p-8 bg-white border border-slate-200 text-slate-800">
+        <DialogContent data-no-edit="true" className="max-w-lg rounded-3xl p-6 sm:p-8 bg-white border border-slate-200 text-slate-800">
           <DialogHeader>
             <div className="w-12 h-12 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center mb-3">
               <Save size={24} />
