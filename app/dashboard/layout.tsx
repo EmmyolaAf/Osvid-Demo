@@ -442,38 +442,41 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </aside>
 
           {/* Main Content Area */}
-          <div className="flex-1 min-w-0 flex flex-col h-screen overflow-y-auto">
-            {/* Top Navigation Bar with Search, Breadcrumbs & User Actions */}
+          <div className="flex-1 min-w-0 flex flex-col h-screen overflow-hidden">
+            {/* Top Navigation Bar with Search, Breadcrumbs & User Actions (Sticky & Pinned at Top) */}
             <TopNavBar onToggleSidebar={() => setSidebarOpen(true)} />
 
-            <main className="p-3 sm:p-5 lg:p-8 max-w-7xl w-full mx-auto flex-1 space-y-5 sm:space-y-6">
-              {/* Warning banner broadcast if active */}
-              {subscription?.showWarning && subscription.warningNotice && !isSuperAdmin && (
-                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex items-center justify-between gap-4 shadow-xs">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0">
-                      <AlertTriangle size={18} />
+            {/* Scrollable Main Content Canvas */}
+            <div className="flex-1 overflow-y-auto">
+              <main className="p-3 sm:p-5 lg:p-8 max-w-7xl w-full mx-auto space-y-5 sm:space-y-6">
+                {/* Warning banner broadcast if active */}
+                {subscription?.showWarning && subscription.warningNotice && !isSuperAdmin && (
+                  <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 flex items-center justify-between gap-4 shadow-xs">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-lg bg-amber-500 text-white flex items-center justify-center shrink-0">
+                        <AlertTriangle size={18} />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-wider text-amber-800">
+                          Hosting &amp; Service Alert
+                        </p>
+                        <p className="text-xs font-normal mt-0.5">{subscription.warningNotice}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wider text-amber-800">
-                        Hosting &amp; Service Alert
-                      </p>
-                      <p className="text-xs font-normal mt-0.5">{subscription.warningNotice}</p>
-                    </div>
+                    <a
+                      href="mailto:billing@osvidchemicals.com?subject=Hosting%20Renewal%20Settlement"
+                      className="shrink-0"
+                    >
+                      <Button size="sm" className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-lg h-8 px-4">
+                        Contact Billing
+                      </Button>
+                    </a>
                   </div>
-                  <a
-                    href="mailto:billing@osvidchemicals.com?subject=Hosting%20Renewal%20Settlement"
-                    className="shrink-0"
-                  >
-                    <Button size="sm" className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl h-8 px-4">
-                      Contact Billing
-                    </Button>
-                  </a>
-                </div>
-              )}
+                )}
 
-              {children}
-            </main>
+                {children}
+              </main>
+            </div>
           </div>
           <Toaster richColors position="top-right" />
         </div>

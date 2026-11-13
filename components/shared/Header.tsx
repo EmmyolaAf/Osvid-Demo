@@ -116,159 +116,164 @@ export default function Header() {
 
   return (
     <>
-      {/* Top Bar */}
-      <div className="bg-osvid-lime text-gray-100 py-2 w-full">
-        <div className="w-full px-2 sm:px-4 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            {Object.entries(companyData.socialMedia).map(
-              ([platform, username]) => {
-                const socialLink = getSocialMediaLink(platform, username);
-                const IconComponent = SocialIconMap[platform.toLowerCase()];
+      {/* Complete Sticky Header (Top Bar + Main Navigation) */}
+      <header className="sticky top-0 left-0 w-full z-50 transition-all duration-300">
+        {/* Top Bar */}
+        <div className={`bg-osvid-lime text-gray-100 transition-all duration-200 ${isScrolled ? "py-1 text-[11px]" : "py-1.5 sm:py-2 text-xs"} w-full`}>
+          <div className="w-full px-2 sm:px-4 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              {Object.entries(companyData.socialMedia).map(
+                ([platform, username]) => {
+                  const socialLink = getSocialMediaLink(platform, username);
+                  const IconComponent = SocialIconMap[platform.toLowerCase()];
 
-                if (!socialLink || !IconComponent) return null;
+                  if (!socialLink || !IconComponent) return null;
 
-                return (
-                  <Link
-                    key={platform}
-                    href={socialLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={`${platform} page`}
-                    className="p-1.5 rounded-full hover:bg-orange-700/30 transition-colors"
-                  >
-                    <IconComponent size={16} className="text-orange-300" />
-                  </Link>
-                );
-              }
-            )}
-          </div>
-
-          <div className="hidden text-sm lg:flex items-center gap-6">
-            <div className="flex items-center gap-2">
-              <MapPin size={16} className="text-osvid-blue shrink-0" />
-              <span className="text-xs line-clamp-1 text-orange-50 hover:text-orange-200 transition-colors">
-                {companyData.address}
-              </span>
+                  return (
+                    <Link
+                      key={platform}
+                      href={socialLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`${platform} page`}
+                      className="p-1 rounded-full hover:bg-orange-700/30 transition-colors"
+                    >
+                      <IconComponent size={15} className="text-orange-300" />
+                    </Link>
+                  );
+                }
+              )}
             </div>
-            <div className="flex items-center gap-2">
-              <PhoneCall size={16} className="text-osvid-blue shrink-0" />
-              <Link
-                href={`tel:${companyData.phone}`}
-                className="text-xs text-orange-50 hover:text-orange-200 transition-colors"
-              >
-                {formatUniversalPhoneNumber(companyData.phone)}
-              </Link>
+
+            <div className="hidden text-sm lg:flex items-center gap-6">
+              <div className="flex items-center gap-2">
+                <MapPin size={15} className="text-osvid-blue shrink-0" />
+                <span className="text-xs line-clamp-1 text-orange-50 hover:text-orange-200 transition-colors">
+                  {companyData.address}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <PhoneCall size={15} className="text-osvid-blue shrink-0" />
+                <Link
+                  href={`tel:${companyData.phone}`}
+                  className="text-xs text-orange-50 hover:text-orange-200 transition-colors"
+                >
+                  {formatUniversalPhoneNumber(companyData.phone)}
+                </Link>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Main Header */}
-      <header
-        className={`sticky top-0 left-0 w-full z-40 transition-all duration-300 ${
-          isScrolled ? "bg-white/95 backdrop-blur-md shadow-sm" : "bg-white"
-        }`}
-      >
-        <div className="w-full px-2 sm:px-4 flex items-center justify-between py-2 sm:py-2.5">
-          {/* Logo */}
-          <Link href="/" className="flex items-center shrink-0">
-            <Image
-              src="/images/logo.webp"
-              alt="Osvid Logo"
-              width={140}
-              height={46}
-              className="h-9 sm:h-11 md:h-14 w-auto object-contain"
-              priority
-            />
-          </Link>
-
-          {/* Desktop Nav */}
-          <nav className="hidden lg:flex items-center gap-1">
-            {menu.map((item) => {
-              const isActive =
-                pathname === "/"
-                  ? item.link === "/"
-                  : pathname.startsWith(item.link) && item.link !== "/";
-
-              return (
-                <Link
-                  key={item.name}
-                  href={item.link}
-                  target={item?.target}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    isActive
-                      ? "text-orange-600 bg-orange-50"
-                      : "text-gray-700 hover:text-orange-600 hover:bg-orange-50/50"
-                  }`}
-                >
-                  {item.name}
-                </Link>
-              );
-            })}
-          </nav>
-
-          {/* Right Side Actions */}
-          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-            {/* Button 1: Dashboard (if Admin/Manager) or Account (if Customer/Guest) */}
-            {isManagerOrAdmin ? (
-              <Link href={dashboardHref} className="hidden sm:inline-block">
-                <Button
-                  size="sm"
-                  className="h-9 px-3.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-1.5 shadow-sm transition-colors"
-                >
-                  <LayoutDashboard size={14} />
-                  <span>Dashboard</span>
-                </Button>
-              </Link>
-            ) : (
-              <Link href={user ? "/account" : "/login"} className="hidden sm:inline-block">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-9 px-3.5 rounded-lg text-xs font-semibold border-slate-300 text-slate-800 hover:text-orange-600 hover:border-orange-500 bg-white flex items-center gap-1.5 shadow-sm transition-colors"
-                >
-                  <User size={14} />
-                  <span>Account</span>
-                </Button>
-              </Link>
-            )}
-
-            {/* Button 2: Get a Quote */}
-            <Button
-              type="button"
-              onClick={() => setIsQuoteModalOpen(true)}
-              size="sm"
-              className="h-9 px-4 rounded-lg text-xs sm:text-sm font-semibold bg-orange-600 hover:bg-orange-700 text-white shadow-sm cursor-pointer transition-colors"
-            >
-              Get a Quote
-            </Button>
-
-            {/* Account Icon */}
-            <Link
-              href={isManagerOrAdmin ? "/dashboard/profile" : (user ? "/account" : "/login")}
-              className="w-9 h-9 rounded-full bg-slate-100 hover:bg-orange-100 border border-slate-200 text-slate-700 hover:text-orange-600 flex items-center justify-center transition-colors shadow-sm"
-              title={isManagerOrAdmin ? "Admin Profile" : (user ? "My Account" : "Sign In")}
-              aria-label="Account profile"
-            >
-              {userProfile?.displayName ? (
-                <span className="text-xs font-bold text-slate-900">
-                  {userProfile.displayName.charAt(0).toUpperCase()}
-                </span>
-              ) : (
-                <User size={16} />
-              )}
+        {/* Main Navigation Bar */}
+        <div
+          className={`w-full transition-all duration-300 ${
+            isScrolled
+              ? "bg-white/95 backdrop-blur-md shadow-md border-b border-slate-200/90 py-1.5 sm:py-2"
+              : "bg-white border-b border-slate-100 py-2 sm:py-2.5"
+          }`}
+        >
+          <div className="w-full px-2 sm:px-4 flex items-center justify-between">
+            {/* Logo */}
+            <Link href="/" className="flex items-center shrink-0">
+              <Image
+                src="/images/logo.webp"
+                alt="Osvid Logo"
+                width={140}
+                height={46}
+                className={`${isScrolled ? "h-8 sm:h-10 md:h-12" : "h-9 sm:h-11 md:h-14"} w-auto object-contain transition-all duration-300`}
+                priority
+              />
             </Link>
 
-            {/* Mobile Menu Hamburger Trigger */}
-            <button
-              onClick={toggleMenu}
-              type="button"
-              className="lg:hidden p-2 rounded-lg bg-slate-50 hover:bg-orange-50 text-slate-700 hover:text-orange-600 transition-colors border border-slate-200 active:scale-95"
-              aria-label="Toggle navigation menu"
-              aria-expanded={isMenuOpen}
-            >
-              <Menu size={20} />
-            </button>
+            {/* Desktop Nav */}
+            <nav className="hidden lg:flex items-center gap-1">
+              {menu.map((item) => {
+                const isActive =
+                  pathname === "/"
+                    ? item.link === "/"
+                    : pathname.startsWith(item.link) && item.link !== "/";
+
+                return (
+                  <Link
+                    key={item.name}
+                    href={item.link}
+                    target={item?.target}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      isActive
+                        ? "text-orange-600 bg-orange-50"
+                        : "text-gray-700 hover:text-orange-600 hover:bg-orange-50/50"
+                    }`}
+                  >
+                    {item.name}
+                  </Link>
+                );
+              })}
+            </nav>
+
+            {/* Right Side Actions */}
+            <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+              {/* Button 1: Dashboard (if Admin/Manager) or Account (if Customer/Guest) */}
+              {isManagerOrAdmin ? (
+                <Link href={dashboardHref} className="hidden sm:inline-block">
+                  <Button
+                    size="sm"
+                    className="h-9 px-3.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-1.5 shadow-sm transition-colors"
+                  >
+                    <LayoutDashboard size={14} />
+                    <span>Dashboard</span>
+                  </Button>
+                </Link>
+              ) : (
+                <Link href={user ? "/account" : "/login"} className="hidden sm:inline-block">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 px-3.5 rounded-lg text-xs font-semibold border-slate-300 text-slate-800 hover:text-orange-600 hover:border-orange-500 bg-white flex items-center gap-1.5 shadow-sm transition-colors"
+                  >
+                    <User size={14} />
+                    <span>Account</span>
+                  </Button>
+                </Link>
+              )}
+
+              {/* Button 2: Get a Quote */}
+              <Button
+                type="button"
+                onClick={() => setIsQuoteModalOpen(true)}
+                size="sm"
+                className="h-9 px-4 rounded-lg text-xs sm:text-sm font-semibold bg-orange-600 hover:bg-orange-700 text-white shadow-sm cursor-pointer transition-colors"
+              >
+                Get a Quote
+              </Button>
+
+              {/* Account Icon */}
+              <Link
+                href={isManagerOrAdmin ? "/dashboard/profile" : (user ? "/account" : "/login")}
+                className="w-9 h-9 rounded-full bg-slate-100 hover:bg-orange-100 border border-slate-200 text-slate-700 hover:text-orange-600 flex items-center justify-center transition-colors shadow-sm"
+                title={isManagerOrAdmin ? "Admin Profile" : (user ? "My Account" : "Sign In")}
+                aria-label="Account profile"
+              >
+                {userProfile?.displayName ? (
+                  <span className="text-xs font-bold text-slate-900">
+                    {userProfile.displayName.charAt(0).toUpperCase()}
+                  </span>
+                ) : (
+                  <User size={16} />
+                )}
+              </Link>
+
+              {/* Mobile Menu Hamburger Trigger */}
+              <button
+                onClick={toggleMenu}
+                type="button"
+                className="lg:hidden p-2 rounded-lg bg-slate-50 hover:bg-orange-50 text-slate-700 hover:text-orange-600 transition-colors border border-slate-200 active:scale-95"
+                aria-label="Toggle navigation menu"
+                aria-expanded={isMenuOpen}
+              >
+                <Menu size={20} />
+              </button>
+            </div>
           </div>
         </div>
       </header>

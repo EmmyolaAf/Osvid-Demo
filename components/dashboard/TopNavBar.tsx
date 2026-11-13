@@ -69,7 +69,7 @@ export default function TopNavBar({
   const totalNotifications = pendingOrdersCount + pendingReviewsCount;
 
   return (
-    <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-3 sm:px-6 py-2.5 sm:py-3 transition-all">
+    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-3 sm:px-6 py-2.5 sm:py-3 transition-all shrink-0 shadow-xs">
       <div className="flex items-center justify-between gap-2 sm:gap-4">
         {/* Left: Hamburger, Brand on Mobile & Breadcrumbs on Desktop */}
         <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">

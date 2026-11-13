@@ -823,9 +823,9 @@ export default function SuperAdminDashboard() {
         {/* ============================================================ */}
         {/* MAIN DASHBOARD CANVAS */}
         {/* ============================================================ */}
-        <main className="flex-1 min-w-0 flex flex-col overflow-y-auto bg-slate-50">
-          {/* Top Header Bar */}
-          <header className="bg-white border-b border-slate-200 px-6 sm:px-8 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 sticky top-0 z-40">
+        <div className="flex-1 min-w-0 flex flex-col h-screen overflow-hidden bg-slate-50">
+          {/* Top Header Bar (Sticky & Pinned at Top) */}
+          <header className="bg-white/95 backdrop-blur-md border-b border-slate-200 px-6 sm:px-8 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0 z-40 shadow-xs">
             <div>
               <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
                 <span>Landlord Control</span>
@@ -886,6 +886,7 @@ export default function SuperAdminDashboard() {
             </div>
           </header>
 
+          <main className="flex-1 overflow-y-auto">
           {/* Main Content Area */}
           <div className="p-6 sm:p-8 space-y-6 max-w-7xl w-full mx-auto">
             {/* ============================================================ */}
@@ -1752,7 +1753,8 @@ export default function SuperAdminDashboard() {
               </div>
             )}
           </div>
-        </main>
+          </main>
+        </div>
 
         {/* ============================================================ */}
         {/* MODAL: PROVISION NEW TENANT ADMIN */}
