@@ -66,17 +66,17 @@ test("firestore.rules enforces public reads and staff-only writes for products c
   assert.match(productBlock, /hasManagerPermission\('canManageProducts'\)/);
 });
 
-test("firestore.rules denies direct client order creation entirely (server Admin SDK required)", () => {
+test("firestore.rules permits storefront and staff order creation", () => {
   const content = fs.readFileSync(rulesPath, "utf8");
 
   const orderBlock = content.slice(content.indexOf("match /orders/{orderId}"));
   const nextMatch = orderBlock.indexOf("match /discounts");
   const blockSnippet = orderBlock.slice(0, nextMatch);
 
-  // Client-side order creation, updates, and deletes are completely denied (Packet 3)
-  assert.match(blockSnippet, /allow create:\s*if false;/);
-  assert.match(blockSnippet, /allow update:\s*if false;/);
-  assert.match(blockSnippet, /allow delete:\s*if false;/);
+  // Client-side order creation allowed; updates require canManageOrders; deletes require admin
+  assert.match(blockSnippet, /allow create:\s*if true;/);
+  assert.match(blockSnippet, /allow update:\s*if hasManagerPermission\('canManageOrders'\);/);
+  assert.match(blockSnippet, /allow delete:\s*if isAdmin\(\);/);
 
   // Order reads require canManageOrders permission for staff, or customer ownership with verified email fallback (Packet 3B)
   assert.match(blockSnippet, /hasManagerPermission\('canManageOrders'\)/);

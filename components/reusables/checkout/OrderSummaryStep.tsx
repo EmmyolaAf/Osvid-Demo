@@ -19,6 +19,8 @@ import {
 import { toast } from "sonner";
 import { initPaystack, resumePayment } from "@/lib/payment";
 import { submitPublicQuoteRequest } from "@/lib/firebase/crm";
+import { createOrderInDb } from "@/lib/firebase/firestore";
+import { Order } from "@/types/auth";
 import { OrderItemsList } from "./OrderItemsList";
 import formatCurrency from "@/helpers/formatCurrency";
 
@@ -468,8 +470,57 @@ export function OrderSummaryStep() {
         });
       }
 
-      // Register commercial order reservation
-      const fallbackOrderId = `OSV-ORD-${Date.now().toString().slice(-6)}`;
+      // 1. Create authoritative order directly in Firestore orders collection
+      const orderNumber = `OSV-ORD-${Date.now().toString().slice(-6)}`;
+      let registeredOrderId = orderNumber;
+
+      try {
+        const orderPayload: Omit<Order, "id" | "createdAt" | "updatedAt"> = {
+          orderNumber,
+          userId: user?.uid,
+          customerName: checkoutData.contactInfo.name,
+          customerEmail: checkoutData.contactInfo.email,
+          customerPhone: checkoutData.contactInfo.phone,
+          deliveryMethod: checkoutData.deliveryMethod === "shipping" ? "delivery" : "pickup",
+          shippingAddress: checkoutData.shippingAddress
+            ? {
+                fullName: checkoutData.contactInfo.name,
+                email: checkoutData.contactInfo.email,
+                phone: checkoutData.contactInfo.phone,
+                streetAddress: checkoutData.shippingAddress.streetAddress || "",
+                city: checkoutData.shippingAddress.city || "",
+                state: checkoutData.shippingAddress.state || "",
+                country: "Nigeria",
+              }
+            : undefined,
+          items: cart.map((it) => ({
+            id: it.cartItemId || it.id,
+            productId: it.id,
+            productName: it.name,
+            price: it.priceData.discountedPrice || it.priceData.price,
+            quantity: it.quantity,
+            imageUrl: it.imageUrl,
+            unit: (it as any).packaging || (it as any).unit || "Unit",
+            variationId: it.variationId,
+          })),
+          subtotal: quoteTotals.subtotal,
+          shippingFee: quoteTotals.shippingFee || 0,
+          discountAmount: quoteTotals.discountAmount || 0,
+          couponCode: appliedDiscount?.code,
+          totalAmount: quoteTotals.total,
+          paymentStatus: "pending",
+          paymentMethod: isRealPaystackKey ? "Paystack" : "Bank Transfer / Store Invoice",
+          orderStatus: "processing",
+          notes: `Placed via Storefront Checkout. Delivery Method: ${checkoutData.deliveryMethod}`,
+        };
+
+        const newId = await createOrderInDb(orderPayload);
+        if (newId) registeredOrderId = newId;
+      } catch (orderErr) {
+        console.error("Order creation in Firestore orders error:", orderErr);
+      }
+
+      // 2. Also register commercial inquiry so it appears in CRM quote requests
       try {
         await submitPublicQuoteRequest({
           customerName: checkoutData.contactInfo.name,
@@ -489,20 +540,20 @@ export function OrderSummaryStep() {
           })),
           subtotal: quoteTotals.subtotal,
           grandTotal: quoteTotals.total,
-          additionalNotes: `Direct Order Placement #${fallbackOrderId} via Storefront Checkout. Delivery Method: ${checkoutData.deliveryMethod}`,
+          additionalNotes: `Direct Order Placement #${orderNumber} via Storefront Checkout. Delivery Method: ${checkoutData.deliveryMethod}`,
         });
       } catch (crmErr) {
         console.warn("Could not log order submission to quote requests:", crmErr);
       }
 
-      updateCheckoutData({ orderId: fallbackOrderId });
+      updateCheckoutData({ orderId: registeredOrderId });
       setPaymentStatus("success");
       clearCart();
       goToNextStep();
 
-      toast.success("Order registered successfully!", {
+      toast.success("Order placed successfully!", {
         id: toastId,
-        description: `Order #${fallbackOrderId} has been placed.`,
+        description: `Order #${orderNumber} has been received and added to Orders & Shipment.`,
       });
     } catch (error: any) {
       console.error("Payment error:", error);

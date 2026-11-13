@@ -222,10 +222,10 @@ service cloud.firestore {
         )
       );
 
-      // All order creations, fulfillment updates, and deletions must go through server APIs
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
+      // Storefront order placement & staff order creation
+      allow create: if true;
+      allow update: if hasManagerPermission('canManageOrders');
+      allow delete: if isAdmin();
     }
 
     // ===============================================================

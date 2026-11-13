@@ -269,21 +269,103 @@ export async function createOrderInDb(orderData: Omit<Order, "id" | "createdAt" 
 
 export async function getOrdersFromDb(statusFilter?: OrderStatus): Promise<Order[]> {
   try {
-    let q = query(collection(db, "orders"), orderBy("createdAt", "desc"));
-    if (statusFilter) {
-      q = query(
-        collection(db, "orders"),
-        where("orderStatus", "==", statusFilter),
-        orderBy("createdAt", "desc")
-      );
+    const ordersMap = new Map<string, Order>();
+
+    // 1. Fetch from 'orders' collection
+    try {
+      let q = query(collection(db, "orders"), orderBy("createdAt", "desc"));
+      if (statusFilter) {
+        q = query(
+          collection(db, "orders"),
+          where("orderStatus", "==", statusFilter),
+          orderBy("createdAt", "desc")
+        );
+      }
+      const snap = await Promise.race([
+        getDocs(q),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Orders query timed out")), 8000)
+        ),
+      ]);
+      snap.docs.forEach((d) => {
+        ordersMap.set(d.id, { id: d.id, ...d.data() } as Order);
+      });
+    } catch (orderErr) {
+      console.warn("Ordered query fallback to unindexed getDocs for orders:", orderErr);
+      try {
+        const fallbackSnap = await getDocs(collection(db, "orders"));
+        fallbackSnap.docs.forEach((d) => {
+          ordersMap.set(d.id, { id: d.id, ...d.data() } as Order);
+        });
+      } catch (fbErr) {
+        console.warn("Fallback orders query failed:", fbErr);
+      }
     }
-    const snap = await Promise.race([
-      getDocs(q),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Orders query timed out")), 10000)
-      ),
-    ]);
-    return snap.docs.map((d) => d.data() as Order);
+
+    // 2. Also retrieve any orders registered as storefront quote submissions
+    try {
+      const rfqSnap = await getDocs(collection(db, "quote_requests"));
+      rfqSnap.docs.forEach((d) => {
+        const data = d.data();
+        const notesStr = String(data.additionalNotes || data.notes || "");
+        const quoteNum = String(data.quoteNumber || "");
+        const isStoreOrder =
+          notesStr.includes("Direct Order Placement") ||
+          notesStr.includes("Storefront Checkout") ||
+          quoteNum.startsWith("ORD-") ||
+          quoteNum.startsWith("OSV-ORD-");
+
+        if (isStoreOrder && !ordersMap.has(d.id)) {
+          const pseudoOrder: Order = {
+            id: d.id,
+            orderNumber: quoteNum || `OSV-ORD-${d.id.slice(-6)}`,
+            customerName: data.customerName || "Customer",
+            customerEmail: data.email || data.customerEmail || "",
+            customerPhone: data.phone || data.customerPhone || "",
+            deliveryMethod: "delivery",
+            shippingAddress: {
+              fullName: data.customerName || "Customer",
+              streetAddress: data.deliveryLocation || data.deliveryAddress || "",
+              city: "",
+              state: data.state || "Lagos",
+            },
+            items: (data.items || []).map((it: any, idx: number) => ({
+              id: `item_${idx}`,
+              productId: it.productId || `prod_${idx}`,
+              productName: it.productName || "Product",
+              price: it.quotedUnitPrice || it.price || 0,
+              quantity: it.quantity || 1,
+              unit: it.unit || "Unit",
+            })),
+            subtotal: data.subtotal || data.estimatedTotal || data.grandTotal || 0,
+            shippingFee: data.freightFee || 0,
+            discountAmount: 0,
+            totalAmount: data.grandTotal || data.estimatedTotal || data.subtotal || 0,
+            paymentStatus: "pending",
+            paymentMethod: "Storefront Checkout",
+            orderStatus: "processing",
+            notes: notesStr || "Storefront Order",
+            createdAt: data.createdAt || new Date().toISOString(),
+            updatedAt: data.updatedAt || data.createdAt || new Date().toISOString(),
+          };
+          ordersMap.set(d.id, pseudoOrder);
+        }
+      });
+    } catch (rfqErr) {
+      console.warn("Could not query quote_requests for fallback orders:", rfqErr);
+    }
+
+    const list = Array.from(ordersMap.values());
+    list.sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
+
+    if (statusFilter) {
+      return list.filter((o) => o.orderStatus === statusFilter);
+    }
+    return list;
   } catch (error) {
     console.error("Error fetching orders:", error);
     return [];
