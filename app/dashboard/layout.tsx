@@ -36,6 +36,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import TopNavBar from "@/components/dashboard/TopNavBar";
+import { CartDrawer } from "@/components/reusables/cart";
 
 interface NavItem {
   title: string;
@@ -479,6 +480,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           </div>
           <Toaster richColors position="top-right" />
+          <CartDrawer />
         </div>
       )}
     </ProtectedRoute>

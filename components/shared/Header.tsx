@@ -305,14 +305,17 @@ export default function Header() {
                     className="h-9 w-auto object-contain"
                   />
                 </Link>
-                <button
-                  onClick={closeMenu}
-                  type="button"
-                  className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors active:scale-95"
-                  aria-label="Close menu"
-                >
-                  <X size={20} />
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <CartTrigger />
+                  <button
+                    onClick={closeMenu}
+                    type="button"
+                    className="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors active:scale-95 cursor-pointer"
+                    aria-label="Close menu"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
               </div>
 
               {/* Drawer Scrollable Content Area */}

@@ -6,6 +6,8 @@ import companyData from "@/data/company";
 import "keen-slider/keen-slider.min.css";
 import InstantPreloader from "@/components/reusables/InstantPreloader";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { CartProvider } from "@/providers/CartProvider";
+import { CheckoutProvider } from "@/providers/CheckoutProvider";
 
 export const metadata: Metadata = {
   metadataBase: new URL(
@@ -39,8 +41,12 @@ export default async function RootLayout({
     >
       <body className={`${clashDisplay.variable} antialiased bg-white`}>
         <AuthProvider>
-          <InstantPreloader />
-          {children}
+          <CartProvider>
+            <CheckoutProvider>
+              <InstantPreloader />
+              {children}
+            </CheckoutProvider>
+          </CartProvider>
         </AuthProvider>
       </body>
     </html>

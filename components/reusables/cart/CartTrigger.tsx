@@ -4,7 +4,6 @@
 import { Button } from "@/components/ui/button";
 import { ShoppingCart } from "lucide-react";
 import { useCart } from "@/providers/CartProvider";
-import Badge from "@/components/ui/badge";
 
 export function CartTrigger() {
   const { totalItems, openCart } = useCart();
@@ -13,13 +12,14 @@ export function CartTrigger() {
     <Button
       variant="ghost"
       size="icon"
-      className="relative w-9 h-9 rounded-lg text-slate-700 hover:text-orange-600 hover:bg-orange-50 transition-colors cursor-pointer"
+      className="relative w-9 h-9 rounded-lg text-slate-700 hover:text-orange-600 hover:bg-orange-50 transition-colors flex items-center justify-center shrink-0 cursor-pointer"
       onClick={openCart}
       aria-label="Open cart"
+      title="Shopping Cart"
     >
-      <ShoppingCart className="h-4.5 w-4.5" />
+      <ShoppingCart size={20} className="shrink-0 text-slate-700 hover:text-orange-600 transition-colors" />
       {totalItems > 0 && (
-        <span className="absolute -right-1 -top-1 h-4 min-w-4 px-1 rounded-full bg-orange-600 text-white text-[10px] font-bold flex items-center justify-center shadow-xs">
+        <span className="absolute -top-1 -right-1 h-4 min-w-[16px] px-1 rounded-full bg-orange-600 text-white text-[10px] font-extrabold flex items-center justify-center ring-2 ring-white shadow-xs">
           {totalItems}
         </span>
       )}

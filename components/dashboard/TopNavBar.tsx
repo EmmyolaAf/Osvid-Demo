@@ -23,6 +23,7 @@ import {
   Menu,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CartTrigger } from "@/components/reusables/cart";
 
 interface TopNavBarProps {
   onToggleSidebar?: () => void;
@@ -193,6 +194,9 @@ export default function TopNavBar({
               <span className="hidden sm:inline">Live Store</span>
             </Button>
           </Link>
+
+          {/* Shopping Cart Trigger */}
+          <CartTrigger />
 
           {/* Notifications Indicator */}
           <Link href="/dashboard/orders">
