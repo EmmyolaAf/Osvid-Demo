@@ -13,15 +13,15 @@ export function CartTrigger() {
     <Button
       variant="ghost"
       size="icon"
-      className="relative"
+      className="relative w-9 h-9 rounded-lg text-slate-700 hover:text-orange-600 hover:bg-orange-50 transition-colors cursor-pointer"
       onClick={openCart}
       aria-label="Open cart"
     >
-      <ShoppingCart className="h-5 w-5" />
+      <ShoppingCart className="h-4.5 w-4.5" />
       {totalItems > 0 && (
-        <Badge className="absolute -right-1 -top-1 h-5 w-5 rounded-full p-0 flex items-center justify-center">
+        <span className="absolute -right-1 -top-1 h-4 min-w-4 px-1 rounded-full bg-orange-600 text-white text-[10px] font-bold flex items-center justify-center shadow-xs">
           {totalItems}
-        </Badge>
+        </span>
       )}
     </Button>
   );

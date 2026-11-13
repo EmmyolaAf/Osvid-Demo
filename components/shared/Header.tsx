@@ -247,21 +247,8 @@ export default function Header() {
                 Get a Quote
               </Button>
 
-              {/* Account Icon */}
-              <Link
-                href={isManagerOrAdmin ? "/dashboard/profile" : (user ? "/account" : "/login")}
-                className="w-9 h-9 rounded-full bg-slate-100 hover:bg-orange-100 border border-slate-200 text-slate-700 hover:text-orange-600 flex items-center justify-center transition-colors shadow-sm"
-                title={isManagerOrAdmin ? "Admin Profile" : (user ? "My Account" : "Sign In")}
-                aria-label="Account profile"
-              >
-                {userProfile?.displayName ? (
-                  <span className="text-xs font-bold text-slate-900">
-                    {userProfile.displayName.charAt(0).toUpperCase()}
-                  </span>
-                ) : (
-                  <User size={16} />
-                )}
-              </Link>
+              {/* Shopping Cart Trigger */}
+              <CartTrigger />
 
               {/* Mobile Menu Hamburger Trigger */}
               <button

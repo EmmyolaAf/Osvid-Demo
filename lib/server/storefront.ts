@@ -42,6 +42,15 @@ export type StorefrontResult<T> =
   | { success: true; data: T; error?: never }
   | { success: false; error: string; data?: never };
 
+function withTimeout<T>(promise: Promise<T>, ms = 4000): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Server fetch timeout")), ms)
+    ),
+  ]);
+}
+
 /**
  * Fetch all active products, optionally filtered by category
  */
@@ -599,10 +608,12 @@ export async function getServerBlogPostBySlug(
  */
 export async function getServerTestimonials(): Promise<StorefrontResult<Testimonial[]>> {
   try {
-    const snapshot = await adminDb
-      .collection("testimonials")
-      .orderBy("rating", "desc")
-      .get();
+    const snapshot = await withTimeout(
+      adminDb
+        .collection("testimonials")
+        .orderBy("rating", "desc")
+        .get()
+    );
 
     const testimonials: Testimonial[] = snapshot.docs
       .filter((d: QueryDocumentSnapshot<DocumentData>) => {
@@ -635,11 +646,13 @@ export async function getServerTestimonials(): Promise<StorefrontResult<Testimon
  */
 export async function getServerTeamMembers(): Promise<StorefrontResult<TeamMember[]>> {
   try {
-    const snapshot = await adminDb
-      .collection("teams")
-      .orderBy("createdAt", "asc")
-      .limit(12)
-      .get();
+    const snapshot = await withTimeout(
+      adminDb
+        .collection("teams")
+        .orderBy("createdAt", "asc")
+        .limit(12)
+        .get()
+    );
 
     if (!snapshot.empty) {
       const members: TeamMember[] = snapshot.docs
