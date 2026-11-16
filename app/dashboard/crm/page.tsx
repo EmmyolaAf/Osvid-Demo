@@ -62,7 +62,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { toast } from "sonner";
 
 export default function AdminCrmPage() {
-  const { user } = useAuth();
+  const { user, userProfile, role, isAdmin, isSuperAdmin } = useAuth();
+  const isPrivilegedAdmin =
+    Boolean(isSuperAdmin) ||
+    Boolean(isAdmin) ||
+    role === "super_admin" ||
+    role === "admin" ||
+    userProfile?.role === "super_admin" ||
+    userProfile?.role === "admin";
   const [activeTab, setActiveTab] = useState<"quotes" | "contacts" | "newsletter" | "emails">("quotes");
 
   // State: Quotes
@@ -242,6 +249,10 @@ export default function AdminCrmPage() {
 
   // Handle Delete Quote Request
   const handleDeleteQuote = async (quoteId: string) => {
+    if (!isPrivilegedAdmin) {
+      toast.error("Deletion forbidden: Only administrators can delete quote requests.");
+      return;
+    }
     if (!confirm("Are you sure you want to delete this quotation request?")) return;
     try {
       const res = await deleteQuoteRequestInDb(quoteId);
@@ -457,6 +468,10 @@ export default function AdminCrmPage() {
   };
 
   const handleDeleteContact = async (contactId: string) => {
+    if (!isPrivilegedAdmin) {
+      toast.error("Deletion forbidden: Only administrators can delete contact submissions.");
+      return;
+    }
     if (!confirm("Are you sure you want to delete this contact submission?")) return;
     try {
       const res = await deleteContactSubmissionInDb(contactId);
@@ -531,6 +546,10 @@ export default function AdminCrmPage() {
 
   // Delete Subscriber
   const handleDeleteSubscriber = async (subscriberId: string) => {
+    if (!isPrivilegedAdmin) {
+      toast.error("Deletion forbidden: Only administrators can delete subscribers.");
+      return;
+    }
     if (!confirm("Are you sure you want to remove this subscriber?")) return;
     try {
       const res = await deleteSubscriberFromDb(subscriberId);

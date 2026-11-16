@@ -71,10 +71,17 @@ import { toast } from "sonner";
 import Image from "next/image";
 
 export default function ProductsManagementPage() {
-  const { isAdmin, isSuperAdmin, userProfile } = useAuth();
+  const { isAdmin, isSuperAdmin, userProfile, role } = useAuth();
+  const isPrivilegedAdmin =
+    Boolean(isSuperAdmin) ||
+    Boolean(isAdmin) ||
+    role === "super_admin" ||
+    role === "admin" ||
+    userProfile?.role === "super_admin" ||
+    userProfile?.role === "admin";
   const perms = userProfile?.permissions ? normalizeManagerPermissions(userProfile.permissions) : undefined;
-  const canManageProducts = isSuperAdmin || isAdmin || Boolean(perms?.canManageProducts);
-  const canManageInventory = isSuperAdmin || isAdmin || Boolean(perms?.canManageInventory);
+  const canManageProducts = isPrivilegedAdmin || Boolean(perms?.canManageProducts);
+  const canManageInventory = isPrivilegedAdmin || Boolean(perms?.canManageInventory);
 
   // Data State
   const [products, setProducts] = useState<Product[]>([]);
@@ -648,6 +655,10 @@ export default function ProductsManagementPage() {
   };
 
   const handleDeleteProduct = async (productId: string, name: string) => {
+    if (!isPrivilegedAdmin) {
+      toast.error("Deletion forbidden: Only administrators can delete products.");
+      return;
+    }
     if (!confirm(`Are you sure you want to delete "${name}" from Firestore? This action cannot be undone.`)) {
       return;
     }
@@ -746,6 +757,10 @@ export default function ProductsManagementPage() {
   };
 
   const handleDeleteCategory = async (catId: string, catName: string) => {
+    if (!isPrivilegedAdmin) {
+      toast.error("Deletion forbidden: Only administrators can delete categories.");
+      return;
+    }
     if (!confirm(`Delete category "${catName}"? This will not delete associated products.`)) {
       return;
     }
@@ -1161,15 +1176,17 @@ export default function ProductsManagementPage() {
                                   >
                                     <Edit size={14} />
                                   </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleDeleteProduct(p.id, p.name)}
-                                    className="text-xs h-8 w-8 p-0 text-red-600 hover:bg-red-50 rounded-lg"
-                                    title="Delete Product"
-                                  >
-                                    <Trash2 size={14} />
-                                  </Button>
+                                  {isPrivilegedAdmin && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleDeleteProduct(p.id, p.name)}
+                                      className="text-xs h-8 w-8 p-0 text-red-600 hover:bg-red-50 rounded-lg"
+                                      title="Delete Product (Admin Only)"
+                                    >
+                                      <Trash2 size={14} />
+                                    </Button>
+                                  )}
                                 </>
                               ) : (
                                 <span className="text-[10px] text-slate-400 font-medium italic">
@@ -1249,14 +1266,17 @@ export default function ProductsManagementPage() {
                       >
                         <Edit size={13} className="mr-1" /> Edit
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteCategory(c.id, c.name)}
-                        className="text-xs h-8 text-red-600 hover:bg-red-50 rounded-lg"
-                      >
-                        <Trash2 size={13} />
-                      </Button>
+                      {isPrivilegedAdmin && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeleteCategory(c.id, c.name)}
+                          className="text-xs h-8 text-red-600 hover:bg-red-50 rounded-lg"
+                          title="Delete Category (Admin Only)"
+                        >
+                          <Trash2 size={13} />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 );

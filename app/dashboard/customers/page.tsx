@@ -3,7 +3,11 @@
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
-import { getCustomersFromDb } from "@/lib/firebase/firestore";
+import {
+  getCustomersFromDb,
+  updateCustomerInDb,
+  deleteCustomerInDb,
+} from "@/lib/firebase/firestore";
 import { CustomerProfile } from "@/types/auth";
 import {
   Users,
@@ -20,15 +24,41 @@ import {
   TrendingUp,
   Download,
   Calendar,
+  Edit,
+  Trash2,
+  Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { toast } from "sonner";
 import formatCurrency from "@/helpers/formatCurrency";
 
 export default function CustomersPage() {
   const { userProfile, role } = useAuth();
+  const isAdmin =
+    role === "super_admin" ||
+    role === "admin" ||
+    userProfile?.role === "super_admin" ||
+    userProfile?.role === "admin";
+
   const [customers, setCustomers] = useState<CustomerProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+
+  // Edit Customer Modal State
+  const [editingCustomer, setEditingCustomer] = useState<CustomerProfile | null>(null);
+  const [editDisplayName, setEditDisplayName] = useState("");
+  const [editPhoneNumber, setEditPhoneNumber] = useState("");
+  const [editStatus, setEditStatus] = useState<"active" | "inactive">("active");
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -55,6 +85,79 @@ export default function CustomersPage() {
       c.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       c.phoneNumber?.includes(searchTerm)
   );
+
+  const handleOpenEdit = (c: CustomerProfile) => {
+    setEditingCustomer(c);
+    setEditDisplayName(c.displayName || "");
+    setEditPhoneNumber(c.phoneNumber || "");
+    setEditStatus(c.status === "inactive" ? "inactive" : "active");
+    setIsEditModalOpen(true);
+  };
+
+  const handleSaveCustomer = async () => {
+    if (!editingCustomer) return;
+    try {
+      setIsSaving(true);
+      const res = await updateCustomerInDb(editingCustomer.uid, {
+        displayName: editDisplayName.trim() || editingCustomer.displayName,
+        phoneNumber: editPhoneNumber.trim(),
+        isActive: editStatus === "active",
+      });
+
+      if (!res.success) {
+        toast.error(res.error || "Failed to update customer profile.");
+        return;
+      }
+
+      setCustomers((prev) =>
+        prev.map((c) =>
+          c.uid === editingCustomer.uid
+            ? {
+                ...c,
+                displayName: editDisplayName.trim() || c.displayName,
+                phoneNumber: editPhoneNumber.trim(),
+                status: editStatus,
+              }
+            : c
+        )
+      );
+
+      toast.success("Customer profile updated in database!");
+      setIsEditModalOpen(false);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to update customer.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteCustomer = async (uid: string, name: string) => {
+    if (!isAdmin) {
+      toast.error("Deletion forbidden: Only administrators can delete customers.");
+      return;
+    }
+
+    if (
+      !confirm(
+        `Are you sure you want to permanently delete customer "${name}" from database? This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const res = await deleteCustomerInDb(uid);
+      if (!res.success) {
+        toast.error(res.error || "Failed to delete customer.");
+        return;
+      }
+
+      setCustomers((prev) => prev.filter((c) => c.uid !== uid));
+      toast.success(`Customer "${name}" deleted from database.`);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to delete customer.");
+    }
+  };
 
   return (
     <ProtectedRoute allowedRoles={["super_admin", "admin", "manager"]}>
@@ -165,7 +268,8 @@ export default function CustomersPage() {
                     <th className="py-3.5 px-6">Contact Channels</th>
                     <th className="py-3.5 px-6">Orders Placed</th>
                     <th className="py-3.5 px-6">Total Spend (LTV)</th>
-                    <th className="py-3.5 px-6 text-right">Account Status</th>
+                    <th className="py-3.5 px-6">Account Status</th>
+                    <th className="py-3.5 px-6 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
@@ -209,7 +313,7 @@ export default function CustomersPage() {
                         {formatCurrency("NGN", c.totalSpent)}
                       </td>
 
-                      <td className="py-4 px-6 text-right">
+                      <td className="py-4 px-6">
                         <span
                           className={`text-[10px] font-extrabold px-2.5 py-1 rounded-full inline-flex items-center gap-1.5 ${
                             c.status === "active"
@@ -225,6 +329,31 @@ export default function CustomersPage() {
                           {c.status === "active" ? "Active Buyer" : "Inactive"}
                         </span>
                       </td>
+
+                      <td className="py-4 px-6 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleOpenEdit(c)}
+                            title="Edit Customer"
+                            className="h-8 w-8 text-slate-500 hover:text-slate-900 rounded-xl"
+                          >
+                            <Edit size={14} />
+                          </Button>
+                          {isAdmin && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDeleteCustomer(c.uid, c.displayName || c.email)}
+                              title="Delete Customer (Admin Only)"
+                              className="h-8 w-8 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-xl"
+                            >
+                              <Trash2 size={14} />
+                            </Button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -232,6 +361,82 @@ export default function CustomersPage() {
             </div>
           )}
         </div>
+
+        {/* Edit Customer Modal */}
+        <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+          <DialogContent className="sm:max-w-md bg-white rounded-3xl p-6 sm:p-8">
+            <DialogHeader className="text-left space-y-1 border-b border-slate-100 pb-4">
+              <DialogTitle className="text-lg font-black text-slate-900">
+                Edit Client Profile
+              </DialogTitle>
+              <DialogDescription className="text-xs text-slate-500">
+                Update customer contact parameters and active buyer status in database.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-3 text-xs">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">Display Name</label>
+                <Input
+                  value={editDisplayName}
+                  onChange={(e) => setEditDisplayName(e.target.value)}
+                  className="h-9 rounded-xl border-slate-300 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">Email Address</label>
+                <Input
+                  value={editingCustomer?.email || ""}
+                  disabled
+                  className="h-9 rounded-xl border-slate-200 bg-slate-50 text-xs text-slate-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">Phone Number</label>
+                <Input
+                  value={editPhoneNumber}
+                  onChange={(e) => setEditPhoneNumber(e.target.value)}
+                  placeholder="+234..."
+                  className="h-9 rounded-xl border-slate-300 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">Account Status</label>
+                <select
+                  value={editStatus}
+                  onChange={(e) => setEditStatus(e.target.value as "active" | "inactive")}
+                  className="w-full h-9 rounded-xl border border-slate-300 text-xs bg-white px-2.5 font-bold text-slate-800 outline-none"
+                >
+                  <option value="active">Active Buyer</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="rounded-xl text-xs font-bold"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleSaveCustomer}
+                  disabled={isSaving}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold gap-1.5"
+                >
+                  {isSaving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                  Save Changes to DB
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </ProtectedRoute>
   );

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { getOrdersFromDb, updateOrderStatusInDb } from "@/lib/firebase/firestore";
+import { getOrdersFromDb, updateOrderStatusInDb, updateOrderInDb, deleteOrderFromDb } from "@/lib/firebase/firestore";
 import { Order, OrderStatus } from "@/types/auth";
 import {
   ShoppingBag,
@@ -24,6 +24,8 @@ import {
   PauseCircle,
   RotateCcw,
   AlertTriangle,
+  Trash2,
+  Edit,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,7 +53,13 @@ const WOO_ORDER_STATUSES: OrderStatus[] = [
 ];
 
 export default function OrdersManagementPage() {
-  const { userProfile } = useAuth();
+  const { userProfile, role } = useAuth();
+  const isAdmin =
+    role === "super_admin" ||
+    role === "admin" ||
+    userProfile?.role === "super_admin" ||
+    userProfile?.role === "admin";
+
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -69,6 +77,19 @@ export default function OrdersManagementPage() {
   const [modalTrackingNumber, setModalTrackingNumber] = useState("");
   const [modalNote, setModalNote] = useState("");
   const [isSavingModal, setIsSavingModal] = useState(false);
+
+  // Edit Order State
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [editCustomerName, setEditCustomerName] = useState("");
+  const [editCustomerEmail, setEditCustomerEmail] = useState("");
+  const [editCustomerPhone, setEditCustomerPhone] = useState("");
+  const [editStreetAddress, setEditStreetAddress] = useState("");
+  const [editPaymentStatus, setEditPaymentStatus] = useState<string>("pending");
+  const [editOrderStatus, setEditOrderStatus] = useState<OrderStatus>("processing");
+  const [editTrackingNumber, setEditTrackingNumber] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const loadOrders = async () => {
     try {
@@ -163,6 +184,96 @@ export default function OrdersManagementPage() {
     setModalTrackingNumber(o.trackingNumber || "");
     setModalNote("");
     setIsDetailOpen(true);
+  };
+
+  const openEditModal = (o: Order) => {
+    setEditingOrder(o);
+    setEditCustomerName(o.customerName || "");
+    setEditCustomerEmail(o.customerEmail || "");
+    setEditCustomerPhone(o.customerPhone || "");
+    setEditStreetAddress(
+      o.shippingAddress?.streetAddress || o.shippingAddress?.address || ""
+    );
+    setEditPaymentStatus(o.paymentStatus || "pending");
+    setEditOrderStatus(o.orderStatus || "processing");
+    setEditTrackingNumber(o.trackingNumber || "");
+    setEditNotes(o.notes || "");
+    setIsEditModalOpen(true);
+  };
+
+  const handleSaveEditOrder = async () => {
+    if (!editingOrder) return;
+    try {
+      setIsSavingEdit(true);
+      const updates: Partial<Order> = {
+        customerName: editCustomerName.trim() || editingOrder.customerName,
+        customerEmail: editCustomerEmail.trim().toLowerCase() || editingOrder.customerEmail,
+        customerPhone: editCustomerPhone.trim(),
+        paymentStatus: editPaymentStatus as any,
+        orderStatus: editOrderStatus,
+        trackingNumber: editTrackingNumber.trim() || undefined,
+        notes: editNotes.trim() || undefined,
+        shippingAddress: {
+          fullName: editCustomerName.trim() || editingOrder.customerName,
+          streetAddress: editStreetAddress.trim(),
+          address: editStreetAddress.trim(),
+          city: editingOrder.shippingAddress?.city || "Lagos",
+          state: editingOrder.shippingAddress?.state || "Lagos",
+          phone: editCustomerPhone.trim() || editingOrder.customerPhone,
+          email: editCustomerEmail.trim() || editingOrder.customerEmail,
+        },
+      };
+
+      const res = await updateOrderInDb(editingOrder.id, updates);
+      if (!res.success) {
+        toast.error(res.error || "Failed to update order.");
+        return;
+      }
+
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === editingOrder.id ? ({ ...o, ...updates } as Order) : o
+        )
+      );
+      if (selectedOrder?.id === editingOrder.id) {
+        setSelectedOrder((prev) => (prev ? ({ ...prev, ...updates } as Order) : null));
+      }
+
+      toast.success("Order details saved directly to database!");
+      setIsEditModalOpen(false);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to save order updates.");
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleDeleteOrder = async (orderId: string, orderNumber: string) => {
+    if (!isAdmin) {
+      toast.error("Deletion forbidden: Only administrators can delete orders.");
+      return;
+    }
+
+    if (
+      !confirm(
+        `Are you sure you want to permanently delete order #${orderNumber} from database? This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const res = await deleteOrderFromDb(orderId);
+      if (!res.success) {
+        toast.error(res.error || "Failed to delete order.");
+        return;
+      }
+      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+      if (selectedOrder?.id === orderId) setIsDetailOpen(false);
+      toast.success(`Order #${orderNumber} deleted successfully from database.`);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to delete order.");
+    }
   };
 
   const filteredOrders = orders.filter((o) => {
@@ -435,6 +546,33 @@ export default function OrdersManagementPage() {
                         >
                           <Eye size={15} />
                         </Button>
+
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => openEditModal(o)}
+                          title="Edit Order"
+                          className="h-8 w-8 text-slate-500 hover:text-slate-900 rounded-xl"
+                        >
+                          <Edit size={14} />
+                        </Button>
+
+                        {isAdmin && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() =>
+                              handleDeleteOrder(
+                                o.id,
+                                o.orderNumber || o.id.substring(0, 8).toUpperCase()
+                              )
+                            }
+                            title="Delete Order (Admin Only)"
+                            className="h-8 w-8 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-xl"
+                          >
+                            <Trash2 size={14} />
+                          </Button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -619,9 +757,167 @@ export default function OrdersManagementPage() {
                   orderId={selectedOrder.id}
                   authorName={userProfile?.displayName || "Staff Administrator"}
                 />
+
+                {isAdmin && (
+                  <div className="pt-4 border-t border-slate-200 flex justify-between items-center">
+                    <p className="text-[11px] text-slate-400">Administrative Controls</p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setIsDetailOpen(false);
+                          openEditModal(selectedOrder);
+                        }}
+                        className="rounded-xl text-xs font-bold gap-1.5 h-8"
+                      >
+                        <Edit size={13} />
+                        Edit Order
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() =>
+                          handleDeleteOrder(
+                            selectedOrder.id,
+                            selectedOrder.orderNumber || selectedOrder.id.substring(0, 8).toUpperCase()
+                          )
+                        }
+                        className="rounded-xl text-xs font-bold gap-1.5 h-8 bg-red-600 hover:bg-red-700"
+                      >
+                        <Trash2 size={13} />
+                        Delete Order
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Order Modal */}
+      <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+        <DialogContent className="sm:max-w-lg bg-white rounded-3xl p-6 sm:p-8">
+          <DialogHeader className="text-left space-y-1 border-b border-slate-100 pb-4">
+            <DialogTitle className="text-lg font-black text-slate-900">
+              Edit Order #{editingOrder?.orderNumber || editingOrder?.id.substring(0, 8).toUpperCase()}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
+              Directly edit and save customer, delivery, and stage parameters to the database.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-3 text-xs">
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">Customer Name</label>
+              <Input
+                value={editCustomerName}
+                onChange={(e) => setEditCustomerName(e.target.value)}
+                className="h-9 rounded-xl border-slate-300 text-xs"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">Email</label>
+                <Input
+                  value={editCustomerEmail}
+                  onChange={(e) => setEditCustomerEmail(e.target.value)}
+                  className="h-9 rounded-xl border-slate-300 text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">Phone</label>
+                <Input
+                  value={editCustomerPhone}
+                  onChange={(e) => setEditCustomerPhone(e.target.value)}
+                  className="h-9 rounded-xl border-slate-300 text-xs"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">Street Address / Destination</label>
+              <Input
+                value={editStreetAddress}
+                onChange={(e) => setEditStreetAddress(e.target.value)}
+                className="h-9 rounded-xl border-slate-300 text-xs"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">Payment Status</label>
+                <select
+                  value={editPaymentStatus}
+                  onChange={(e) => setEditPaymentStatus(e.target.value)}
+                  className="w-full h-9 rounded-xl border border-slate-300 text-xs bg-white px-2.5 font-bold text-slate-800 outline-none"
+                >
+                  <option value="pending">Pending</option>
+                  <option value="paid">Paid</option>
+                  <option value="failed">Failed</option>
+                  <option value="refunded">Refunded</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">Order Fulfillment Status</label>
+                <select
+                  value={editOrderStatus}
+                  onChange={(e) => setEditOrderStatus(e.target.value as OrderStatus)}
+                  className="w-full h-9 rounded-xl border border-slate-300 text-xs bg-white px-2.5 font-bold text-slate-800 outline-none"
+                >
+                  {WOO_ORDER_STATUSES.map((st) => (
+                    <option key={st} value={st}>
+                      {st.charAt(0).toUpperCase() + st.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">Courier Tracking Number</label>
+              <Input
+                value={editTrackingNumber}
+                onChange={(e) => setEditTrackingNumber(e.target.value)}
+                placeholder="e.g. GIG-12345-NG"
+                className="h-9 rounded-xl border-slate-300 text-xs font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 mb-1">Order Notes / Internal Instructions</label>
+              <textarea
+                value={editNotes}
+                onChange={(e) => setEditNotes(e.target.value)}
+                rows={2}
+                className="w-full rounded-xl border border-slate-300 text-xs p-2.5 outline-none resize-none focus:border-orange-500"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsEditModalOpen(false)}
+                className="rounded-xl text-xs font-bold"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSaveEditOrder}
+                disabled={isSavingEdit}
+                className="bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold gap-1.5"
+              >
+                {isSavingEdit ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                Save Changes to DB
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

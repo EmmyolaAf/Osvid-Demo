@@ -45,6 +45,11 @@ import { toast } from "sonner";
 
 export default function DiscountsPage() {
   const { userProfile, role } = useAuth();
+  const isAdmin =
+    role === "super_admin" ||
+    role === "admin" ||
+    userProfile?.role === "super_admin" ||
+    userProfile?.role === "admin";
   const [activeTab, setActiveTab] = useState<"coupons" | "pricing_tiers">("coupons");
 
   // Coupons State
@@ -211,6 +216,10 @@ export default function DiscountsPage() {
   };
 
   const handleDelete = async (id: string, code: string) => {
+    if (!isAdmin) {
+      toast.error("Deletion forbidden: Only administrators can delete coupon codes.");
+      return;
+    }
     const existingCoupon = discounts.find((d) => d.id === id);
     if (existingCoupon && Number(existingCoupon.reservedUsageCount || 0) > 0) {
       toast.error(
@@ -324,6 +333,10 @@ export default function DiscountsPage() {
   };
 
   const handleDeleteTier = async (id: string, name: string) => {
+    if (!isAdmin) {
+      toast.error("Deletion forbidden: Only administrators can delete pricing tiers.");
+      return;
+    }
     if (!confirm(`Delete pricing tier "${name}"? Products using this tier will revert to standard retail pricing.`)) {
       return;
     }
@@ -511,14 +524,16 @@ export default function DiscountsPage() {
                         >
                           <Edit size={13} /> Edit
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDelete(disc.id, disc.code)}
-                          className="h-8 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 gap-1"
-                        >
-                          <Trash2 size={13} /> Delete
-                        </Button>
+                        {isAdmin && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(disc.id, disc.code)}
+                            className="h-8 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 gap-1"
+                          >
+                            <Trash2 size={13} /> Delete
+                          </Button>
+                        )}
                       </div>
                     </div>
                   );
@@ -612,14 +627,16 @@ export default function DiscountsPage() {
                       >
                         <Edit size={13} /> Edit Brackets
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteTier(tier.id, tier.name)}
-                        className="h-8 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 gap-1"
-                      >
-                        <Trash2 size={13} /> Delete
-                      </Button>
+                      {isAdmin && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeleteTier(tier.id, tier.name)}
+                          className="h-8 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 gap-1"
+                        >
+                          <Trash2 size={13} /> Delete
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}

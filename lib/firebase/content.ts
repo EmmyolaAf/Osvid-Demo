@@ -64,17 +64,28 @@ export async function saveSiteContent(
     updatedBy: updatedBy || "Administrator",
   };
 
+  // 1. Primary authoritative persistence to Cloud Firestore
+  try {
+    const docRef = doc(db, "site_content", SITE_CONTENT_DOC_ID);
+    const sanitizedMerged = JSON.parse(JSON.stringify(merged));
+    await setDoc(docRef, sanitizedMerged, { merge: true });
+  } catch (err) {
+    console.error("Could not write site content to Firestore:", err);
+    throw new Error("Failed to save site content to database. Please check your network connection.");
+  }
+
+  // 2. Client events and cache synchronization
   if (typeof window !== "undefined") {
     localStorage.removeItem("osvid_site_content");
     window.dispatchEvent(new CustomEvent("osvid_content_updated", { detail: merged }));
 
-    // Send to codebase save endpoint
+    // Optional: sync to codebase save endpoint if local API server is active
     try {
       const idToken = await auth.currentUser?.getIdToken();
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (idToken) headers["Authorization"] = `Bearer ${idToken}`;
 
-      const res = await fetch("/api/admin/website-content/save", {
+      await fetch("/api/admin/website-content/save", {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -84,26 +95,9 @@ export async function saveSiteContent(
           summary: summary || `Updated ${page || "website"} elements in codebase`,
         }),
       });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        const msg = errorData.error || "Server rejected website content save";
-        console.warn("Codebase save API returned error:", msg);
-        throw new Error(msg);
-      }
-    } catch (apiErr: any) {
-      console.warn("Failed to reach codebase save endpoint:", apiErr);
-      throw apiErr;
+    } catch {
+      // API endpoint not reachable on static hosting; Firestore write is already authoritative
     }
-  }
-
-  // Backup to Firestore
-  try {
-    const docRef = doc(db, "site_content", SITE_CONTENT_DOC_ID);
-    const sanitizedMerged = JSON.parse(JSON.stringify(merged));
-    await setDoc(docRef, sanitizedMerged, { merge: true });
-  } catch (err) {
-    console.warn("Could not write site content to Firestore:", err);
   }
 
   return merged;

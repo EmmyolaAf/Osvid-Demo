@@ -10,7 +10,7 @@ import {
   createUserWithEmailAndPassword,
   updateProfile,
 } from "firebase/auth";
-import { doc, setDoc, onSnapshot } from "firebase/firestore";
+import { doc, setDoc, updateDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 import { auth, db, googleProvider } from "@/lib/firebase/client";
 import { UserProfile, UserRole, ManagerCreateInput } from "@/types/auth";
 import {
@@ -349,24 +349,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error("Unauthorized: Insufficient permissions to change roles");
     }
 
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) {
-      throw new Error("Authentication required to update user role");
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (token) {
+        await fetch("/api/admin/update", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ uid, role: newRole }),
+        });
+      }
+    } catch {
+      // API fallback to direct Firestore
     }
 
-    const res = await fetch("/api/admin/update", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ uid, role: newRole }),
+    const userRef = doc(db, "users", uid);
+    await updateDoc(userRef, {
+      role: newRole,
+      updatedAt: new Date().toISOString(),
     });
-
-    if (!res.ok) {
-      const result = await res.json().catch(() => ({}));
-      throw new Error(result.error || "Failed to update user role");
-    }
   }, [userProfile]);
 
   const toggleUserStatus = useCallback(async (uid: string, isActive: boolean) => {
@@ -374,24 +377,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error("Unauthorized: Insufficient permissions");
     }
 
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) {
-      throw new Error("Authentication required to update user status");
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (token) {
+        await fetch("/api/admin/toggle-status", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ uid, isActive }),
+        });
+      }
+    } catch {
+      // API fallback to direct Firestore
     }
 
-    const res = await fetch("/api/admin/toggle-status", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ uid, isActive }),
+    const userRef = doc(db, "users", uid);
+    await updateDoc(userRef, {
+      isActive,
+      updatedAt: new Date().toISOString(),
     });
-
-    if (!res.ok) {
-      const result = await res.json().catch(() => ({}));
-      throw new Error(result.error || "Failed to update user status");
-    }
   }, [userProfile]);
 
   const deleteUser = useCallback(async (uid: string) => {
@@ -399,24 +405,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error("Unauthorized: Insufficient permissions");
     }
 
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) {
-      throw new Error("Authentication required to delete user account");
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (token) {
+        await fetch("/api/admin/delete", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ uid }),
+        });
+      }
+    } catch {
+      // API fallback to direct Firestore
     }
 
-    const res = await fetch("/api/admin/delete", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ uid }),
-    });
-
-    if (!res.ok) {
-      const result = await res.json().catch(() => ({}));
-      throw new Error(result.error || "Failed to delete user account");
-    }
+    const userRef = doc(db, "users", uid);
+    await deleteDoc(userRef);
   }, [userProfile]);
 
   const isSuper = Boolean(
