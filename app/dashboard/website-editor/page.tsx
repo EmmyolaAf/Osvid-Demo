@@ -744,6 +744,81 @@ export default function WebsiteEditorStudioPage() {
                       />
                     </div>
                   </div>
+
+                  <div className="pt-4 border-t border-slate-100 space-y-3">
+                    <div>
+                      <h4 className="text-xs font-black uppercase tracking-wider text-slate-800">
+                        Spinning Experience Badge (Homepage)
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        Customize the text and metrics on the rotating circular badge in the &quot;Building Trust Through Quality&quot; section.
+                      </p>
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-bold uppercase text-slate-600">
+                        Spinning Circular Text
+                      </Label>
+                      <Input
+                        value={content.aboutSummary.spinningBadgeText ?? "OSVID CHEMICALS • YEARS OF EXCELLENCE DELIVERY • "}
+                        placeholder="OSVID CHEMICALS • YEARS OF EXCELLENCE DELIVERY • "
+                        onChange={(e) =>
+                          setContent({
+                            ...content,
+                            aboutSummary: {
+                              ...content.aboutSummary,
+                              spinningBadgeText: e.target.value,
+                            },
+                          })
+                        }
+                        className="mt-1 h-10 rounded-xl text-xs font-mono"
+                      />
+                      <p className="text-[10px] text-slate-400 mt-1">
+                        Text rotates along the circular perimeter. Tip: End with a bullet (&bull;) or separator.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label className="text-xs font-bold uppercase text-slate-600">
+                          Center Number / Metric
+                        </Label>
+                        <Input
+                          value={content.aboutSummary.spinningBadgeNumber ?? content.aboutSummary.yearsOfExperience ?? "3+"}
+                          placeholder="3+"
+                          onChange={(e) =>
+                            setContent({
+                              ...content,
+                              aboutSummary: {
+                                ...content.aboutSummary,
+                                spinningBadgeNumber: e.target.value,
+                              },
+                            })
+                          }
+                          className="mt-1 h-10 rounded-xl text-xs font-bold text-orange-600"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs font-bold uppercase text-slate-600">
+                          Center Subtitle / Label
+                        </Label>
+                        <Input
+                          value={content.aboutSummary.spinningBadgeLabel ?? "Years"}
+                          placeholder="Years"
+                          onChange={(e) =>
+                            setContent({
+                              ...content,
+                              aboutSummary: {
+                                ...content.aboutSummary,
+                                spinningBadgeLabel: e.target.value,
+                              },
+                            })
+                          }
+                          className="mt-1 h-10 rounded-xl text-xs font-bold text-slate-700"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
 

@@ -24,6 +24,9 @@ export interface AboutSummaryContent {
   yearsOfExperience: string;
   productsDelivered: string;
   satisfactionRate: string;
+  spinningBadgeText?: string;
+  spinningBadgeNumber?: string;
+  spinningBadgeLabel?: string;
 }
 
 export interface ContactInfoContent {
@@ -91,9 +94,12 @@ export const DEFAULT_SITE_CONTENT: SiteContent = {
     heading: "Leading the Chemical Formulation Industry",
     subheading: "Innovative Formulations for Industrial & Commercial Growth",
     description: "With years of research and production excellence, OSVID delivers reliable raw materials, surface cleaning agents, and precision specialty chemicals.",
-    yearsOfExperience: "10+",
+    yearsOfExperience: "3+",
     productsDelivered: "50,000+",
     satisfactionRate: "99.8%",
+    spinningBadgeText: "OSVID CHEMICALS • YEARS OF EXCELLENCE DELIVERY • ",
+    spinningBadgeNumber: "3+",
+    spinningBadgeLabel: "Years",
   },
   contactInfo: {
     phone: "+234 814 395 9711",

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
   FaCheckCircle,
   FaCogs,
@@ -12,8 +12,32 @@ import {
   FaShieldAlt,
 } from "react-icons/fa";
 import { RevealAnimationWrapper } from "../custom-animation-wrapper";
+import { getSiteContent } from "@/lib/firebase/content";
+import { SiteContent, DEFAULT_SITE_CONTENT } from "@/types/content";
+import SpinningExperienceBadge from "./SpinningExperienceBadge";
 
 export default function FoundationSection() {
+  const [siteContent, setSiteContent] = useState<SiteContent>(DEFAULT_SITE_CONTENT);
+
+  useEffect(() => {
+    getSiteContent().then(setSiteContent);
+
+    const handleUpdate = (e: any) => {
+      if (e.detail) setSiteContent(e.detail);
+    };
+    window.addEventListener("osvid_content_updated", handleUpdate);
+    return () => window.removeEventListener("osvid_content_updated", handleUpdate);
+  }, []);
+
+  const badgeText =
+    siteContent.aboutSummary?.spinningBadgeText ||
+    "OSVID CHEMICALS • YEARS OF EXCELLENCE DELIVERY • ";
+  const badgeNumber =
+    siteContent.aboutSummary?.spinningBadgeNumber ||
+    siteContent.aboutSummary?.yearsOfExperience ||
+    "3+";
+  const badgeLabel = siteContent.aboutSummary?.spinningBadgeLabel || "Years";
+
   return (
     <section className="relative py-16 md:py-20 bg-gradient-to-br from-yellow-50 to-white px-4 sm:px-6 lg:px-8 overflow-hidden">
       {/* Background Elements */}
@@ -29,38 +53,27 @@ export default function FoundationSection() {
         <div className="flex flex-col lg:flex-row items-center gap-12 xl:gap-16">
           {/* Image Column */}
           <div className="w-full lg:w-1/2 relative">
-            <div className="relative h-[500px] lg:h-[600px] rounded-2xl shadow-2xl">
+            <div className="relative h-[480px] sm:h-[540px] lg:h-[600px] rounded-3xl overflow-hidden shadow-2xl border border-slate-200/80 group">
               <Image
                 fill
                 loading="lazy"
                 quality={90}
                 src="/images/about-section.webp"
-                alt="OSVID team working on construction project"
-                className="object-cover object-center"
+                alt="OSVID team working on construction and chemical projects"
+                className="object-cover object-center group-hover:scale-105 transition-transform duration-700 ease-out"
                 sizes="(max-width: 1024px) 100vw, 50vw"
               />
-              {/* <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" /> */}
-            </div>
 
-            {/* Experience Badge */}
-            <div className="absolute -bottom-8 z-40 -left-8 w-40 h-40 md:w-48 md:h-48">
-              <div className="relative w-full h-full">
-                <Image
-                  height={920}
-                  width={1080}
-                  loading="lazy"
-                  quality={100}
-                  src="/images/experience.png"
-                  alt="Decorative gear icon signifying experience" // More descriptive alt text
-                  className="w-48 h-48  object-cover animate-spin [animation-duration:6s] " // Corrected animation duration
-                />{" "}
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-20 h-20 md:w-24 md:h-24 rounded-full bg-orange-500 flex items-center justify-center shadow-lg">
-                    <span className="text-2xl md:text-3xl font-bold text-white">
-                      3+
-                    </span>
-                  </div>
-                </div>
+              {/* Gradient overlay for contrast */}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent pointer-events-none" />
+
+              {/* Experience Badge - strictly within the square container */}
+              <div className="absolute bottom-4 left-4 sm:bottom-6 sm:left-6 z-20">
+                <SpinningExperienceBadge
+                  circularText={badgeText}
+                  centerNumber={badgeNumber}
+                  centerLabel={badgeLabel}
+                />
               </div>
             </div>
           </div>
