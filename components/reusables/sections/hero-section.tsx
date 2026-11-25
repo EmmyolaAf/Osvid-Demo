@@ -197,7 +197,7 @@ export default function HeroSection() {
                     variants={overlayVariants}
                     className="absolute inset-0 z-20 flex items-center"
                   >
-                    <div className="w-full px-4 sm:px-6 md:px-10 lg:px-12 xl:px-14">
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
                       <motion.div
                         key={`text-content-${currentRealIndex}`}
                         initial="initial"

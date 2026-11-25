@@ -13,8 +13,8 @@ import Link from "next/link"; // For internal links
 
 export default function TrustBuildingSection() {
   return (
-    <section className="bg-osvid-cream py-16 md:py-24 px-4 sm:px-6 lg:px-8">
-      <div className="container mx-auto text-center">
+    <section className="bg-osvid-cream py-16 md:py-24">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
         <h2 className="text-4xl md:text-5xl font-extrabold text-osvid-blue mb-12">
           Shop with Confidence
         </h2>

@@ -122,7 +122,7 @@ export default function CTASection({
       {/* Gradient Overlay */}
       <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/60 to-black/30 z-0" />
 
-      <div className="container relative z-10 flex flex-col lg:flex-row items-center justify-between gap-12 px-4 sm:px-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 flex flex-col lg:flex-row items-center justify-between gap-12">
         {/* CONTACT INFO */}
         <motion.div
           className="w-full lg:w-[45%] space-y-8"

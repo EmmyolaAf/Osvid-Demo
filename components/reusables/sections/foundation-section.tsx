@@ -39,7 +39,7 @@ export default function FoundationSection() {
   const badgeLabel = siteContent.aboutSummary?.spinningBadgeLabel || "Years";
 
   return (
-    <section className="relative py-16 md:py-20 bg-gradient-to-br from-yellow-50 to-white px-4 sm:px-6 lg:px-8 overflow-hidden">
+    <section className="relative py-16 md:py-20 bg-gradient-to-br from-yellow-50 to-white overflow-hidden">
       {/* Background Elements */}
       <div
         className="absolute top-0 left-0 w-full h-full z-0"
@@ -49,7 +49,7 @@ export default function FoundationSection() {
         <div className="absolute -bottom-40 -right-40 w-[700px] h-[700px] bg-orange-100/10 rounded-full blur-[100px] animate-pulse delay-1000" />
       </div>
 
-      <div className="container mx-auto relative z-10">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
         <div className="flex flex-col lg:flex-row items-center gap-12 xl:gap-16">
           {/* Image Column */}
           <div className="w-full lg:w-1/2 relative">

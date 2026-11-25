@@ -83,7 +83,7 @@ export default async function ServiceDetailPage({
 
   return (
     <main className="min-h-screen bg-slate-50/50">
-      <div className="container mx-auto py-8 md:py-12 px-4 md:px-14 flex flex-col md:flex-row gap-12">
+      <div className="max-w-7xl mx-auto py-8 md:py-12 px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row gap-12">
         {/* Left Sidebar */}
         <aside className="w-full md:w-80 lg:w-96 p-6 bg-white rounded-3xl border border-slate-200 shadow-sm h-max flex-shrink-0">
           <nav className="mb-8">
@@ -213,7 +213,7 @@ export default async function ServiceDetailPage({
 
       {/* Related Services */}
       {relatedServices.length > 0 && (
-        <section className="py-12 container mx-auto px-4 sm:px-6">
+        <section className="py-12 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="max-w-2xl mb-8">
             <h2 className="text-2xl font-black text-slate-900">
               Other Industrial Services

@@ -129,7 +129,7 @@ export default async function ProductCategoryDetailPage({
 
   return (
     <main className="min-h-screen bg-slate-50/50">
-      <div className="container mx-auto flex flex-col md:flex-row py-8 md:py-12 gap-8 px-4 sm:px-6">
+      <div className="max-w-7xl mx-auto flex flex-col md:flex-row py-8 md:py-12 gap-8 px-4 sm:px-6 lg:px-8">
         {/* Left Sidebar (Categories Navigation) */}
         <aside className="w-full md:w-80 lg:w-96 p-6 h-max bg-white rounded-3xl border border-slate-200 shadow-sm flex-shrink-0">
           <nav className="mb-8">

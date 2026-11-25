@@ -18,7 +18,7 @@ export default async function FeaturedProducts() {
 
   return (
     <section className="py-16 md:pt-24 bg-white">
-      <div className="container mx-auto px-4 text-center">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
         <h2 className="text-sm md:text-base mb-8 font-semibold mx-auto uppercase w-max border-y py-1 text-osvid-orange border-osvid-orange tracking-wider">
           Featured Products
         </h2>

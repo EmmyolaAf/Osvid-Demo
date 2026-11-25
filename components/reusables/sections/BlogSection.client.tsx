@@ -51,7 +51,7 @@ export default function BlogSectionClient({ posts }: BlogSectionClientProps) {
         <div className="absolute inset-0 bg-gradient-to-b from-white/90 via-white/70 to-white/90" />
       </div>
 
-      <div className="container relative z-10">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
         <motion.div
           initial="hidden"
           whileInView="visible"

@@ -29,7 +29,7 @@ export default function TeamSectionAbout({
         <div className="absolute inset-0 bg-gradient-to-b from-gray-100/30 via-gray-100/70 to-gray-100/90" />
       </div>
 
-      <div className="container mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
         {/* Section Header */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}

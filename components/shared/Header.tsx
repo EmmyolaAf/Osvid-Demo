@@ -120,7 +120,7 @@ export default function Header() {
       <header className="sticky top-0 left-0 w-full z-50 transition-all duration-300">
         {/* Top Bar */}
         <div className={`bg-osvid-lime text-gray-100 transition-all duration-200 ${isScrolled ? "py-1 text-[11px]" : "py-1.5 sm:py-2 text-xs"} w-full`}>
-          <div className="w-full px-2 sm:px-4 flex items-center justify-between gap-4">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               {Object.entries(companyData.socialMedia).map(
                 ([platform, username]) => {
@@ -173,7 +173,7 @@ export default function Header() {
               : "bg-white border-b border-slate-100 py-2 sm:py-2.5"
           }`}
         >
-          <div className="w-full px-2 sm:px-4 flex items-center justify-between">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
             {/* Logo */}
             <Link href="/" className="flex items-center shrink-0">
               <Image

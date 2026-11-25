@@ -26,7 +26,7 @@ export default async function ServicesPage() {
       />
 
       {!result.success ? (
-        <section className="container mx-auto py-16 px-4">
+        <section className="max-w-7xl mx-auto py-16 px-4 sm:px-6 lg:px-8">
           <div className="max-w-md mx-auto bg-red-50 border border-red-200 rounded-2xl p-8 text-center shadow-sm">
             <AlertCircle className="w-10 h-10 text-red-600 mx-auto mb-3" />
             <h2 className="text-base font-bold text-red-900 mb-1">

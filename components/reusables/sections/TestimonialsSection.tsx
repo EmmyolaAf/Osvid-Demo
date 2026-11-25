@@ -19,7 +19,7 @@ export default function TestimonialsSection({
         <div className="absolute bottom-10 right-20 w-40 h-40 rounded-full bg-osvid-lime mix-blend-multiply filter blur-xl"></div>
       </div>
 
-      <div className="container mx-auto px-4 sm:px-6 lg:px-8 relative">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
         {/* Section Header */}
         <div className="text-center mb-16">
           <motion.div

@@ -40,7 +40,7 @@ export default function Footer() {
     >
       <div className="bg-black/10 backdrop-blur-sm">
         {/* Top Footer */}
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 grid py-10 md:py-14 gap-8 grid-cols-1 sm:grid-cols-2 md:grid-cols-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid py-10 md:py-14 gap-8 grid-cols-1 sm:grid-cols-2 md:grid-cols-4">
           {/* About Us */}
           <div className="text-white">
             <h2 className="text-xl md:text-2xl font-bold mb-4 text-osvid-cream">
@@ -114,7 +114,7 @@ export default function Footer() {
 
         {/* Bottom Footer */}
         <div className="py-4 bg-[#574e4299] text-white">
-          <div className="max-w-7xl mx-auto px-3 sm:px-6 flex flex-col md:flex-row text-center md:text-left justify-between items-center gap-4">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row text-center md:text-left justify-between items-center gap-4">
             <div className="flex flex-col md:flex-row gap-2 md:gap-6">
               <p className="text-orange-100 font-medium text-sm">
                 &copy; {currentYear} {companyData.name}. All rights reserved.

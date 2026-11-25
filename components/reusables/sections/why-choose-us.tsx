@@ -40,7 +40,7 @@ export default function WhyChooseOsvid() {
         <div className="absolute -bottom-40 -left-40 w-[800px] h-[800px] bg-orange-50/20 rounded-full blur-3xl" />
       </div>
 
-      <div className="container mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
         {/* Features Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-20">
           {features.map((feature, index) => (

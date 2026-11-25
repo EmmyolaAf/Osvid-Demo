@@ -36,17 +36,19 @@ export default async function AboutPage() {
 
       <IntroSectionAbout />
 
-      <div className="bg-osvid-blue text-osvid-orange container ">
-        <h2 className="py-4 uppercase text-2xl md:text-4xl text-center">
-          Jesus Loves You . Don&apos;t die in your Sin.
-        </h2>
+      <div className="bg-osvid-blue text-osvid-orange w-full">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <h2 className="py-4 uppercase text-2xl md:text-4xl text-center">
+            Jesus Loves You . Don&apos;t die in your Sin.
+          </h2>
+        </div>
       </div>
 
       <HistorySectionAbout />
 
       {/* MISSION + VISION - UPDATED */}
       <section className="bg-osvid-cream py-20 overflow-hidden">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <h3 className="text-3xl md:text-5xl font-bold text-center text-gray-900 mb-12 animate-fade-in-down">
             Our Mission & Vision
           </h3>
@@ -73,7 +75,7 @@ export default async function AboutPage() {
 
       {/* CORE VALUES - UPDATED */}
       <section className="py-20 bg-gray-50 overflow-hidden">
-        <div className="container">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <h3 className="text-3xl md:text-5xl font-bold text-gray-900 mb-12 text-center animate-fade-in-down">
             Our Core Values
           </h3>
@@ -117,7 +119,7 @@ export default async function AboutPage() {
 
       {/* WHY CHOOSE US */}
       <section className="py-20 bg-white overflow-hidden">
-        <div className="container">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <h3 className="text-3xl md:text-5xl font-bold text-center text-gray-900 mb-12 animate-fade-in-down">
             Why Choose OSVID?
           </h3>

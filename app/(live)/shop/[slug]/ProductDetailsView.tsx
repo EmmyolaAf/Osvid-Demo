@@ -65,7 +65,7 @@ export default function ProductDetailsView({
             { label: "Not Found", href: "#" },
           ]}
         />
-        <section className="container mx-auto py-16 px-4">
+        <section className="max-w-7xl mx-auto py-16 px-4 sm:px-6 lg:px-8">
           <div className="max-w-md mx-auto bg-slate-50 border border-slate-200 rounded-2xl p-8 text-center shadow-sm">
             <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4">
               <AlertCircle className="w-6 h-6" />
@@ -103,7 +103,7 @@ export default function ProductDetailsView({
       />
 
       <div className="bg-slate-50/60 py-10 sm:py-14">
-        <section className="container mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
           <ProductDetailsClient product={product} />
           <div className="pt-8 border-t border-slate-200">
             <ProductReviewsSection productId={product.id} productName={product.name} />

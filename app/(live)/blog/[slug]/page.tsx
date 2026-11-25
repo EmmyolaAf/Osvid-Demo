@@ -100,7 +100,8 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
         }}
       >
         <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-xs" />
-        <div className="container mx-auto px-4 sm:px-6 relative z-10 text-center text-white max-w-3xl">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center text-white">
+          <div className="max-w-3xl mx-auto">
           {post.category && (
             <span className="inline-block px-3 py-1 rounded-full bg-orange-600 font-bold text-xs uppercase tracking-wider mb-3">
               {post.category}
@@ -132,12 +133,13 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
                 : "Published"}
             </span>
           </div>
+          </div>
         </div>
       </section>
 
       {/* Content Area */}
       <section className="py-12 md:py-16">
-        <div className="container mx-auto px-4 sm:px-6 flex flex-col lg:flex-row gap-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col lg:flex-row gap-10">
           <article className="w-full lg:w-2/3 bg-white p-6 sm:p-10 rounded-3xl border border-slate-200 shadow-sm space-y-6">
             <Link
               href="/blog"

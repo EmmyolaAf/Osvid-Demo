@@ -346,7 +346,7 @@ export default function ShopClientPage({
 
   return (
     <div className="bg-slate-50/60 min-h-screen py-8 sm:py-12">
-      <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Horizontal Category Carousel Navigation */}
         <div className="mb-8 overflow-x-auto pb-2 scrollbar-hide">
           <div className="flex items-center gap-2 min-w-max">

@@ -44,7 +44,7 @@ export default async function BlogPage() {
       />
 
       <section className="py-12 md:py-16">
-        <div className="container mx-auto px-4 sm:px-6 flex flex-col lg:flex-row gap-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col lg:flex-row gap-10">
           {/* Main Blog Post Listing Area */}
           <div className="w-full lg:w-2/3 space-y-8">
             {!result.success ? (

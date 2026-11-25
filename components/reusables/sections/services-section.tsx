@@ -44,7 +44,7 @@ export default function ServicesSection({ services }: { services: Service[] }) {
         </div>
 
         {/* Foreground content */}
-        <div className="relative z-10 container px-4 md:px-12">
+        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           {/* Introduction / Headline Area */}
           <div className="max-w-3xl mx-auto text-center mb-16 md:mb-20">
             <h2 className="text-sm md:text-base font-semibold uppercase w-max border-y py-1 px-4 mx-auto text-osvid-orange border-osvid-orange tracking-wider mb-4">

@@ -28,7 +28,7 @@ export default function PageHeader({
   const imageUrl = bgImageSrc || "/images/bgs/page-header.webp"; // Reverted default back to page-header.webp
 
   return (
-    <section className="relative h-[40vh] md:min-h-[50vh] w-full overflow-hidden flex items-end justify-start pb-8 px-4 sm:px-6 lg:px-14">
+    <section className="relative h-[40vh] md:min-h-[50vh] w-full overflow-hidden flex items-end justify-start pb-8">
       {/* Background Image Container */}
       <div className="absolute inset-0 z-0">
         <Image
@@ -51,7 +51,7 @@ export default function PageHeader({
         />
       </div>
 
-      <div className="container">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
         {/* Content Container (Left-aligned) */}
         <div className="relative  z-10 text-left  w-full">
           {/* Breadcrumbs */}

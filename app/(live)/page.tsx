@@ -44,7 +44,7 @@ export default async function Home() {
         style={{ backgroundImage: "url('/images/bbb.jpg')" }}
         className="min-h-[calc(100vh-6rem)] text-white bg-gray-950 bg-blend-overlay bg-fixed"
       >
-        <div className="container py-12 md:py-20 mx-auto flex flex-col justify-center items-center gap-6 md:gap-12">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-20 flex flex-col justify-center items-center gap-6 md:gap-12">
           <div className="text-center flex flex-col gap-8 max-w-5xl">
             <h2 className="text-lg text-orange-500 font-semibold uppercase mx-auto w-max border-y py-2 border-orange-600">
               OUR SERVICES
