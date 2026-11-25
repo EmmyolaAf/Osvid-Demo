@@ -476,7 +476,7 @@ export function ProductFormModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto rounded-3xl p-6 sm:p-8">
+      <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden rounded-3xl p-6 sm:p-8">
         <DialogHeader className="border-b border-slate-100 pb-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -1427,7 +1427,7 @@ export function ProductFormModal({
                   <p className="text-[10px] text-slate-400">
                     Products recommended instead of this item (e.g. analytical grade vs technical grade).
                   </p>
-                  <div className="max-h-56 overflow-y-auto space-y-1 pt-1 pr-1">
+                  <div className="max-h-56 overflow-y-auto no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden space-y-1 pt-1 pr-1">
                     {allProducts
                       .filter((p) => p.id !== editingProduct?.id)
                       .map((p) => {
@@ -1466,7 +1466,7 @@ export function ProductFormModal({
                   <p className="text-[10px] text-slate-400">
                     Related materials promoted in the shopping cart alongside this purchase.
                   </p>
-                  <div className="max-h-56 overflow-y-auto space-y-1 pt-1 pr-1">
+                  <div className="max-h-56 overflow-y-auto no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden space-y-1 pt-1 pr-1">
                     {allProducts
                       .filter((p) => p.id !== editingProduct?.id)
                       .map((p) => {
