@@ -197,7 +197,7 @@ export default function HeroSection() {
                     variants={overlayVariants}
                     className="absolute inset-0 z-20 flex items-center"
                   >
-                    <div className="max-w-7xl px-3 sm:px-6 mx-auto">
+                    <div className="w-full px-4 sm:px-6 md:px-10 lg:px-12 xl:px-14">
                       <motion.div
                         key={`text-content-${currentRealIndex}`}
                         initial="initial"
@@ -211,7 +211,7 @@ export default function HeroSection() {
                             },
                           },
                         }}
-                        className="max-w-2xl lg:max-w-3xl xl:max-w-4xl space-y-6"
+                        className="w-full md:max-w-[85%] lg:max-w-[75%] space-y-6 text-left"
                       >
                         {/* Tagline */}
                         <motion.div variants={textVariants}>
@@ -237,7 +237,7 @@ export default function HeroSection() {
                           style={{
                             color: headingOverride?.textColor,
                           }}
-                          className="text-4xl sm:text-5xl md:text-6xl font-bold text-white leading-tight"
+                          className="text-3xl sm:text-5xl md:text-6xl lg:text-7xl font-bold text-white leading-[1.1] tracking-tight"
                         >
                           <span className="text-orange-400">
                             {slides[currentRealIndex].heading
@@ -259,7 +259,7 @@ export default function HeroSection() {
                           style={{
                             color: captionOverride?.textColor,
                           }}
-                          className="text-lg md:text-xl text-white/90 leading-relaxed"
+                          className="text-base sm:text-lg md:text-xl text-white/90 leading-relaxed max-w-3xl lg:max-w-4xl"
                         >
                           {slides[currentRealIndex].caption}
                         </motion.p>
