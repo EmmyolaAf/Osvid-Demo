@@ -278,8 +278,12 @@ export interface ProductAttribute {
 
 export interface ProductVariation {
   id: string;
+  name?: string;
+  description?: string;
   sku?: string;
   price: number;
+  discountPrice?: number;
+  lowStockThreshold?: number;
   priceOverride?: number;
   costPrice?: number;
   minPriceFloor?: number;
@@ -296,7 +300,7 @@ export interface ProductVariation {
   dimensions?: string;
   imageUrl?: string;
   attributes: Record<string, string>;
-  isActive: boolean;
+  isActive?: boolean;
   minPurchaseQuantity?: number;
   maxPurchaseQuantity?: number;
   capacity?: number;

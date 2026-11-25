@@ -172,7 +172,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           sectionTitle: "Pricing & Promotions",
           items: [
             {
-              title: "Discounts & Pricing",
+              title: "Discounts & Coupons",
               href: "/dashboard/discounts",
               icon: Tag,
               allowed: isAdmin || Boolean(perms?.canManageDiscounts),

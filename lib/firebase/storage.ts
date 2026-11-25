@@ -148,16 +148,40 @@ export async function uploadCatalogueImage(
     return { success: false, error: validation.error };
   }
 
-  try {
-    const storagePath = generateManagedStoragePath(folder, file.name);
-    const storageRef = ref(storage, storagePath);
+  return new Promise((resolve) => {
+    let settled = false;
 
-    const uploadTask = uploadBytesResumable(storageRef, file, {
-      contentType: file.type,
-      cacheControl: "public, max-age=31536000",
-    });
+    // Safety timeout: If Firebase Storage connection or CORS hangs for > 8s, fall back to Data URL
+    const fallbackTimer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          resolve({
+            success: true,
+            downloadUrl: reader.result as string,
+            storagePath: `local-data/${file.name}`,
+          });
+        };
+        reader.onerror = () => {
+          resolve({
+            success: false,
+            error: "Image upload timed out. You can also paste an image URL directly.",
+          });
+        };
+        reader.readAsDataURL(file);
+      }
+    }, 8000);
 
-    return new Promise((resolve) => {
+    try {
+      const storagePath = generateManagedStoragePath(folder, file.name);
+      const storageRef = ref(storage, storagePath);
+
+      const uploadTask = uploadBytesResumable(storageRef, file, {
+        contentType: file.type,
+        cacheControl: "public, max-age=31536000",
+      });
+
       uploadTask.on(
         "state_changed",
         (snapshot) => {
@@ -167,34 +191,75 @@ export async function uploadCatalogueImage(
           }
         },
         (error) => {
-          resolve({
-            success: false,
-            error: error.message || "Firebase Storage upload failed.",
-          });
+          if (!settled) {
+            settled = true;
+            clearTimeout(fallbackTimer);
+            // Fallback to data URL on network/storage rejection
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              resolve({
+                success: true,
+                downloadUrl: reader.result as string,
+                storagePath: `local-data/${file.name}`,
+              });
+            };
+            reader.onerror = () => {
+              resolve({
+                success: false,
+                error: error.message || "Storage upload failed. Please use the direct link option.",
+              });
+            };
+            reader.readAsDataURL(file);
+          }
         },
         async () => {
-          try {
-            const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-            resolve({
-              success: true,
-              downloadUrl,
-              storagePath,
-            });
-          } catch (urlErr: any) {
-            resolve({
-              success: false,
-              error: urlErr.message || "Failed to retrieve uploaded image download URL.",
-            });
+          if (!settled) {
+            settled = true;
+            clearTimeout(fallbackTimer);
+            try {
+              const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve({
+                success: true,
+                downloadUrl,
+                storagePath,
+              });
+            } catch (urlErr: any) {
+              // Fallback to data URL
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                resolve({
+                  success: true,
+                  downloadUrl: reader.result as string,
+                  storagePath: `local-data/${file.name}`,
+                });
+              };
+              reader.readAsDataURL(file);
+            }
           }
         }
       );
-    });
-  } catch (err: any) {
-    return {
-      success: false,
-      error: err.message || "Failed to initialize upload task.",
-    };
-  }
+    } catch (err: any) {
+      if (!settled) {
+        settled = true;
+        clearTimeout(fallbackTimer);
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          resolve({
+            success: true,
+            downloadUrl: reader.result as string,
+            storagePath: `local-data/${file.name}`,
+          });
+        };
+        reader.onerror = () => {
+          resolve({
+            success: false,
+            error: err.message || "Failed to initialize upload task.",
+          });
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+  });
 }
 
 /**
