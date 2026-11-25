@@ -47,7 +47,15 @@ export async function POST(req: Request): Promise<NextResponse<CheckoutQuoteResp
       );
     }
 
-    const { items, couponCode, deliveryMethod, shippingAddress, pickupLocationId } = body || {};
+    const {
+      items,
+      couponCode,
+      deliveryMethod,
+      shippingAddress,
+      pickupLocationId,
+      authenticatedUserId,
+      customerQualifyingPoints,
+    } = body || {};
 
     const quote = await calculateAuthoritativeQuote({
       rawItems: items,
@@ -55,6 +63,8 @@ export async function POST(req: Request): Promise<NextResponse<CheckoutQuoteResp
       deliveryMethod,
       shippingAddress,
       pickupLocationId,
+      authenticatedUserId,
+      customerQualifyingPoints,
     });
 
     return NextResponse.json(
@@ -67,6 +77,9 @@ export async function POST(req: Request): Promise<NextResponse<CheckoutQuoteResp
         totalAmount: quote.totalAmount,
         totalAmountKobo: quote.totalAmountKobo,
         currency: quote.currency,
+        totalCartPoints: quote.totalCartPoints,
+        customerQualifyingPoints: quote.customerQualifyingPoints,
+        totalAccumulatedPoints: quote.totalAccumulatedPoints,
         coupon: quote.coupon,
       },
       { status: 200 }

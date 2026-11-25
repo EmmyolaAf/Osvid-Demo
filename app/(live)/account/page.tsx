@@ -129,9 +129,14 @@ export default function AccountPage() {
               <div>
                 <h1 className="text-xl sm:text-2xl font-bold">{userProfile?.displayName || "Customer"}</h1>
                 <p className="text-xs text-slate-300">{user?.email}</p>
-                <span className="inline-block mt-1 px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-white/10 text-orange-300 uppercase tracking-wider border border-white/10">
-                  {role?.replace("_", " ")}
-                </span>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="inline-block px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-white/10 text-orange-300 uppercase tracking-wider border border-white/10">
+                    {role?.replace("_", " ")}
+                  </span>
+                  <span className="inline-block px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-indigo-500/20 text-indigo-300 uppercase tracking-wider border border-indigo-400/30">
+                    {userProfile?.accumulatedQualifyingPoints || 0} Qualifying Pts
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -152,6 +157,28 @@ export default function AccountPage() {
                 <LogOut size={14} className="mr-1.5" />
                 Sign Out
               </Button>
+            </div>
+          </div>
+
+          {/* Points & Commercial Discount Status */}
+          <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-900 rounded-xl p-5 sm:p-6 text-white shadow-md border border-indigo-800/60 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="space-y-1 text-center sm:text-left">
+              <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400">
+                Commercial Purchasing Tier
+              </span>
+              <h2 className="text-lg sm:text-xl font-black">
+                {userProfile?.accumulatedQualifyingPoints || 0} Accumulated Points
+              </h2>
+              <p className="text-xs text-slate-300 max-w-lg">
+                Points accumulate across all your eligible product purchases, automatically unlocking wholesale-tier discounts when product thresholds are reached.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link href="/shop">
+                <Button className="bg-white text-slate-900 hover:bg-slate-100 font-bold text-xs rounded-lg shadow-xs h-9 px-3.5">
+                  Browse Products
+                </Button>
+              </Link>
             </div>
           </div>
 

@@ -239,6 +239,28 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
           volumeDiscountThreshold: product.volumeDiscountThreshold,
           volumeDiscountPercentage: product.volumeDiscountPercentage,
           volumeUnit: product.volumeUnit || product.unit,
+          pointsPerUnit:
+            selectedVariation?.pointsPerUnit !== undefined && selectedVariation.pointsPerUnit !== null
+              ? Number(selectedVariation.pointsPerUnit)
+              : product.pointsPerUnit !== undefined && product.pointsPerUnit !== null
+              ? Number(product.pointsPerUnit)
+              : undefined,
+          pointsThreshold:
+            selectedVariation?.pointsThreshold !== undefined && selectedVariation.pointsThreshold !== null
+              ? Number(selectedVariation.pointsThreshold)
+              : product.pointsThreshold !== undefined && product.pointsThreshold !== null
+              ? Number(product.pointsThreshold)
+              : undefined,
+          pointsDiscountPercentage:
+            selectedVariation?.pointsDiscountPercentage !== undefined && selectedVariation.pointsDiscountPercentage !== null
+              ? Number(selectedVariation.pointsDiscountPercentage)
+              : product.pointsDiscountPercentage !== undefined && product.pointsDiscountPercentage !== null
+              ? Number(product.pointsDiscountPercentage)
+              : undefined,
+          isPointsEligible:
+            selectedVariation?.isPointsEligible !== undefined
+              ? selectedVariation.isPointsEligible
+              : product.isPointsEligible,
           priceData: {
             price: basePrice,
             discountedPrice: salePrice,
@@ -465,6 +487,28 @@ export default function ProductDetailsClient({ product }: ProductDetailsClientPr
                 <span className="font-extrabold text-emerald-300">
                   Total Saved: {formatCurrency("NGN", tierSavings)}
                 </span>
+              </div>
+            )}
+
+            {/* Commercial Points & Qualification Callout */}
+            {((selectedVariation?.pointsPerUnit ?? product.pointsPerUnit) !== undefined &&
+              Number(selectedVariation?.pointsPerUnit ?? product.pointsPerUnit) > 0) && (
+              <div className="pt-2.5 border-t border-slate-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-1.5 text-amber-300">
+                  <Sparkles size={14} className="text-amber-400 shrink-0" />
+                  <span>
+                    <strong>Commercial Resale Value:</strong> Earns{" "}
+                    <strong>
+                      {selectedVariation?.pointsPerUnit ?? product.pointsPerUnit} pts/unit
+                    </strong>{" "}
+                    ({(((Number(selectedVariation?.pointsPerUnit ?? product.pointsPerUnit) || 0) * quantity)).toFixed(1)} pts total)
+                  </span>
+                </div>
+                {(selectedVariation?.pointsThreshold ?? product.pointsThreshold) && (
+                  <span className="text-[10px] font-bold text-amber-200 bg-amber-400/20 px-2 py-0.5 rounded-full w-fit">
+                    {(selectedVariation?.pointsDiscountPercentage ?? product.pointsDiscountPercentage) || 0}% off at {selectedVariation?.pointsThreshold ?? product.pointsThreshold} pts
+                  </span>
+                )}
               </div>
             )}
           </div>

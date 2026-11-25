@@ -262,7 +262,7 @@ export async function createCheckoutSession(
     const productDocs: Array<{
       ref: DocumentReference<DocumentData>;
       data: DocumentData;
-      item: { productId: string; quantity: number };
+      item: { productId: string; quantity: number; variationId?: string; variationAttributes?: Record<string, string> };
     }> = [];
 
     for (const item of canonicalItems) {
@@ -284,20 +284,58 @@ export async function createCheckoutSession(
         );
       }
 
+      productDocs.push({ ref: pRef, data: pData, item });
+    }
+
+    // Compute cross-product commercial points earned in cart
+    let totalCartPoints = 0;
+    for (const p of productDocs) {
+      let variation: any = undefined;
+      if (p.item.variationId && Array.isArray(p.data.variations)) {
+        variation = p.data.variations.find((varItem: any) => varItem.id === p.item.variationId);
+      }
+      const ptsPerUnit =
+        variation?.pointsPerUnit !== undefined && variation.pointsPerUnit !== null
+          ? Number(variation.pointsPerUnit)
+          : p.data.pointsPerUnit !== undefined && p.data.pointsPerUnit !== null
+          ? Number(p.data.pointsPerUnit)
+          : 0;
+      totalCartPoints += ptsPerUnit * p.item.quantity;
+    }
+    totalCartPoints = Math.round(totalCartPoints * 100) / 100;
+
+    // Fetch customer's account qualifying points if authenticated
+    let accountPoints = 0;
+    if (params.authenticatedUserId) {
+      try {
+        const userRef = adminDb.collection("users").doc(params.authenticatedUserId);
+        const userSnap = await transaction.get(userRef);
+        if (userSnap.exists) {
+          accountPoints = Number(userSnap.data()?.accumulatedQualifyingPoints) || 0;
+        }
+      } catch {
+        accountPoints = 0;
+      }
+    }
+    const totalAccumulatedPoints = Math.round((totalCartPoints + accountPoints) * 100) / 100;
+
+    for (const p of productDocs) {
+      const { data: pData, item } = p;
       let sku = pData.sku || "";
       let imageUrl = pData.imageUrl || "";
       let variationAttributes: Record<string, string> | undefined = undefined;
 
+      let variation: any = undefined;
       let basePrice = Number(pData.price);
       if (item.variationId && Array.isArray(pData.variations)) {
-        const v = pData.variations.find((varItem: any) => varItem.id === item.variationId);
-        if (v) {
-          if (v.price !== undefined) basePrice = Number(v.price);
-          if (v.sku) sku = v.sku;
-          if (v.imageUrl) imageUrl = v.imageUrl;
-          variationAttributes = v.attributes;
-          if (v.salePrice !== undefined && Number(v.salePrice) > 0 && Number(v.salePrice) < basePrice) {
-            pData.discountPrice = Number(v.salePrice);
+        variation = pData.variations.find((varItem: any) => varItem.id === item.variationId);
+        if (variation) {
+          if (variation.price !== undefined) basePrice = Number(variation.price);
+          if (variation.sku) sku = variation.sku;
+          if (variation.imageUrl) imageUrl = variation.imageUrl;
+          variationAttributes = variation.attributes;
+          if (variation.salePrice !== undefined && Number(variation.salePrice) > 0 && Number(variation.salePrice) < basePrice) {
+            pData.discountPrice = Number(variation.salePrice);
           }
         }
       }
@@ -330,6 +368,42 @@ export async function createCheckoutSession(
         }
       }
 
+      // Authoritative commercial points and automatic discount evaluation
+      const effectivePtsPerUnit =
+        variation?.pointsPerUnit !== undefined && variation.pointsPerUnit !== null
+          ? Number(variation.pointsPerUnit)
+          : pData.pointsPerUnit !== undefined && pData.pointsPerUnit !== null
+          ? Number(pData.pointsPerUnit)
+          : 0;
+
+      const pointsEarned = Math.round(effectivePtsPerUnit * item.quantity * 100) / 100;
+
+      const effectiveThreshold =
+        variation?.pointsThreshold !== undefined && variation.pointsThreshold !== null
+          ? Number(variation.pointsThreshold)
+          : pData.pointsThreshold !== undefined && pData.pointsThreshold !== null
+          ? Number(pData.pointsThreshold)
+          : 0;
+
+      const effectiveDiscountPct =
+        variation?.pointsDiscountPercentage !== undefined && variation.pointsDiscountPercentage !== null
+          ? Number(variation.pointsDiscountPercentage)
+          : pData.pointsDiscountPercentage !== undefined && pData.pointsDiscountPercentage !== null
+          ? Number(pData.pointsDiscountPercentage)
+          : 0;
+
+      let isPointsDiscountApplied = false;
+      if (
+        effectiveThreshold > 0 &&
+        totalAccumulatedPoints >= effectiveThreshold &&
+        effectiveDiscountPct > 0
+      ) {
+        isPointsDiscountApplied = true;
+        const pct = Math.min(100, Math.max(0, effectiveDiscountPct));
+        const pointsDiscountPrice = Math.round(basePrice * (1 - pct / 100));
+        unitPrice = Math.min(unitPrice, pointsDiscountPrice);
+      }
+
       const lineTotal = unitPrice * item.quantity;
 
       // Available stock invariant check
@@ -344,7 +418,6 @@ export async function createCheckoutSession(
         );
       }
 
-      productDocs.push({ ref: pRef, data: pData, item });
       pricedItems.push({
         productId: item.productId,
         name: pData.name || "Product",
@@ -356,6 +429,11 @@ export async function createCheckoutSession(
         lineTotal,
         variationId: item.variationId,
         variationAttributes,
+        pointsPerUnit: effectivePtsPerUnit,
+        pointsEarned,
+        pointsThreshold: effectiveThreshold > 0 ? effectiveThreshold : undefined,
+        pointsDiscountPercentage: isPointsDiscountApplied ? effectiveDiscountPct : undefined,
+        isPointsDiscountApplied,
       });
     }
 
@@ -482,6 +560,9 @@ export async function createCheckoutSession(
       discountAmount,
       totalAmount,
       totalAmountKobo,
+      totalCartPoints,
+      customerQualifyingPoints: accountPoints,
+      totalAccumulatedPoints,
       couponId: couponDocRef ? couponDocRef.id : undefined,
       couponCode: couponDocData ? couponDocData.code : undefined,
       paymentInitializationStatus: "uninitialized",

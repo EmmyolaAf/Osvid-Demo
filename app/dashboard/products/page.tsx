@@ -1058,6 +1058,11 @@ export default function ProductsManagementPage() {
                                 Bulk: {p.pricingTierName}
                               </span>
                             )}
+                            {p.pointsPerUnit !== undefined && p.pointsPerUnit > 0 && (
+                              <span className="block mt-1 text-[10px] font-bold text-amber-900 bg-amber-100/90 border border-amber-300/80 px-1.5 py-0.5 rounded w-fit">
+                                {p.pointsPerUnit} pts/unit {p.pointsThreshold ? `• ${p.pointsDiscountPercentage || 0}% at ${p.pointsThreshold} pts` : ""}
+                              </span>
+                            )}
                           </td>
 
                           <td className="py-3.5 px-5">
@@ -1289,6 +1294,7 @@ export default function ProductsManagementPage() {
       {/* ======================================================== */}
       {/* PRODUCT ADD / EDIT MODAL VIA MODERN COMPONENT */}
       <ProductFormModal
+        key={editingProduct?.id || (isProductModalOpen ? "open-new" : "closed")}
         isOpen={isProductModalOpen}
         onClose={() => setIsProductModalOpen(false)}
         onSave={handleSaveProductFromModal}

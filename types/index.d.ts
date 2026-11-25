@@ -65,6 +65,11 @@ export interface CartItem {
       };
     };
   };
+  pointsPerUnit?: number;
+  pointsEarned?: number;
+  pointsThreshold?: number;
+  pointsDiscountPercentage?: number;
+  isPointsEligible?: boolean;
   // Add any other fields you need from the product data
 }
 

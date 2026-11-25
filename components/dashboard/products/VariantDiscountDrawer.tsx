@@ -84,6 +84,22 @@ export function VariantDiscountDrawer({
     variant.costPrice !== undefined ? variant.costPrice.toString() : ""
   );
 
+  // Product-Based Points & Automatic Qualification state
+  const [pointsPerUnit, setPointsPerUnit] = useState<string>(
+    variant.pointsPerUnit !== undefined && variant.pointsPerUnit !== null ? variant.pointsPerUnit.toString() : ""
+  );
+  const [pointsThreshold, setPointsThreshold] = useState<string>(
+    variant.pointsThreshold !== undefined && variant.pointsThreshold !== null ? variant.pointsThreshold.toString() : ""
+  );
+  const [pointsDiscountPercentage, setPointsDiscountPercentage] = useState<string>(
+    variant.pointsDiscountPercentage !== undefined && variant.pointsDiscountPercentage !== null
+      ? variant.pointsDiscountPercentage.toString()
+      : ""
+  );
+  const [isPointsEligible, setIsPointsEligible] = useState<boolean>(
+    variant.isPointsEligible !== false
+  );
+
   // Handlers for Volume Tiers
   const handleAddTier = () => {
     const last = tiers[tiers.length - 1];
@@ -139,6 +155,10 @@ export function VariantDiscountDrawer({
       pricingTierId: validTiers.length > 0 ? "custom" : undefined,
       minPriceFloor: parsedFloor,
       costPrice: parsedCost,
+      pointsPerUnit: pointsPerUnit ? parseFloat(pointsPerUnit) : undefined,
+      pointsThreshold: pointsThreshold ? parseFloat(pointsThreshold) : undefined,
+      pointsDiscountPercentage: pointsDiscountPercentage ? parseFloat(pointsDiscountPercentage) : undefined,
+      isPointsEligible,
       discountType: isFlashSaleActive && parsedDiscountVal ? discountType : undefined,
       discountValue: isFlashSaleActive && parsedDiscountVal ? parsedDiscountVal : undefined,
       badgeText: isFlashSaleActive && parsedDiscountVal ? badgeText : undefined,
@@ -277,7 +297,76 @@ export function VariantDiscountDrawer({
             )}
           </div>
 
-          {/* 2. PROMOTIONAL / FLASH SALE SECTION */}
+          {/* 2. COMMERCIAL POINTS & THRESHOLD DISCOUNT STRATEGY */}
+          <div className="p-4 bg-orange-50/60 rounded-2xl border border-orange-200/90 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
+                  <Sparkles size={14} className="text-orange-600" />
+                  2. Commercial Points &amp; Threshold Discount
+                </h4>
+                <p className="text-[11px] text-slate-500">
+                  Assign points earned per unit and independent qualification discount for this variation.
+                </p>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isPointsEligible}
+                  onChange={(e) => setIsPointsEligible(e.target.checked)}
+                  className="rounded text-orange-600"
+                />
+                <span className="text-[11px] font-bold text-slate-700">Points Active</span>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+              <div>
+                <Label className="text-[11px] font-bold text-slate-700">Points Per Unit</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="e.g. 0.2, 0.5, 3"
+                  value={pointsPerUnit}
+                  onChange={(e) => setPointsPerUnit(e.target.value)}
+                  className="mt-1 h-8 rounded-lg text-xs font-bold"
+                />
+                <span className="text-[10px] text-slate-400">Pts earned per 1 unit purchased</span>
+              </div>
+
+              <div>
+                <Label className="text-[11px] font-bold text-slate-700">Qualifying Threshold</Label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  placeholder="e.g. 10 points"
+                  value={pointsThreshold}
+                  onChange={(e) => setPointsThreshold(e.target.value)}
+                  className="mt-1 h-8 rounded-lg text-xs font-bold"
+                />
+                <span className="text-[10px] text-slate-400">Total customer pts required</span>
+              </div>
+
+              <div>
+                <Label className="text-[11px] font-bold text-slate-700">Automatic Discount (%)</Label>
+                <Input
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  max="90"
+                  placeholder="e.g. 8%"
+                  value={pointsDiscountPercentage}
+                  onChange={(e) => setPointsDiscountPercentage(e.target.value)}
+                  className="mt-1 h-8 rounded-lg text-xs font-bold text-orange-600"
+                />
+                <span className="text-[10px] text-slate-400">Discount % once qualified</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. PROMOTIONAL / FLASH SALE SECTION */}
           <div className="p-4 bg-amber-50/60 rounded-2xl border border-amber-200/80 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">

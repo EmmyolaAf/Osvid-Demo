@@ -15,6 +15,7 @@ import {
   Tag,
   ShieldCheck,
   Layers,
+  Sparkles,
 } from "lucide-react";
 import { FadeInAnimationWrapper } from "../custom-animation-wrapper";
 import formatCurrency from "@/helpers/formatCurrency";
@@ -41,6 +42,10 @@ interface ProductCardProps {
     volumeDiscountThreshold?: number;
     volumeDiscountPercentage?: number;
     volumeUnit?: string;
+    pointsPerUnit?: number;
+    pointsThreshold?: number;
+    pointsDiscountPercentage?: number;
+    isPointsEligible?: boolean;
   };
   index: number;
   currency?: string;
@@ -134,6 +139,10 @@ export default function ProductCard({
         volumeDiscountThreshold: product.volumeDiscountThreshold,
         volumeDiscountPercentage: product.volumeDiscountPercentage,
         volumeUnit: product.volumeUnit,
+        pointsPerUnit: product.pointsPerUnit,
+        pointsThreshold: product.pointsThreshold,
+        pointsDiscountPercentage: product.pointsDiscountPercentage,
+        isPointsEligible: product.isPointsEligible,
       };
 
       await addToCart(cartItem, 1);
@@ -282,6 +291,16 @@ export default function ProductCard({
               In Stock
             </span>
           </div>
+
+          {product.pointsPerUnit !== undefined && product.pointsPerUnit > 0 && (
+            <div className="flex items-center gap-1.5 text-[10px] font-bold text-amber-900 bg-amber-50/90 border border-amber-200/90 px-2 py-0.5 rounded-lg w-fit">
+              <Sparkles size={11} className="text-amber-600 shrink-0" />
+              <span>
+                Earns {product.pointsPerUnit} pts/unit
+                {product.pointsThreshold ? ` • ${product.pointsDiscountPercentage || 0}% off at ${product.pointsThreshold} pts` : ""}
+              </span>
+            </div>
+          )}
 
           {/* Add to Cart or Select Options for Variable Products */}
           {isVariableWithOptions ? (

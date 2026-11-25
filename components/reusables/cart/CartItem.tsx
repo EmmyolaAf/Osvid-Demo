@@ -127,7 +127,14 @@ export function CartItem({ item }: CartItemProps) {
           </div>
 
           {/* Active Wholesale Tier or Volume Discount Badge */}
-          {effective.isVolumeDiscountApplied ? (
+          {effective.isPointsDiscountApplied ? (
+            <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-bold">
+              <Sparkles size={11} className="text-emerald-600" />
+              <span>
+                Points Threshold Met: {effective.appliedPointsDiscountPercentage || effective.discountPercentage}% OFF ({effective.qualifyingPointsThreshold} pts reached)
+              </span>
+            </div>
+          ) : effective.isVolumeDiscountApplied ? (
             <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-bold">
               <Sparkles size={11} className="text-emerald-600" />
               <span>
@@ -142,6 +149,16 @@ export function CartItem({ item }: CartItemProps) {
               </span>
             </div>
           ) : null}
+
+          {/* Commercial Points Information */}
+          {effective.pointsPerUnit > 0 && (
+            <div className="text-[10px] text-amber-800 font-semibold flex items-center gap-1">
+              <span>Earns {(effective.pointsPerUnit * item.quantity).toFixed(1)} pts ({effective.pointsPerUnit} pts/unit)</span>
+              {!effective.isPointsDiscountApplied && effective.qualifyingPointsThreshold ? (
+                <span className="text-slate-500">• {item.pointsDiscountPercentage || 0}% discount at {effective.qualifyingPointsThreshold} pts</span>
+              ) : null}
+            </div>
+          )}
 
           {/* Volume Stacking Nudge if threshold is set but not yet met */}
           {effective.volumeThreshold && !effective.isVolumeDiscountApplied && (

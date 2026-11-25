@@ -253,6 +253,9 @@ export interface AuthoritativePricingResult {
   totalAmount: number;
   totalAmountKobo: number;
   currency: "NGN";
+  totalCartPoints?: number;
+  customerQualifyingPoints?: number;
+  totalAccumulatedPoints?: number;
   coupon?: {
     id: string;
     code: string;
@@ -274,6 +277,8 @@ export async function calculateAuthoritativeQuote(params: {
   deliveryMethod?: "shipping" | "pickup";
   shippingAddress?: any;
   pickupLocationId?: string;
+  authenticatedUserId?: string;
+  customerQualifyingPoints?: number;
   transaction?: Transaction;
 }): Promise<AuthoritativePricingResult> {
   const canonicalItems = canonicalizeCartItems(params.rawItems);
@@ -297,21 +302,48 @@ export async function calculateAuthoritativeQuote(params: {
     productSnapshots.set(pid, snap);
   }
 
-  // 2. Compute cumulative volume per product across all variations in order
+  // 2. Compute cumulative volume per product and cross-product points
   const productVolumeMap = new Map<string, number>();
+  let totalCartPoints = 0;
   for (const item of canonicalItems) {
     const snap = productSnapshots.get(item.productId)!;
     const data = snap.data() || {};
     let itemCapacity = 0;
+    let variation: any = undefined;
     if (item.variationId && Array.isArray(data.variations)) {
-      const v = data.variations.find((v: any) => v.id === item.variationId);
-      if (v?.capacity) itemCapacity = Number(v.capacity);
+      variation = data.variations.find((v: any) => v.id === item.variationId);
+      if (variation?.capacity) itemCapacity = Number(variation.capacity);
     } else {
       itemCapacity = 1;
     }
     const currentVol = productVolumeMap.get(item.productId) || 0;
     productVolumeMap.set(item.productId, currentVol + item.quantity * itemCapacity);
+
+    const ptsPerUnit =
+      variation?.pointsPerUnit !== undefined && variation.pointsPerUnit !== null
+        ? Number(variation.pointsPerUnit)
+        : data.pointsPerUnit !== undefined && data.pointsPerUnit !== null
+        ? Number(data.pointsPerUnit)
+        : 0;
+    totalCartPoints += ptsPerUnit * item.quantity;
   }
+  totalCartPoints = Math.round(totalCartPoints * 100) / 100;
+
+  // Resolve customer's accumulated qualifying points from user account if authenticated
+  let accountPoints = Number(params.customerQualifyingPoints) || 0;
+  if (!accountPoints && params.authenticatedUserId) {
+    try {
+      const userRef = adminDb.collection("users").doc(params.authenticatedUserId);
+      const userSnap = params.transaction ? await params.transaction.get(userRef) : await userRef.get();
+      if (userSnap.exists) {
+        accountPoints = Number(userSnap.data()?.accumulatedQualifyingPoints) || 0;
+      }
+    } catch {
+      // Graceful fallback to 0
+    }
+  }
+
+  const totalAccumulatedPoints = Math.round((totalCartPoints + accountPoints) * 100) / 100;
 
   // 3. Authoritative unit price and discount calculation
   for (const item of canonicalItems) {
@@ -344,6 +376,10 @@ export async function calculateAuthoritativeQuote(params: {
       cumulativeProductVolume: cumVolume,
       volumeDiscountThreshold: Number(data.volumeDiscountThreshold) || 0,
       volumeDiscountPercentage: Number(data.volumeDiscountPercentage) || 0,
+      pointsPerUnit: Number(data.pointsPerUnit) || 0,
+      pointsThreshold: Number(data.pointsThreshold) || 0,
+      pointsDiscountPercentage: Number(data.pointsDiscountPercentage) || 0,
+      accumulatedQualifyingPoints: totalAccumulatedPoints,
     });
 
     const unitPrice = pricingEngineResult.unitPrice;
@@ -364,6 +400,11 @@ export async function calculateAuthoritativeQuote(params: {
       lineTotal,
       variationId: item.variationId,
       variationAttributes: item.variationAttributes || variation?.attributes,
+      pointsPerUnit: pricingEngineResult.pointsPerUnit,
+      pointsEarned: pricingEngineResult.pointsEarned,
+      pointsThreshold: pricingEngineResult.qualifyingPointsThreshold,
+      pointsDiscountPercentage: pricingEngineResult.appliedPointsDiscountPercentage,
+      isPointsDiscountApplied: pricingEngineResult.isPointsDiscountApplied,
     });
   }
 
@@ -480,6 +521,9 @@ export async function calculateAuthoritativeQuote(params: {
     totalAmount,
     totalAmountKobo,
     currency: "NGN",
+    totalCartPoints,
+    customerQualifyingPoints: accountPoints,
+    totalAccumulatedPoints,
     coupon: couponInfo,
     productSnapshots,
     discountSnapshot,

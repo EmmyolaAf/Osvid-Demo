@@ -34,6 +34,11 @@ export interface AuthoritativeQuoteItem {
   variationId?: string;
   variationAttributes?: Record<string, string>;
   taxAmount?: number;
+  pointsPerUnit?: number;
+  pointsEarned?: number;
+  pointsThreshold?: number;
+  pointsDiscountPercentage?: number;
+  isPointsDiscountApplied?: boolean;
 }
 
 export interface CheckoutQuoteRequest {
@@ -55,6 +60,9 @@ export interface CheckoutQuoteResponse {
   totalAmount: number;
   totalAmountKobo: number;
   currency: "NGN";
+  totalCartPoints?: number;
+  customerQualifyingPoints?: number;
+  totalAccumulatedPoints?: number;
   coupon?: {
     code: string;
     discountType: "percentage" | "fixed";
@@ -101,6 +109,9 @@ export interface CheckoutSession {
   totalAmountKobo: number;
   couponId?: string;
   couponCode?: string;
+  totalCartPoints?: number;
+  customerQualifyingPoints?: number;
+  totalAccumulatedPoints?: number;
   paystackReference?: string;
   paystackAccessCode?: string;
   paymentInitializationStatus?: PaymentInitializationStatus;

@@ -41,6 +41,11 @@ export type CartItem = {
   volumeDiscountThreshold?: number;
   volumeDiscountPercentage?: number;
   volumeUnit?: string;
+  pointsPerUnit?: number;
+  pointsThreshold?: number;
+  pointsDiscountPercentage?: number;
+  pointsEarned?: number;
+  isPointsEligible?: boolean;
 };
 
 export function getEffectiveCartItemPrice(
@@ -52,6 +57,11 @@ export function getEffectiveCartItemPrice(
   appliedTier?: PricingTierItem;
   discountPercentage: number;
   isVolumeDiscountApplied: boolean;
+  isPointsDiscountApplied: boolean;
+  appliedPointsDiscountPercentage?: number;
+  qualifyingPointsThreshold?: number;
+  pointsPerUnit: number;
+  pointsEarned: number;
   cumulativeVolume: number;
   volumeThreshold?: number;
   volumeUnit?: string;
@@ -66,6 +76,11 @@ export function getEffectiveCartItemPrice(
     0
   );
 
+  const totalCartPoints = (allItems && allItems.length > 0 ? allItems : [item]).reduce(
+    (acc, i) => acc + Number(i.quantity) * (Number(i.pointsPerUnit) || 0),
+    0
+  );
+
   const engineResult = calculateEffectiveVariantPrice({
     baseProductPrice: item.priceData.price,
     variant: {
@@ -73,17 +88,27 @@ export function getEffectiveCartItemPrice(
       salePrice: item.priceData.discountedPrice,
       pricingTiers: item.pricingTiers,
       capacity: item.capacity,
+      pointsPerUnit: item.pointsPerUnit,
+      pointsThreshold: item.pointsThreshold,
+      pointsDiscountPercentage: item.pointsDiscountPercentage,
+      isPointsEligible: item.isPointsEligible,
     },
     quantity: item.quantity,
     cumulativeProductVolume: cumulativeVolume,
     volumeDiscountThreshold: item.volumeDiscountThreshold,
     volumeDiscountPercentage: item.volumeDiscountPercentage,
+    pointsPerUnit: item.pointsPerUnit,
+    pointsThreshold: item.pointsThreshold,
+    pointsDiscountPercentage: item.pointsDiscountPercentage,
+    accumulatedQualifyingPoints: totalCartPoints,
   });
 
   const volUnit = item.volumeUnit || item.capacityUnit || "Liters";
 
   let discountReason: string | undefined = undefined;
-  if (engineResult.isVolumeWholesaleApplied) {
+  if (engineResult.isPointsDiscountApplied) {
+    discountReason = `Points Qualified (${engineResult.appliedPointsDiscountPercentage || item.pointsDiscountPercentage}% off)`;
+  } else if (engineResult.isVolumeWholesaleApplied) {
     discountReason = `Volume Wholesale (${cumulativeVolume} ${volUnit} reached)`;
   } else if (engineResult.appliedFlashSale) {
     discountReason = engineResult.appliedFlashSale.badgeText || "Flash Deal";
@@ -97,6 +122,11 @@ export function getEffectiveCartItemPrice(
     appliedTier: engineResult.appliedTier,
     discountPercentage: engineResult.discountPercentage,
     isVolumeDiscountApplied: engineResult.isVolumeWholesaleApplied,
+    isPointsDiscountApplied: engineResult.isPointsDiscountApplied,
+    appliedPointsDiscountPercentage: engineResult.appliedPointsDiscountPercentage,
+    qualifyingPointsThreshold: item.pointsThreshold,
+    pointsPerUnit: Number(item.pointsPerUnit) || 0,
+    pointsEarned: (Number(item.pointsPerUnit) || 0) * item.quantity,
     cumulativeVolume,
     volumeThreshold: item.volumeDiscountThreshold ? Number(item.volumeDiscountThreshold) : undefined,
     volumeUnit: volUnit,
@@ -116,6 +146,7 @@ interface CartContextType {
   clearCart: () => void;
   totalItems: number;
   subtotal: number;
+  totalCartPoints: number;
   isCartOpen: boolean;
   openCart: () => void;
   closeCart: () => void;
@@ -227,13 +258,16 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Memoized calculations
-  const { totalItems, subtotal } = useMemo(() => {
+  const { totalItems, subtotal, totalCartPoints } = useMemo(() => {
     const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
     const subtotal = cart.reduce((sum, item) => {
       const { unitPrice } = getEffectiveCartItemPrice(item, cart);
       return sum + unitPrice * item.quantity;
     }, 0);
-    return { totalItems, subtotal };
+    const totalCartPoints = Math.round(
+      cart.reduce((sum, item) => sum + (Number(item.pointsPerUnit) || 0) * item.quantity, 0) * 100
+    ) / 100;
+    return { totalItems, subtotal, totalCartPoints };
   }, [cart]);
 
   const openCart = useCallback(() => setIsCartOpen(true), []);
@@ -249,6 +283,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         clearCart,
         totalItems,
         subtotal,
+        totalCartPoints,
         isCartOpen,
         openCart,
         closeCart,

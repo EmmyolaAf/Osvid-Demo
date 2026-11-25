@@ -24,11 +24,19 @@ export interface CalculateEffectiveVariantPriceParams {
     isFlashSaleActive?: boolean;
     pricingTiers?: PricingTierItem[];
     capacity?: number;
+    pointsPerUnit?: number;
+    pointsThreshold?: number;
+    pointsDiscountPercentage?: number;
+    isPointsEligible?: boolean;
   };
   quantity: number;
   cumulativeProductVolume?: number;
   volumeDiscountThreshold?: number;
   volumeDiscountPercentage?: number;
+  pointsPerUnit?: number;
+  pointsThreshold?: number;
+  pointsDiscountPercentage?: number;
+  accumulatedQualifyingPoints?: number;
   now?: Date;
 }
 
@@ -45,6 +53,11 @@ export interface EffectiveVariantPriceResult {
     savings: number;
   };
   isVolumeWholesaleApplied: boolean;
+  isPointsDiscountApplied: boolean;
+  appliedPointsDiscountPercentage?: number;
+  qualifyingPointsThreshold?: number;
+  pointsPerUnit: number;
+  pointsEarned: number;
   isFloorEnforced: boolean;
   minPriceFloor?: number;
   savingsPerUnit: number;
@@ -207,6 +220,44 @@ export function calculateEffectiveVariantPrice(
     postVolumePrice = Math.min(currentUnitPrice, tierPriceOverride);
   }
 
+  // 4B. Product-Based Point Accumulation and Automatic Discount System
+  const effectivePointsPerUnit =
+    variant?.pointsPerUnit !== undefined && variant.pointsPerUnit !== null
+      ? Number(variant.pointsPerUnit)
+      : params.pointsPerUnit !== undefined && params.pointsPerUnit !== null
+      ? Number(params.pointsPerUnit)
+      : 0;
+
+  const pointsEarned = Math.round(effectivePointsPerUnit * qty * 100) / 100;
+
+  const effectiveThreshold =
+    variant?.pointsThreshold !== undefined && variant.pointsThreshold !== null
+      ? Number(variant.pointsThreshold)
+      : params.pointsThreshold !== undefined && params.pointsThreshold !== null
+      ? Number(params.pointsThreshold)
+      : 0;
+
+  const effectivePointsDiscountPct =
+    variant?.pointsDiscountPercentage !== undefined && variant.pointsDiscountPercentage !== null
+      ? Number(variant.pointsDiscountPercentage)
+      : params.pointsDiscountPercentage !== undefined && params.pointsDiscountPercentage !== null
+      ? Number(params.pointsDiscountPercentage)
+      : 0;
+
+  const accumulatedPoints = Number(params.accumulatedQualifyingPoints || 0);
+
+  let isPointsDiscountApplied = false;
+  if (
+    effectiveThreshold > 0 &&
+    accumulatedPoints >= effectiveThreshold &&
+    effectivePointsDiscountPct > 0
+  ) {
+    isPointsDiscountApplied = true;
+    const pct = Math.min(100, Math.max(0, effectivePointsDiscountPct));
+    const pointsDiscountedPrice = Math.round(baseUnitPrice * (1 - pct / 100));
+    postVolumePrice = Math.min(postVolumePrice, pointsDiscountedPrice);
+  }
+
   // 5. Cost Floor Guardrail Enforcement
   const minFloor =
     variant?.minPriceFloor !== undefined && variant.minPriceFloor !== null
@@ -238,6 +289,11 @@ export function calculateEffectiveVariantPrice(
     appliedTier,
     appliedFlashSale,
     isVolumeWholesaleApplied,
+    isPointsDiscountApplied,
+    appliedPointsDiscountPercentage: isPointsDiscountApplied ? effectivePointsDiscountPct : undefined,
+    qualifyingPointsThreshold: effectiveThreshold > 0 ? effectiveThreshold : undefined,
+    pointsPerUnit: effectivePointsPerUnit,
+    pointsEarned,
     isFloorEnforced,
     minPriceFloor: minFloor,
     savingsPerUnit,
@@ -245,6 +301,22 @@ export function calculateEffectiveVariantPrice(
     standardLineTotal,
     totalSavings,
   };
+}
+
+/**
+ * Calculates total commercial points earned across disparate cart or order items.
+ * Points earned = Configured points per unit × Purchased quantity
+ */
+export function calculateTotalCartPoints(
+  items: Array<{ quantity: number; pointsPerUnit?: number }>
+): number {
+  if (!Array.isArray(items)) return 0;
+  const total = items.reduce((acc, it) => {
+    const qty = Number(it.quantity) || 0;
+    const pts = Number(it.pointsPerUnit) || 0;
+    return acc + qty * pts;
+  }, 0);
+  return Math.round(total * 100) / 100;
 }
 
 /**

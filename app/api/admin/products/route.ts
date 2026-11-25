@@ -80,6 +80,11 @@ export async function GET(req: NextRequest) {
           volumeDiscountPercentage:
             data.volumeDiscountPercentage !== undefined ? Number(data.volumeDiscountPercentage) : undefined,
           volumeUnit: data.volumeUnit || undefined,
+          pointsPerUnit: data.pointsPerUnit !== undefined ? Number(data.pointsPerUnit) : undefined,
+          pointsThreshold: data.pointsThreshold !== undefined ? Number(data.pointsThreshold) : undefined,
+          pointsDiscountPercentage:
+            data.pointsDiscountPercentage !== undefined ? Number(data.pointsDiscountPercentage) : undefined,
+          isPointsEligible: data.isPointsEligible !== false,
           createdAt: data.createdAt || new Date().toISOString(),
           updatedAt: data.updatedAt || new Date().toISOString(),
         } as Product;
@@ -198,6 +203,25 @@ export async function POST(req: NextRequest) {
           ? Number(product.volumeDiscountPercentage)
           : undefined,
       volumeUnit: product.volumeUnit?.trim() || undefined,
+      pointsPerUnit:
+        product.pointsPerUnit !== undefined &&
+        product.pointsPerUnit !== null &&
+        !isNaN(Number(product.pointsPerUnit))
+          ? Number(product.pointsPerUnit)
+          : undefined,
+      pointsThreshold:
+        product.pointsThreshold !== undefined &&
+        product.pointsThreshold !== null &&
+        !isNaN(Number(product.pointsThreshold))
+          ? Number(product.pointsThreshold)
+          : undefined,
+      pointsDiscountPercentage:
+        product.pointsDiscountPercentage !== undefined &&
+        product.pointsDiscountPercentage !== null &&
+        !isNaN(Number(product.pointsDiscountPercentage))
+          ? Number(product.pointsDiscountPercentage)
+          : undefined,
+      isPointsEligible: product.isPointsEligible !== false,
       isActive: product.isActive !== false,
       createdAt: product.createdAt || now,
       updatedAt: now,

@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/sheet";
 import { useCart } from "@/providers/CartProvider";
 import { CartItem } from "./CartItem";
-import { ShoppingCart } from "lucide-react";
+import { ShoppingCart, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
@@ -25,6 +25,7 @@ export function CartDrawer() {
     closeCart,
     subtotal,
     totalItems,
+    totalCartPoints,
     isLoading,
     error,
   } = useCart();
@@ -76,6 +77,17 @@ export function CartDrawer() {
 
             <SheetFooter className="border-t pt-4">
               <div className="w-full space-y-4">
+                {totalCartPoints > 0 && (
+                  <div className="flex items-center justify-between text-xs bg-amber-50 p-2.5 rounded-xl border border-amber-200/90 text-amber-900 font-bold">
+                    <span className="flex items-center gap-1.5">
+                      <Sparkles size={14} className="text-amber-600" />
+                      Cart Qualifying Points:
+                    </span>
+                    <span className="text-sm font-black text-amber-700">
+                      {totalCartPoints.toFixed(1)} pts
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between text-lg font-medium">
                   <span>Subtotal</span>
                   <span>₦{subtotal.toLocaleString()}</span>

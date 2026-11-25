@@ -765,7 +765,15 @@ export async function finalizeSuccessfulPayment(
         quantity: it.quantity,
         imageUrl: it.imageUrl,
         unit: it.unit,
+        pointsPerUnit: it.pointsPerUnit ?? 0,
+        pointsEarned: it.pointsEarned ?? Number(((it.pointsPerUnit || 0) * it.quantity).toFixed(2)),
+        pointsDiscountApplied: it.isPointsDiscountApplied ?? false,
+        pointsDiscountPercentage: it.pointsDiscountPercentage ?? 0,
       }));
+
+      const orderTotalPoints = Number(
+        (currentSession.totalCartPoints ?? orderItems.reduce((acc, it) => acc + (it.pointsEarned || 0), 0)).toFixed(2)
+      );
 
       const formattedShippingAddress = currentSession.shippingAddress
         ? {
@@ -799,6 +807,8 @@ export async function finalizeSuccessfulPayment(
         deliveryMethod: currentSession.deliveryMethod === "pickup" ? "pickup" : "delivery",
         shippingAddress: formattedShippingAddress,
         items: orderItems,
+        totalPointsEarned: orderTotalPoints,
+        accumulatedPointsAtOrder: currentSession.totalAccumulatedPoints ?? currentSession.customerQualifyingPoints ?? 0,
         subtotal: currentSession.subtotal,
         shippingFee: currentSession.shippingFee,
         discountAmount: currentSession.discountAmount,
@@ -828,6 +838,7 @@ export async function finalizeSuccessfulPayment(
         transaction.update(userDocRef, {
           totalOrders: FieldValue.increment(1),
           totalSpent: FieldValue.increment(currentSession.totalAmount),
+          accumulatedQualifyingPoints: FieldValue.increment(orderTotalPoints),
           lastOrderDate: nowIso,
         });
       }

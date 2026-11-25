@@ -27,6 +27,7 @@ import {
   Edit,
   Trash2,
   Save,
+  Award,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,6 +58,7 @@ export default function CustomersPage() {
   const [editDisplayName, setEditDisplayName] = useState("");
   const [editPhoneNumber, setEditPhoneNumber] = useState("");
   const [editStatus, setEditStatus] = useState<"active" | "inactive">("active");
+  const [editPoints, setEditPoints] = useState<number | string>(0);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -91,6 +93,7 @@ export default function CustomersPage() {
     setEditDisplayName(c.displayName || "");
     setEditPhoneNumber(c.phoneNumber || "");
     setEditStatus(c.status === "inactive" ? "inactive" : "active");
+    setEditPoints(c.accumulatedQualifyingPoints ?? 0);
     setIsEditModalOpen(true);
   };
 
@@ -98,10 +101,12 @@ export default function CustomersPage() {
     if (!editingCustomer) return;
     try {
       setIsSaving(true);
+      const pointsVal = Number(editPoints) || 0;
       const res = await updateCustomerInDb(editingCustomer.uid, {
         displayName: editDisplayName.trim() || editingCustomer.displayName,
         phoneNumber: editPhoneNumber.trim(),
         isActive: editStatus === "active",
+        accumulatedQualifyingPoints: pointsVal,
       });
 
       if (!res.success) {
@@ -117,6 +122,7 @@ export default function CustomersPage() {
                 displayName: editDisplayName.trim() || c.displayName,
                 phoneNumber: editPhoneNumber.trim(),
                 status: editStatus,
+                accumulatedQualifyingPoints: pointsVal,
               }
             : c
         )
@@ -267,6 +273,7 @@ export default function CustomersPage() {
                     <th className="py-3.5 px-6">Client / Formulator</th>
                     <th className="py-3.5 px-6">Contact Channels</th>
                     <th className="py-3.5 px-6">Orders Placed</th>
+                    <th className="py-3.5 px-6">Qualifying Points</th>
                     <th className="py-3.5 px-6">Total Spend (LTV)</th>
                     <th className="py-3.5 px-6">Account Status</th>
                     <th className="py-3.5 px-6 text-right">Actions</th>
@@ -306,6 +313,13 @@ export default function CustomersPage() {
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700">
                           <ShoppingBag size={12} />
                           {c.totalOrders} {c.totalOrders === 1 ? "order" : "orders"}
+                        </span>
+                      </td>
+
+                      <td className="py-4 px-6">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200/80">
+                          <Award size={12} className="text-indigo-600" />
+                          {c.accumulatedQualifyingPoints ?? 0} pts
                         </span>
                       </td>
 
@@ -401,6 +415,23 @@ export default function CustomersPage() {
                   placeholder="+234..."
                   className="h-9 rounded-xl border-slate-300 text-xs"
                 />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                  Accumulated Qualifying Points
+                </label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={editPoints}
+                  onChange={(e) => setEditPoints(e.target.value)}
+                  className="h-9 rounded-xl border-slate-300 text-xs font-mono font-bold"
+                />
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  Points balance used to evaluate automatic product discounts when thresholds are met.
+                </p>
               </div>
 
               <div>

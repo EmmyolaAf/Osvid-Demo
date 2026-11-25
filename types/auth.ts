@@ -94,6 +94,7 @@ export interface UserProfile {
   role: UserRole;
   permissions?: ManagerPermissions;
   isActive?: boolean;
+  accumulatedQualifyingPoints?: number;
   createdBy?: string;
   createdAt: string;
   lastLoginAt?: string;
@@ -116,6 +117,7 @@ export interface CustomerProfile {
   totalOrders: number;
   totalSpent: number;
   lastOrderDate?: string;
+  accumulatedQualifyingPoints?: number;
   status: "active" | "inactive";
   createdAt: string;
 }
@@ -161,6 +163,10 @@ export interface OrderItem {
   variationAttributes?: Record<string, string>;
   sku?: string;
   taxAmount?: number;
+  pointsEarned?: number;
+  pointsPerUnit?: number;
+  pointsDiscountApplied?: boolean;
+  pointsDiscountPercentage?: number;
 }
 
 export interface ShippingAddress {
@@ -205,6 +211,8 @@ export interface Order {
   taxRatePercent?: number;
   discountAmount?: number;
   couponCode?: string;
+  totalPointsEarned?: number;
+  accumulatedPointsAtOrder?: number;
   totalAmount: number;
   paymentStatus: PaymentStatus;
   paymentMethod?: string;
@@ -293,6 +301,10 @@ export interface ProductVariation {
   maxPurchaseQuantity?: number;
   capacity?: number;
   capacityUnit?: string;
+  pointsPerUnit?: number;
+  pointsThreshold?: number;
+  pointsDiscountPercentage?: number;
+  isPointsEligible?: boolean;
   pricingTierId?: string;
   pricingTierName?: string;
   pricingTiers?: PricingTierItem[];
@@ -387,6 +399,10 @@ export interface Product {
   volumeDiscountThreshold?: number;
   volumeDiscountPercentage?: number;
   volumeUnit?: string;
+  pointsPerUnit?: number;
+  pointsThreshold?: number;
+  pointsDiscountPercentage?: number;
+  isPointsEligible?: boolean;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

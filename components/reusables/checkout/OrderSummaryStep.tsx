@@ -30,7 +30,7 @@ type QuoteState = "loading" | "ready" | "error";
 export function OrderSummaryStep() {
   const { cart, clearCart } = useCart();
   const { checkoutData, updateCheckoutData, goToPrevStep, goToNextStep } = useCheckout();
-  const { user } = useAuth();
+  const { user, userProfile } = useAuth();
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("idle");
   const [isPaystackReady, setIsPaystackReady] = useState(false);
 
@@ -52,6 +52,9 @@ export function OrderSummaryStep() {
     discountAmount: number;
     taxAmount?: number;
     total: number;
+    totalCartPoints?: number;
+    customerQualifyingPoints?: number;
+    totalAccumulatedPoints?: number;
   }>(() => {
     const fallbackSubtotal = cart.reduce(
       (sum, item) =>
@@ -108,6 +111,8 @@ export function OrderSummaryStep() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          authenticatedUserId: user?.uid,
+          customerQualifyingPoints: userProfile?.accumulatedQualifyingPoints || 0,
           items: cart.map((it) => ({
             productId: it.id,
             quantity: it.quantity,
@@ -130,6 +135,9 @@ export function OrderSummaryStep() {
             discountAmount: data.discountAmount || 0,
             taxAmount: data.taxAmount || 0,
             total: data.totalAmount,
+            totalCartPoints: data.totalCartPoints,
+            customerQualifyingPoints: data.customerQualifyingPoints,
+            totalAccumulatedPoints: data.totalAccumulatedPoints,
           });
 
           if (data.coupon) {
@@ -502,7 +510,13 @@ export function OrderSummaryStep() {
             imageUrl: it.imageUrl,
             unit: (it as any).packaging || (it as any).unit || "Unit",
             variationId: it.variationId,
+            pointsPerUnit: it.pointsPerUnit ?? 0,
+            pointsEarned: it.pointsEarned ?? Number(((it.pointsPerUnit || 0) * it.quantity).toFixed(2)),
+            pointsDiscountApplied: (it.priceData.discountedPrice !== undefined && it.priceData.discountedPrice < it.priceData.price),
+            pointsDiscountPercentage: it.pointsDiscountPercentage ?? 0,
           })),
+          totalPointsEarned: quoteTotals.totalCartPoints ?? cart.reduce((sum, it) => sum + (it.pointsEarned || (Number(it.pointsPerUnit || 0) * it.quantity)), 0),
+          accumulatedPointsAtOrder: quoteTotals.totalAccumulatedPoints ?? userProfile?.accumulatedQualifyingPoints ?? 0,
           subtotal: quoteTotals.subtotal,
           shippingFee: quoteTotals.shippingFee || 0,
           discountAmount: quoteTotals.discountAmount || 0,
@@ -681,6 +695,27 @@ export function OrderSummaryStep() {
                 </form>
               )}
             </div>
+
+            {/* Commercial Points Banner */}
+            {((quoteTotals.totalCartPoints || 0) > 0 || (userProfile?.accumulatedQualifyingPoints || 0) > 0) && (
+              <div className="bg-gradient-to-br from-indigo-50/90 to-blue-50/90 p-3 rounded-2xl border border-indigo-200/80">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-extrabold text-indigo-900 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse" />
+                    Commercial Points in Cart:
+                  </span>
+                  <span className="font-black text-indigo-700 bg-white/90 px-2 py-0.5 rounded-lg border border-indigo-200">
+                    +{(quoteTotals.totalCartPoints ?? cart.reduce((sum, it) => sum + (it.pointsEarned || (Number(it.pointsPerUnit || 0) * it.quantity)), 0)).toFixed(1)} pts
+                  </span>
+                </div>
+                {userProfile?.accumulatedQualifyingPoints !== undefined && (
+                  <p className="text-[11px] text-indigo-700/90 mt-1.5 flex items-center justify-between font-medium">
+                    <span>Account Qualifying Balance:</span>
+                    <span className="font-bold">{userProfile.accumulatedQualifyingPoints} pts</span>
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="space-y-2.5 text-sm pt-1">
               <div className="flex items-center justify-between">

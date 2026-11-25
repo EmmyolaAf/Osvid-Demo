@@ -8,6 +8,7 @@ import {
   updateDoc,
   deleteDoc,
   deleteField,
+  increment,
   query,
   where,
   orderBy,
@@ -272,7 +273,7 @@ export async function deleteUserRecord(uid: string): Promise<void> {
 
 export async function updateCustomerInDb(
   uid: string,
-  data: { displayName?: string; phoneNumber?: string; isActive?: boolean }
+  data: { displayName?: string; phoneNumber?: string; isActive?: boolean; accumulatedQualifyingPoints?: number }
 ): Promise<MutationResult> {
   try {
     const userRef = doc(db, "users", uid);
@@ -282,6 +283,7 @@ export async function updateCustomerInDb(
     if (data.displayName !== undefined) updates.displayName = data.displayName.trim();
     if (data.phoneNumber !== undefined) updates.phoneNumber = data.phoneNumber.trim();
     if (data.isActive !== undefined) updates.isActive = data.isActive;
+    if (data.accumulatedQualifyingPoints !== undefined) updates.accumulatedQualifyingPoints = Number(data.accumulatedQualifyingPoints);
 
     await updateDoc(userRef, updates);
     return { success: true };
@@ -308,9 +310,13 @@ export async function deleteCustomerInDb(uid: string): Promise<MutationResult> {
 export async function createOrderInDb(orderData: Omit<Order, "id" | "createdAt" | "updatedAt">): Promise<string> {
   try {
     const orderRef = doc(collection(db, "orders"));
+    const totalPointsEarned = orderData.totalPointsEarned ?? 
+      (orderData.items || []).reduce((acc, it) => acc + (it.pointsEarned ?? (Number(it.pointsPerUnit || 0) * it.quantity)), 0);
+
     const newOrder: Order = {
       ...orderData,
       id: orderRef.id,
+      totalPointsEarned: Number(Number(totalPointsEarned).toFixed(2)),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       statusHistory: [
@@ -322,6 +328,22 @@ export async function createOrderInDb(orderData: Omit<Order, "id" | "createdAt" 
       ],
     };
     await setDoc(orderRef, cleanFirestoreData(newOrder));
+
+    // Update customer qualifying points and metrics if customer is logged in
+    if (orderData.userId && totalPointsEarned > 0) {
+      try {
+        const userRef = doc(db, "users", orderData.userId);
+        await updateDoc(userRef, {
+          accumulatedQualifyingPoints: increment(Number(Number(totalPointsEarned).toFixed(2))),
+          totalOrders: increment(1),
+          totalSpent: increment(orderData.totalAmount || 0),
+          lastOrderDate: new Date().toISOString(),
+        });
+      } catch (userErr) {
+        console.warn("Could not increment customer points on order creation:", userErr);
+      }
+    }
+
     return orderRef.id;
   } catch (error) {
     console.error("Error creating order in Firestore:", error);
@@ -942,6 +964,25 @@ export async function saveProductToDb(
             ? Number(productData.volumeDiscountPercentage)
             : undefined,
         volumeUnit: productData.volumeUnit?.trim() || undefined,
+        pointsPerUnit:
+          productData.pointsPerUnit !== undefined &&
+          productData.pointsPerUnit !== null &&
+          !isNaN(Number(productData.pointsPerUnit))
+            ? Number(productData.pointsPerUnit)
+            : undefined,
+        pointsThreshold:
+          productData.pointsThreshold !== undefined &&
+          productData.pointsThreshold !== null &&
+          !isNaN(Number(productData.pointsThreshold))
+            ? Number(productData.pointsThreshold)
+            : undefined,
+        pointsDiscountPercentage:
+          productData.pointsDiscountPercentage !== undefined &&
+          productData.pointsDiscountPercentage !== null &&
+          !isNaN(Number(productData.pointsDiscountPercentage))
+            ? Number(productData.pointsDiscountPercentage)
+            : undefined,
+        isPointsEligible: productData.isPointsEligible !== false,
         manageStock: productData.manageStock !== false,
         stockStatus: productData.stockStatus || "in_stock",
         allowBackorders: productData.allowBackorders || "no",
@@ -1030,6 +1071,25 @@ export async function saveProductToDb(
           ? Number(productData.volumeDiscountPercentage)
           : undefined,
       volumeUnit: productData.volumeUnit?.trim() || undefined,
+      pointsPerUnit:
+        productData.pointsPerUnit !== undefined &&
+        productData.pointsPerUnit !== null &&
+        !isNaN(Number(productData.pointsPerUnit))
+          ? Number(productData.pointsPerUnit)
+          : undefined,
+      pointsThreshold:
+        productData.pointsThreshold !== undefined &&
+        productData.pointsThreshold !== null &&
+        !isNaN(Number(productData.pointsThreshold))
+          ? Number(productData.pointsThreshold)
+          : undefined,
+      pointsDiscountPercentage:
+        productData.pointsDiscountPercentage !== undefined &&
+        productData.pointsDiscountPercentage !== null &&
+        !isNaN(Number(productData.pointsDiscountPercentage))
+          ? Number(productData.pointsDiscountPercentage)
+          : undefined,
+      isPointsEligible: productData.isPointsEligible !== false,
       manageStock: productData.manageStock !== false,
       stockStatus: productData.stockStatus || "in_stock",
       allowBackorders: productData.allowBackorders || "no",

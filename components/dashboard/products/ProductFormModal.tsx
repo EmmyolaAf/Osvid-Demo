@@ -139,6 +139,26 @@ export function ProductFormModal({
   const [taxStatus, setTaxStatus] = useState(editingProduct?.taxStatus || "taxable");
   const [taxClass, setTaxClass] = useState(editingProduct?.taxClass || "standard");
 
+  // Commercial Points & Automatic Discount Strategy
+  const [pointsPerUnit, setPointsPerUnit] = useState(
+    editingProduct?.pointsPerUnit !== undefined && editingProduct.pointsPerUnit !== null
+      ? editingProduct.pointsPerUnit.toString()
+      : ""
+  );
+  const [pointsThreshold, setPointsThreshold] = useState(
+    editingProduct?.pointsThreshold !== undefined && editingProduct.pointsThreshold !== null
+      ? editingProduct.pointsThreshold.toString()
+      : ""
+  );
+  const [pointsDiscountPercentage, setPointsDiscountPercentage] = useState(
+    editingProduct?.pointsDiscountPercentage !== undefined && editingProduct.pointsDiscountPercentage !== null
+      ? editingProduct.pointsDiscountPercentage.toString()
+      : ""
+  );
+  const [isPointsEligible, setIsPointsEligible] = useState(
+    editingProduct?.isPointsEligible !== false
+  );
+
   // Stock
   const [stockQuantity, setStockQuantity] = useState(
     editingProduct ? (editingProduct.stockQuantity ?? 0).toString() : "50"
@@ -305,6 +325,10 @@ export function ProductFormModal({
           manageStock: true,
           capacity: detectedCapacity,
           capacityUnit: volumeUnit || unit || "Liters",
+          pointsPerUnit: pointsPerUnit ? parseFloat(pointsPerUnit) : undefined,
+          pointsThreshold: pointsThreshold ? parseFloat(pointsThreshold) : undefined,
+          pointsDiscountPercentage: pointsDiscountPercentage ? parseFloat(pointsDiscountPercentage) : undefined,
+          isPointsEligible,
           attributes: combo.attributes,
           isActive: true,
         };
@@ -602,6 +626,19 @@ export function ProductFormModal({
           ? Number(volumeDiscountPercentage)
           : undefined,
       volumeUnit: volumeUnit.trim() || undefined,
+      pointsPerUnit:
+        pointsPerUnit !== "" && !isNaN(Number(pointsPerUnit))
+          ? Number(pointsPerUnit)
+          : undefined,
+      pointsThreshold:
+        pointsThreshold !== "" && !isNaN(Number(pointsThreshold))
+          ? Number(pointsThreshold)
+          : undefined,
+      pointsDiscountPercentage:
+        pointsDiscountPercentage !== "" && !isNaN(Number(pointsDiscountPercentage))
+          ? Number(pointsDiscountPercentage)
+          : undefined,
+      isPointsEligible,
       taxStatus,
       taxClass,
       stockQuantity: parseInt(stockQuantity, 10) || 0,
@@ -643,6 +680,19 @@ export function ProductFormModal({
         capacity:
           v.capacity !== undefined && !isNaN(Number(v.capacity)) ? Number(v.capacity) : undefined,
         capacityUnit: v.capacityUnit?.trim() || volumeUnit || unit || "Liters",
+        pointsPerUnit:
+          v.pointsPerUnit !== undefined && !isNaN(Number(v.pointsPerUnit))
+            ? Number(v.pointsPerUnit)
+            : undefined,
+        pointsThreshold:
+          v.pointsThreshold !== undefined && !isNaN(Number(v.pointsThreshold))
+            ? Number(v.pointsThreshold)
+            : undefined,
+        pointsDiscountPercentage:
+          v.pointsDiscountPercentage !== undefined && !isNaN(Number(v.pointsDiscountPercentage))
+            ? Number(v.pointsDiscountPercentage)
+            : undefined,
+        isPointsEligible: v.isPointsEligible !== false,
         pricingTierId: v.pricingTierId || undefined,
         pricingTierName: v.pricingTierName || undefined,
         pricingTiers: v.pricingTiers && v.pricingTiers.length > 0 ? v.pricingTiers : undefined,
@@ -1201,6 +1251,99 @@ export function ProductFormModal({
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* Commercial Points & Automatic Discount Strategy */}
+              <div className="bg-gradient-to-br from-amber-50/70 via-orange-50/40 to-slate-50 border border-orange-200/90 rounded-2xl p-4.5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-orange-100 pb-3">
+                  <div>
+                    <Label className="text-xs font-black text-slate-900 flex items-center gap-1.5 uppercase tracking-wide">
+                      <Sparkles size={15} className="text-orange-600" />
+                      Commercial Points &amp; Automatic Discount Strategy
+                    </Label>
+                    <p className="text-[11px] text-slate-600 mt-0.5">
+                      Points reflect commercial resale value rather than retail price. Customers accumulate points across disparate product purchases toward unlocking product-specific discounts.
+                    </p>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-xl border border-orange-200/80 shadow-2xs self-start sm:self-auto">
+                    <input
+                      type="checkbox"
+                      checked={isPointsEligible}
+                      onChange={(e) => setIsPointsEligible(e.target.checked)}
+                      className="rounded text-orange-600 focus:ring-orange-500"
+                    />
+                    <span className="text-xs font-bold text-slate-800">Points Enabled</span>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                  <div className="bg-white p-3 rounded-xl border border-orange-100 shadow-2xs">
+                    <Label className="text-[11px] font-bold text-slate-800 block">
+                      Points Per Unit
+                    </Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="e.g. 0.2, 0.5, 3, 4"
+                      value={pointsPerUnit}
+                      onChange={(e) => setPointsPerUnit(e.target.value)}
+                      className="mt-1 h-9 rounded-lg text-xs font-bold text-slate-900"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Commercial resale points earned per 1 unit purchased.
+                    </p>
+                  </div>
+
+                  <div className="bg-white p-3 rounded-xl border border-orange-100 shadow-2xs">
+                    <Label className="text-[11px] font-bold text-slate-800 block">
+                      Qualification Threshold (Points)
+                    </Label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      placeholder="e.g. 10"
+                      value={pointsThreshold}
+                      onChange={(e) => setPointsThreshold(e.target.value)}
+                      className="mt-1 h-9 rounded-lg text-xs font-bold text-slate-900"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Accumulated points required across all eligible products.
+                    </p>
+                  </div>
+
+                  <div className="bg-white p-3 rounded-xl border border-orange-100 shadow-2xs">
+                    <Label className="text-[11px] font-bold text-slate-800 block">
+                      Automatic Discount (%)
+                    </Label>
+                    <Input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      max="90"
+                      placeholder="e.g. 10"
+                      value={pointsDiscountPercentage}
+                      onChange={(e) => setPointsDiscountPercentage(e.target.value)}
+                      className="mt-1 h-9 rounded-lg text-xs font-bold text-orange-600"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Product-specific discount applied once threshold is reached.
+                    </p>
+                  </div>
+                </div>
+
+                {pointsThreshold && pointsDiscountPercentage && (
+                  <div className="p-3 rounded-xl bg-orange-100/70 border border-orange-200 text-orange-950 text-xs flex items-start gap-2.5">
+                    <CheckCircle2 size={16} className="text-orange-600 shrink-0 mt-0.5" />
+                    <div className="space-y-0.5">
+                      <p className="font-bold">Active Qualification Rule Summary:</p>
+                      <p className="text-[11px] text-slate-700 leading-relaxed">
+                        Purchasing this item earns <strong>{pointsPerUnit || "0"} points/unit</strong>. When a customer reaches <strong>{pointsThreshold} points</strong> (accumulated across this and other eligible items), this product automatically qualifies for an exclusive <strong>{pointsDiscountPercentage}% discount</strong>.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Tax & VAT Configuration */}

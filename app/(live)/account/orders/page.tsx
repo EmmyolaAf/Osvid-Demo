@@ -208,6 +208,11 @@ export default function CustomerOrdersPage() {
                             {order.deliveryMethod}
                           </span>
                         )}
+                        {(order.totalPointsEarned !== undefined && order.totalPointsEarned > 0) && (
+                          <span className="text-[10px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200 px-2.5 py-0.5 rounded-full">
+                            +{order.totalPointsEarned} Commercial Pts Earned
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-slate-400 mt-1">
                         Placed on {new Date(order.createdAt).toLocaleDateString("en-NG", {
@@ -261,9 +266,19 @@ export default function CustomerOrdersPage() {
                       <div key={idx} className="py-2.5 flex items-center justify-between first:pt-0 last:pb-0">
                         <div>
                           <p className="font-bold text-slate-900">{item.productName}</p>
-                          <p className="text-[11px] text-slate-400">
-                            Quantity: {item.quantity} {item.unit ? `(${item.unit})` : ""}
-                          </p>
+                          <div className="flex flex-wrap items-center gap-2 mt-0.5 text-[11px] text-slate-500">
+                            <span>Quantity: {item.quantity} {item.unit ? `(${item.unit})` : ""}</span>
+                            {(item.pointsEarned !== undefined && item.pointsEarned > 0) && (
+                              <span className="text-indigo-600 font-bold">
+                                • {item.pointsEarned} pts
+                              </span>
+                            )}
+                            {item.pointsDiscountApplied && (
+                              <span className="text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
+                                {item.pointsDiscountPercentage ? `${item.pointsDiscountPercentage}% Threshold Met` : "Discounted"}
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <p className="font-bold text-slate-900">
                           {formatCurrency("NGN", (item.price || 0) * (item.quantity || 1))}
