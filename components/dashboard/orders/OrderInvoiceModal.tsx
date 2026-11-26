@@ -37,8 +37,8 @@ export default function OrderInvoiceModal({
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 overflow-y-auto">
-      <div className="relative w-full max-w-3xl bg-white rounded-3xl shadow-2xl overflow-hidden my-8">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 sm:p-4 overflow-y-auto overflow-x-hidden">
+      <div className="relative w-full max-w-[calc(100vw-1.5rem)] sm:max-w-3xl bg-white rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[92vh] box-border break-words [overflow-wrap:anywhere] flex flex-col">
         {/* Top Action Bar (hidden in print) */}
         <div className="flex items-center justify-between px-6 py-4 bg-slate-900 text-white print:hidden">
           <div className="flex items-center gap-2">
@@ -70,7 +70,7 @@ export default function OrderInvoiceModal({
         {/* Printable Document Container */}
         <div
           ref={invoiceRef}
-          className="p-8 sm:p-12 space-y-8 bg-white text-slate-800 text-xs font-sans print:p-0 print:m-0"
+          className="p-4 sm:p-8 md:p-12 space-y-8 bg-white text-slate-800 text-xs font-sans print:p-0 print:m-0 overflow-y-auto overflow-x-hidden flex-1 break-words [overflow-wrap:anywhere]"
         >
           {/* Header */}
           <div className="flex flex-col sm:flex-row justify-between items-start gap-6 border-b border-slate-200 pb-6">

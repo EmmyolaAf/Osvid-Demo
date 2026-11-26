@@ -476,7 +476,7 @@ export function ProductFormModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden rounded-3xl p-6 sm:p-8">
+      <DialogContent className="w-[calc(100vw-2rem)] max-w-4xl max-h-[90vh] overflow-y-auto overflow-x-hidden no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden rounded-3xl p-4 sm:p-6 md:p-8">
         <DialogHeader className="border-b border-slate-100 pb-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -498,7 +498,7 @@ export function ProductFormModal({
           </div>
 
           {/* Stepper Wizard Bar */}
-          <div className="flex items-center gap-1.5 pt-4 overflow-x-auto no-scrollbar">
+          <div className="flex items-center gap-1.5 pt-4 flex-wrap sm:flex-nowrap overflow-x-auto no-scrollbar max-w-full pb-1">
             {steps.map((st, idx) => {
               const isCurrent = idx === currentStepIndex;
               const isPassed = idx < currentStepIndex;
@@ -668,18 +668,18 @@ export function ProductFormModal({
                     {features.map((feat, fIdx) => (
                       <li
                         key={fIdx}
-                        className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-slate-200/80 text-xs text-slate-800"
+                        className="flex items-center justify-between bg-white px-3 py-2 rounded-xl border border-slate-200/80 text-xs text-slate-800 gap-2"
                       >
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
                           <span className="w-5 h-5 rounded-full bg-orange-100 text-orange-700 font-bold text-[10px] flex items-center justify-center shrink-0">
                             {fIdx + 1}
                           </span>
-                          <span>{feat}</span>
+                          <span className="break-words [overflow-wrap:anywhere] min-w-0 flex-1">{feat}</span>
                         </div>
                         <button
                           type="button"
                           onClick={() => handleRemoveFeature(fIdx)}
-                          className="text-slate-400 hover:text-rose-600 p-1 transition-colors"
+                          className="text-slate-400 hover:text-rose-600 p-1 transition-colors shrink-0"
                         >
                           <Trash2 size={13} />
                         </button>
@@ -988,20 +988,20 @@ export function ProductFormModal({
                           key={v.id}
                           className="p-4 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3"
                         >
-                          <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                          <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100 min-w-0">
                             <div className="flex items-center gap-2">
                               <span className="w-5 h-5 rounded-full bg-slate-900 text-white text-[10px] font-bold flex items-center justify-center">
                                 {idx + 1}
                               </span>
-                              <span className="font-bold text-xs text-slate-900">{v.name}</span>
-                              <span className="font-mono text-[10px] text-slate-400">({v.sku})</span>
+                              <span className="font-bold text-xs text-slate-900 break-words [overflow-wrap:anywhere]">{v.name}</span>
+                              <span className="font-mono text-[10px] text-slate-400 break-all">({v.sku})</span>
                             </div>
                             <span className="text-[11px] font-black text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
                               {v.pointsPerUnit ?? 0.2} pts/unit
                             </span>
                           </div>
 
-                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 text-xs">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2.5 text-xs min-w-0">
                             <div>
                               <Label className="text-[10px] font-bold text-slate-600 block mb-1">
                                 Regular Price (₦) *
@@ -1177,10 +1177,10 @@ export function ProductFormModal({
                   ) : (
                     <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl bg-white overflow-hidden shadow-xs">
                       {variations.map((v, idx) => (
-                        <div key={v.id} className="p-3.5 grid grid-cols-1 sm:grid-cols-4 gap-3 items-center text-xs">
-                          <div>
-                            <span className="font-bold text-slate-900 block">{v.name}</span>
-                            <span className="text-[10px] text-slate-400 font-mono">{v.sku}</span>
+                        <div key={v.id} className="p-3.5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-center text-xs min-w-0">
+                          <div className="min-w-0">
+                            <span className="font-bold text-slate-900 block break-words [overflow-wrap:anywhere]">{v.name}</span>
+                            <span className="text-[10px] text-slate-400 font-mono break-all">{v.sku}</span>
                           </div>
 
                           <div>

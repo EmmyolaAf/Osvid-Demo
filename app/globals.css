@@ -213,3 +213,41 @@ h4 {
   -ms-overflow-style: none !important;
   scrollbar-width: none !important;
 }
+
+/* Guarantee all popups/modals stay within viewport, content breaks/folds cleanly, and zero horizontal side-scrolling */
+[data-slot="dialog-content"] {
+  box-sizing: border-box !important;
+  max-width: calc(100vw - 2rem) !important;
+  max-height: calc(100vh - 2rem) !important;
+  overflow-x: hidden !important;
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
+}
+
+[data-slot="dialog-content"] * {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+[data-slot="dialog-content"] p,
+[data-slot="dialog-content"] span,
+[data-slot="dialog-content"] h1,
+[data-slot="dialog-content"] h2,
+[data-slot="dialog-content"] h3,
+[data-slot="dialog-content"] h4,
+[data-slot="dialog-content"] h5,
+[data-slot="dialog-content"] h6,
+[data-slot="dialog-content"] label,
+[data-slot="dialog-content"] li,
+[data-slot="dialog-content"] td,
+[data-slot="dialog-content"] th {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Keep horizontal scroll constrained ONLY inside designated tables, never causing whole-modal blowout */
+[data-slot="dialog-content"] .overflow-x-auto,
+[data-slot="dialog-content"] [class*="overflow-x-auto"] {
+  max-width: 100% !important;
+  overflow-x: auto !important;
+}
