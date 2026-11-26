@@ -6,7 +6,6 @@ import CTASection from "@/components/reusables/sections/cta";
 import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import PageHeader from "@/components/reusables/PageHeader";
 
 export const revalidate = 300;
 
@@ -16,15 +15,6 @@ export default async function ServicesPage() {
 
   return (
     <main>
-      <PageHeader
-        title="Industrial Application Services"
-        description="Comprehensive surface preparation, epoxy flooring, industrial coating, and chemical treatment solutions."
-        breadcrumbs={[
-          { label: "Home", href: "/" },
-          { label: "Services", href: "/services" },
-        ]}
-      />
-
       {!result.success ? (
         <section className="max-w-7xl mx-auto py-16 px-4 sm:px-6 lg:px-8">
           <div className="max-w-md mx-auto bg-red-50 border border-red-200 rounded-2xl p-8 text-center shadow-sm">
