@@ -9,7 +9,7 @@ import Link from "next/link";
 import { EmptyCartState } from "../checkout/EmptyState";
 
 export function CartPage() {
-  const { cart, subtotal, totalItems, isLoading, error } = useCart();
+  const { cart, subtotal, totalItems, totalCartPoints, isLoading, error } = useCart();
 
   if (isLoading) {
     return (
@@ -52,6 +52,12 @@ export function CartPage() {
           <div className="border rounded-lg p-6 sticky top-4">
             <h2 className="text-lg font-medium mb-4">Order Summary</h2>
             <div className="space-y-4">
+              {totalCartPoints > 0 && (
+                <div className="flex items-center justify-between text-xs bg-amber-50 p-3 rounded-xl border border-amber-200 text-amber-900 font-bold">
+                  <span>Qualifying Wholesale Points</span>
+                  <span className="font-mono text-sm text-amber-700">{totalCartPoints.toFixed(1)} pts</span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span>Subtotal</span>
                 <span>₦{subtotal.toLocaleString()}</span>

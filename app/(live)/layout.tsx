@@ -6,7 +6,7 @@ import ReactQueryProvider from "../ReactQueryProvider";
 import { Toaster } from "@/components/ui/sonner";
 
 import "keen-slider/keen-slider.min.css";
-import { CartDrawer } from "@/components/reusables/cart";
+import { CartDrawer, InteractiveCartReminder } from "@/components/reusables/cart";
 import VisualEditorToolbar from "@/components/editor/VisualEditorToolbar";
 import SiteContentApplier from "@/components/editor/SiteContentApplier";
 
@@ -23,6 +23,7 @@ export default async function RootLayout({
       <Toaster richColors position="top-right" />
       <Footer />
       <CartDrawer />
+      <InteractiveCartReminder />
       <Suspense fallback={null}>
         <VisualEditorToolbar />
       </Suspense>

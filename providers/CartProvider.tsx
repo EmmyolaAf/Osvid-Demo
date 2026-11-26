@@ -7,9 +7,17 @@ import {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
 } from "react";
 import { PricingTierItem } from "@/types/auth";
 import { calculateEffectiveVariantPrice } from "@/lib/pricing/variant-pricing-engine";
+import { useAuth } from "@/contexts/AuthContext";
+import { db } from "@/lib/firebase/client";
+import { collection, doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
+
+const LOCAL_STORAGE_KEY = "osvid_persistent_cart_v2";
+const CART_META_KEY = "osvid_cart_meta_v2";
+const LEGACY_STORAGE_KEYS = ["cart", "osvid_cart_items"];
 
 // Standardized type definitions
 type PriceData = {
@@ -152,25 +160,78 @@ interface CartContextType {
   closeCart: () => void;
   isLoading: boolean;
   error: string | null;
+  cartCreatedAt: string | null;
+  cartUpdatedAt: string | null;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [cartCreatedAt, setCartCreatedAt] = useState<string | null>(null);
+  const [cartUpdatedAt, setCartUpdatedAt] = useState<string | null>(null);
+  const isInitialLoadRef = useRef(true);
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Load cart from storage
+  // 1. Initial Load from Persistent Local Storage (with Legacy Migration)
   useEffect(() => {
-    const loadCart = () => {
+    const loadInitialCart = () => {
       try {
-        const savedCart =
-          typeof window !== "undefined"
-            ? JSON.parse(sessionStorage.getItem("cart") || "[]")
-            : [];
-        setCart(savedCart);
+        if (typeof window === "undefined") return;
+
+        let parsedItems: CartItem[] = [];
+
+        // Try primary persistent storage
+        const primaryRaw = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (primaryRaw) {
+          try {
+            parsedItems = JSON.parse(primaryRaw);
+          } catch (e) {
+            console.warn("Could not parse primary persistent cart:", e);
+          }
+        }
+
+        // Check legacy fallbacks if primary is empty
+        if (!parsedItems || parsedItems.length === 0) {
+          for (const key of LEGACY_STORAGE_KEYS) {
+            const legacyVal = localStorage.getItem(key) || sessionStorage.getItem(key);
+            if (legacyVal) {
+              try {
+                const legItems = JSON.parse(legacyVal);
+                if (Array.isArray(legItems) && legItems.length > 0) {
+                  parsedItems = legItems;
+                  // Migrate immediately to persistent key
+                  localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(legItems));
+                  break;
+                }
+              } catch {
+                // Ignore parse errors on legacy keys
+              }
+            }
+          }
+        }
+
+        // Load or initialize metadata
+        let metaRaw = localStorage.getItem(CART_META_KEY);
+        let meta = metaRaw ? JSON.parse(metaRaw) : null;
+        if (!meta && parsedItems && parsedItems.length > 0) {
+          meta = {
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          localStorage.setItem(CART_META_KEY, JSON.stringify(meta));
+        }
+
+        if (meta) {
+          setCartCreatedAt(meta.createdAt || null);
+          setCartUpdatedAt(meta.updatedAt || null);
+        }
+
+        setCart(Array.isArray(parsedItems) ? parsedItems : []);
       } catch (err) {
         setError("Failed to load cart data");
         console.error("Cart load error:", err);
@@ -179,20 +240,133 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    loadCart();
+    loadInitialCart();
   }, []);
 
-  // Save cart to storage
+  // 2. Synchronize with Firestore when user is logged in
   useEffect(() => {
-    if (!isLoading) {
+    const currentUserId = user?.uid;
+    if (!currentUserId || isLoading) return;
+
+    let isMounted = true;
+    async function syncCloudCart() {
       try {
-        sessionStorage.setItem("cart", JSON.stringify(cart));
-      } catch (err) {
-        setError("Failed to save cart data");
-        console.error("Cart save error:", err);
+        const cartDocRef = doc(collection(db, "user_carts"), currentUserId);
+        const cartSnap = await getDoc(cartDocRef);
+
+        if (!isMounted) return;
+
+        if (cartSnap.exists()) {
+          const cloudData = cartSnap.data();
+          const cloudItems: CartItem[] = Array.isArray(cloudData?.items) ? cloudData.items : [];
+
+          // Smart merge: combine local guest cart items with cloud items
+          setCart((localCart) => {
+            const mergedMap = new Map<string, CartItem>();
+
+            // Add cloud items first
+            cloudItems.forEach((ci) => {
+              const key = `${ci.id}_${ci.variationId || ci.variant || "default"}`;
+              mergedMap.set(key, ci);
+            });
+
+            // Merge local items
+            localCart.forEach((li) => {
+              const key = `${li.id}_${li.variationId || li.variant || "default"}`;
+              const existing = mergedMap.get(key);
+              if (existing) {
+                // If in both, take higher quantity or latest
+                mergedMap.set(key, {
+                  ...existing,
+                  quantity: Math.max(existing.quantity, li.quantity),
+                });
+              } else {
+                mergedMap.set(key, li);
+              }
+            });
+
+            const merged = Array.from(mergedMap.values());
+            if (typeof window !== "undefined") {
+              try {
+                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(merged));
+              } catch {}
+            }
+            return merged;
+          });
+        } else if (cart.length > 0) {
+          // Push initial local items to user's cloud cart
+          await setDoc(cartDocRef, {
+            items: cart,
+            userId: currentUserId,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (cloudErr) {
+        console.warn("Could not synchronize user cart with Firestore:", cloudErr);
       }
     }
-  }, [cart, isLoading]);
+
+    syncCloudCart();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user?.uid, isLoading]);
+
+  // 3. Save cart to persistent local storage on changes and debounced write to Cloud
+  useEffect(() => {
+    if (isLoading) return;
+
+    if (isInitialLoadRef.current) {
+      isInitialLoadRef.current = false;
+      return;
+    }
+
+    const now = new Date().toISOString();
+    setCartUpdatedAt(now);
+
+    // Persist to browser LocalStorage for both guests and signed-in users
+    try {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cart));
+        sessionStorage.setItem("cart", JSON.stringify(cart)); // backwards compatibility
+
+        const currentMetaRaw = localStorage.getItem(CART_META_KEY);
+        const currentMeta = currentMetaRaw ? JSON.parse(currentMetaRaw) : {};
+        const newMeta = {
+          createdAt: currentMeta.createdAt || now,
+          updatedAt: now,
+          itemsCount: cart.length,
+        };
+        localStorage.setItem(CART_META_KEY, JSON.stringify(newMeta));
+        if (!cartCreatedAt) setCartCreatedAt(newMeta.createdAt);
+      }
+    } catch (err) {
+      console.error("Cart save error:", err);
+    }
+
+    // Debounced Firestore sync for authenticated users
+    const currentUserId = user?.uid;
+    if (currentUserId) {
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+      syncTimeoutRef.current = setTimeout(async () => {
+        try {
+          const cartDocRef = doc(collection(db, "user_carts"), currentUserId);
+          if (cart.length === 0) {
+            await deleteDoc(cartDocRef);
+          } else {
+            await setDoc(cartDocRef, {
+              items: cart,
+              userId: currentUserId,
+              updatedAt: now,
+            });
+          }
+        } catch (syncErr) {
+          console.warn("Debounced cloud cart sync error:", syncErr);
+        }
+      }, 800);
+    }
+  }, [cart, isLoading, user?.uid]);
 
   const addToCart = useCallback(
     (
@@ -216,7 +390,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           ...prevCart,
           {
             ...product,
-            cartItemId: `${product.id}-${Date.now()}`,
+            cartItemId: `${product.id}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
             quantity,
           },
         ];
@@ -225,7 +399,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  // Other methods remain similar but with better error handling
   const removeFromCart = useCallback((cartItemId: string) => {
     setCart((prevCart) =>
       prevCart.filter((item) => item.cartItemId !== cartItemId)
@@ -247,15 +420,26 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     [removeFromCart]
   );
 
-  const clearCart = useCallback(() => {
+  const clearCart = useCallback(async () => {
     setCart([]);
     try {
-      sessionStorage.removeItem("cart");
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(LOCAL_STORAGE_KEY);
+        localStorage.removeItem(CART_META_KEY);
+        sessionStorage.removeItem("cart");
+        LEGACY_STORAGE_KEYS.forEach((k) => {
+          localStorage.removeItem(k);
+          sessionStorage.removeItem(k);
+        });
+      }
+      if (user?.uid) {
+        await deleteDoc(doc(collection(db, "user_carts"), user.uid)).catch(() => {});
+      }
     } catch (err) {
       setError("Failed to clear cart");
       console.error("Clear cart error:", err);
     }
-  }, []);
+  }, [user?.uid]);
 
   // Memoized calculations
   const { totalItems, subtotal, totalCartPoints } = useMemo(() => {
@@ -289,6 +473,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         closeCart,
         isLoading,
         error,
+        cartCreatedAt,
+        cartUpdatedAt,
       }}
     >
       {children}

@@ -47,12 +47,13 @@ export function CheckoutProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const loadData = () => {
       try {
-        const savedData =
-          typeof window !== "undefined"
-            ? JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "null")
-            : null;
-        if (savedData) {
-          setCheckoutData(savedData);
+        if (typeof window === "undefined") return;
+        const raw = localStorage.getItem(STORAGE_KEY) || sessionStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const savedData = JSON.parse(raw);
+          if (savedData && typeof savedData === "object") {
+            setCheckoutData((prev) => ({ ...prev, ...savedData }));
+          }
         }
       } catch (err) {
         console.error("Failed to load checkout data:", err);
@@ -62,12 +63,14 @@ export function CheckoutProvider({ children }: { children: React.ReactNode }) {
     loadData();
   }, []);
 
-  // Save checkout data
+  // Save checkout data persistently
   useEffect(() => {
-    try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(checkoutData));
-    } catch (err) {
-      console.error("Failed to save checkout data:", err);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(checkoutData));
+      } catch (err) {
+        console.error("Failed to save checkout data:", err);
+      }
     }
   }, [checkoutData]);
 
@@ -105,7 +108,10 @@ export function CheckoutProvider({ children }: { children: React.ReactNode }) {
     setCurrentStep(1);
     setErrors({});
     try {
-      sessionStorage.removeItem(STORAGE_KEY);
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(STORAGE_KEY);
+        sessionStorage.removeItem(STORAGE_KEY);
+      }
     } catch (err) {
       console.error("Failed to clear checkout data:", err);
     }
