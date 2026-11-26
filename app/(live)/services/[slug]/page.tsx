@@ -161,10 +161,16 @@ export default async function ServiceDetailPage({
             </div>
           </section>
 
-          {/* Description Section */}
+            {/* Description Section */}
           <section className="bg-white p-6 sm:p-10 rounded-3xl border border-slate-200 shadow-sm space-y-8">
             <article className="prose prose-slate max-w-none leading-relaxed text-slate-700 text-sm sm:text-base">
-              <div dangerouslySetInnerHTML={{ __html: service.description }} />
+              <div
+                dangerouslySetInnerHTML={{
+                  __html: (service.description || "")
+                    .replace(/—/g, " - ")
+                    .replace(/\s*\*\s*/g, " • "),
+                }}
+              />
             </article>
 
             {/* Partnership Callout */}

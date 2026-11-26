@@ -19,7 +19,9 @@ export default function ServiceCategoryCard({
   service,
   className = "",
 }: ServiceCategoryCardProps) {
-  const cardDescription = stripHtmlTags(service.description);
+  const cardDescription = stripHtmlTags(service.description)
+    .replace(/—/g, " - ")
+    .replace(/\s*\*\s*/g, " • ");
   const animationDelay = index * 0.1;
 
   return (

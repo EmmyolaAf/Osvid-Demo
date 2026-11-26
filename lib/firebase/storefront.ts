@@ -24,6 +24,18 @@ import {
   Testimonial,
   TeamMember,
 } from "@/types";
+import { services as defaultServices } from "@/data/services";
+
+function getLocalServices(): Service[] {
+  return defaultServices.map((s) => ({
+    _id: `srv_${s.id}`,
+    title: (s.title || "").replace(/—/g, "-"),
+    slug: s.slug || `service-${s.id}`,
+    description: (s.description || "").replace(/—/g, "-"),
+    image: s.image || "/images/placeholder.webp",
+    createdAt: new Date().toISOString(),
+  }));
+}
 
 // ============================================================================
 // RESULT PATTERN TYPE DEFINITION
@@ -275,24 +287,28 @@ export async function getServices(): Promise<StorefrontResult<Service[]>> {
     const q = query(servicesRef, orderBy("priority", "asc"));
     const snapshot = await getDocs(q);
 
-    const services: Service[] = snapshot.docs.map((d) => {
+    let services: Service[] = snapshot.docs.map((d) => {
       const data = d.data();
       return {
         _id: d.id,
-        title: data.title || "",
+        title: (data.title || "").replace(/—/g, "-"),
         slug: data.slug || d.id,
-        description: data.description || "",
+        description: (data.description || "").replace(/—/g, "-"),
         image: data.image || data.imageUrl || "/images/placeholder.webp",
         createdAt: data.createdAt || new Date().toISOString(),
       };
     });
 
+    if (services.length === 0) {
+      services = getLocalServices();
+    }
+
     return { success: true, data: services };
   } catch (error: any) {
-    console.error("Firestore getServices error:", error);
+    console.warn("Firestore getServices fallback to local services:", error);
     return {
-      success: false,
-      error: error?.message || "Failed to fetch chemical services.",
+      success: true,
+      data: getLocalServices(),
     };
   }
 }
@@ -317,9 +333,9 @@ export async function getServiceBySlug(
       const data = docSnap.data();
       const service: Service = {
         _id: docSnap.id,
-        title: data.title || "",
+        title: (data.title || "").replace(/—/g, "-"),
         slug: data.slug || docSnap.id,
-        description: data.description || "",
+        description: (data.description || "").replace(/—/g, "-"),
         image: data.image || data.imageUrl || "/images/placeholder.webp",
         createdAt: data.createdAt || new Date().toISOString(),
       };
@@ -334,21 +350,27 @@ export async function getServiceBySlug(
       const data = directSnap.data();
       const service: Service = {
         _id: directSnap.id,
-        title: data.title || "",
+        title: (data.title || "").replace(/—/g, "-"),
         slug: data.slug || directSnap.id,
-        description: data.description || "",
+        description: (data.description || "").replace(/—/g, "-"),
         image: data.image || data.imageUrl || "/images/placeholder.webp",
         createdAt: data.createdAt || new Date().toISOString(),
       };
       return { success: true, data: service };
     }
 
+    const localMatch = getLocalServices().find((s) => s.slug === slug || s._id === slug);
+    if (localMatch) {
+      return { success: true, data: localMatch };
+    }
+
     return { success: true, data: null };
   } catch (error: any) {
-    console.error(`Firestore getServiceBySlug (${slug}) error:`, error);
+    console.warn("Firestore getServiceBySlug fallback to local:", error);
+    const localMatch = getLocalServices().find((s) => s.slug === slug || s._id === slug);
     return {
-      success: false,
-      error: error?.message || `Failed to fetch service "${slug}".`,
+      success: true,
+      data: localMatch || null,
     };
   }
 }

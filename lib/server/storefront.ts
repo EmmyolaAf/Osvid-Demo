@@ -27,6 +27,18 @@ import {
   Testimonial,
   TeamMember,
 } from "@/types";
+import { services as defaultServices } from "@/data/services";
+
+function getLocalServices(): Service[] {
+  return defaultServices.map((s) => ({
+    _id: `srv_${s.id}`,
+    title: (s.title || "").replace(/—/g, "-"),
+    slug: s.slug || `service-${s.id}`,
+    description: (s.description || "").replace(/—/g, "-"),
+    image: s.image || "/images/placeholder.webp",
+    createdAt: new Date().toISOString(),
+  }));
+}
 
 async function getLocalProducts(): Promise<Product[]> {
   try {
@@ -423,29 +435,36 @@ export async function getServerServices(): Promise<StorefrontResult<Service[]>> 
         .get()
     );
 
-    const services: Service[] = snapshot.docs
-      .filter((d: QueryDocumentSnapshot<DocumentData>) => {
-        const data = d.data();
-        return data.isActive !== false && data.published !== false && data.isPublished !== false;
-      })
-      .map((d: QueryDocumentSnapshot<DocumentData>) => {
-        const data = d.data();
-        return {
-          _id: d.id,
-          title: data.title || "",
-          slug: data.slug || d.id,
-          description: data.description || "",
-          image: data.image || data.imageUrl || "/images/placeholder.webp",
-          createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
-        };
-      });
+    let services: Service[] = [];
+    if (!snapshot.empty) {
+      services = snapshot.docs
+        .filter((d: QueryDocumentSnapshot<DocumentData>) => {
+          const data = d.data();
+          return data.isActive !== false && data.published !== false && data.isPublished !== false;
+        })
+        .map((d: QueryDocumentSnapshot<DocumentData>) => {
+          const data = d.data();
+          return {
+            _id: d.id,
+            title: (data.title || "").replace(/—/g, "-"),
+            slug: data.slug || d.id,
+            description: (data.description || "").replace(/—/g, "-"),
+            image: data.image || data.imageUrl || "/images/placeholder.webp",
+            createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
+          };
+        });
+    }
+
+    if (services.length === 0) {
+      services = getLocalServices();
+    }
 
     return { success: true, data: services };
   } catch (error: any) {
-    console.error("Server Firestore getServices error:", error);
+    console.warn("Server Firestore getServices falling back to local services:", error?.message);
     return {
-      success: false,
-      error: "Unable to load chemical services right now.",
+      success: true,
+      data: getLocalServices(),
     };
   }
 }
@@ -477,9 +496,9 @@ export async function getServerServiceBySlug(
           success: true,
           data: {
             _id: docSnap.id,
-            title: data.title || "",
+            title: (data.title || "").replace(/—/g, "-"),
             slug: data.slug || docSnap.id,
-            description: data.description || "",
+            description: (data.description || "").replace(/—/g, "-"),
             image: data.image || data.imageUrl || "/images/placeholder.webp",
             createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
           },
@@ -495,9 +514,9 @@ export async function getServerServiceBySlug(
           success: true,
           data: {
             _id: directDoc.id,
-            title: data.title || "",
+            title: (data.title || "").replace(/—/g, "-"),
             slug: data.slug || directDoc.id,
-            description: data.description || "",
+            description: (data.description || "").replace(/—/g, "-"),
             image: data.image || data.imageUrl || "/images/placeholder.webp",
             createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
           },
@@ -505,12 +524,18 @@ export async function getServerServiceBySlug(
       }
     }
 
+    const localMatch = getLocalServices().find((s) => s.slug === slug || s._id === slug);
+    if (localMatch) {
+      return { success: true, data: localMatch };
+    }
+
     return { success: true, data: null };
   } catch (error: any) {
-    console.error(`Server Firestore getServiceBySlug (${slug}) error:`, error);
+    console.warn(`Server Firestore getServiceBySlug (${slug}) fallback to local:`, error?.message);
+    const localMatch = getLocalServices().find((s) => s.slug === slug || s._id === slug);
     return {
-      success: false,
-      error: "Unable to load chemical service details right now.",
+      success: true,
+      data: localMatch || null,
     };
   }
 }
