@@ -176,7 +176,7 @@ export function VariantDiscountDrawer({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl bg-white rounded-3xl p-6 max-h-[90vh] overflow-y-auto shadow-2xl">
+      <DialogContent className="w-[90vw] sm:w-full sm:max-w-[60vw] bg-white rounded-3xl p-6 max-h-[90vh] overflow-y-auto shadow-2xl">
         <DialogHeader className="border-b border-slate-100 pb-4">
           <div className="flex items-center gap-2 text-xs font-bold text-orange-600 uppercase tracking-wider">
             <Tag size={14} />

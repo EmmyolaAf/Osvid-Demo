@@ -214,17 +214,32 @@ h4 {
   scrollbar-width: none !important;
 }
 
-/* Guarantee all popups/modals stay within viewport, content breaks/folds cleanly, and zero horizontal side-scrolling */
-[data-slot="dialog-content"] {
+/* Universal Popup Modal Sizing Invariant:
+   - On small screens (< 640px): up to 90% of screen width (w-[90vw], max-w-[90vw])
+   - On larger screens (>= 640px): strictly never exceeds 60% of page width (max-w-[60vw])
+   - Zero horizontal overflow, strict word breaking and padding
+*/
+[data-slot="dialog-content"],
+.popup-modal-container {
   box-sizing: border-box !important;
-  max-width: calc(100vw - 2rem) !important;
+  width: 90vw !important;
+  max-width: 90vw !important;
   max-height: calc(100vh - 2rem) !important;
   overflow-x: hidden !important;
   word-break: break-word !important;
   overflow-wrap: anywhere !important;
 }
 
-[data-slot="dialog-content"] * {
+@media (min-width: 640px) {
+  [data-slot="dialog-content"],
+  .popup-modal-container {
+    width: 100% !important;
+    max-width: 60vw !important;
+  }
+}
+
+[data-slot="dialog-content"] *,
+.popup-modal-container * {
   max-width: 100%;
   box-sizing: border-box;
 }
@@ -240,14 +255,28 @@ h4 {
 [data-slot="dialog-content"] label,
 [data-slot="dialog-content"] li,
 [data-slot="dialog-content"] td,
-[data-slot="dialog-content"] th {
+[data-slot="dialog-content"] th,
+.popup-modal-container p,
+.popup-modal-container span,
+.popup-modal-container h1,
+.popup-modal-container h2,
+.popup-modal-container h3,
+.popup-modal-container h4,
+.popup-modal-container h5,
+.popup-modal-container h6,
+.popup-modal-container label,
+.popup-modal-container li,
+.popup-modal-container td,
+.popup-modal-container th {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
 /* Keep horizontal scroll constrained ONLY inside designated tables, never causing whole-modal blowout */
 [data-slot="dialog-content"] .overflow-x-auto,
-[data-slot="dialog-content"] [class*="overflow-x-auto"] {
+[data-slot="dialog-content"] [class*="overflow-x-auto"],
+.popup-modal-container .overflow-x-auto,
+.popup-modal-container [class*="overflow-x-auto"] {
   max-width: 100% !important;
   overflow-x: auto !important;
 }

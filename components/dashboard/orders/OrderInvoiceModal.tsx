@@ -38,7 +38,7 @@ export default function OrderInvoiceModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 sm:p-4 overflow-y-auto overflow-x-hidden">
-      <div className="relative w-full max-w-[calc(100vw-1.5rem)] sm:max-w-3xl bg-white rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[92vh] box-border break-words [overflow-wrap:anywhere] flex flex-col">
+      <div className="relative w-[90vw] sm:w-full sm:max-w-[60vw] popup-modal-container bg-white rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[92vh] box-border break-words [overflow-wrap:anywhere] flex flex-col">
         {/* Top Action Bar (hidden in print) */}
         <div className="flex items-center justify-between px-6 py-4 bg-slate-900 text-white print:hidden">
           <div className="flex items-center gap-2">
