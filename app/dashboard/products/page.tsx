@@ -5,11 +5,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import { auth } from "@/lib/firebase/client";
 import {
   getProductsFromDb,
+  subscribeToProducts,
   saveProductToDb,
   updateProductStockInDb,
   adjustProductStockViaApi,
   deleteProductFromDb,
   getCategoriesFromDb,
+  subscribeToCategories,
   saveCategoryToDb,
   deleteCategoryFromDb,
   getPricingTiersFromDb,
@@ -235,7 +237,23 @@ export default function ProductsManagementPage() {
   };
 
   useEffect(() => {
+    // Initial fetch
     loadData();
+
+    // Instant real-time listener: across devices & sessions
+    const unsubscribeProducts = subscribeToProducts((realtimeProducts) => {
+      setProducts(realtimeProducts);
+      setLoading(false);
+    });
+
+    const unsubscribeCategories = subscribeToCategories((realtimeCategories) => {
+      setCategories(realtimeCategories);
+    });
+
+    return () => {
+      unsubscribeProducts();
+      unsubscribeCategories();
+    };
   }, []);
 
   // Format Currency

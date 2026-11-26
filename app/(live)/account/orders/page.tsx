@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
-import { getUserOrdersFromDb } from "@/lib/firebase/firestore";
+import { getUserOrdersFromDb, subscribeToUserOrders } from "@/lib/firebase/firestore";
 import { Order, OrderStatus } from "@/types/auth";
 import {
   ShoppingBag,
@@ -63,7 +63,13 @@ export default function CustomerOrdersPage() {
 
   useEffect(() => {
     loadUserOrders();
-  }, [loadUserOrders]);
+    if (!user) return;
+    const unsubscribe = subscribeToUserOrders(user.uid, user.email || undefined, (realtimeOrders) => {
+      setOrders(realtimeOrders);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, [loadUserOrders, user]);
 
   const getStatusStep = (status: OrderStatus) => {
     const steps = [

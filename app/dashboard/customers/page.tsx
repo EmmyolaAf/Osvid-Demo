@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import {
   getCustomersFromDb,
+  subscribeToCustomers,
   updateCustomerInDb,
   deleteCustomerInDb,
 } from "@/lib/firebase/firestore";
@@ -75,6 +76,12 @@ export default function CustomersPage() {
       }
     }
     load();
+
+    const unsubscribe = subscribeToCustomers((realtimeCustomers) => {
+      setCustomers(realtimeCustomers);
+      setLoading(false);
+    });
+    return () => unsubscribe();
   }, []);
 
   const totalSpentAll = customers.reduce((acc, c) => acc + (c.totalSpent || 0), 0);

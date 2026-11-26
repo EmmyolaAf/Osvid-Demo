@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import {
   getDiscountsFromDb,
+  subscribeToDiscounts,
   saveDiscountInDb,
   deleteDiscountFromDb,
 } from "@/lib/firebase/firestore";
@@ -80,6 +81,11 @@ export default function DiscountsPage() {
 
   useEffect(() => {
     loadData();
+    const unsubscribe = subscribeToDiscounts((realtimeDiscounts) => {
+      setDiscounts(realtimeDiscounts);
+      setLoading(false);
+    });
+    return () => unsubscribe();
   }, []);
 
   // Filter coupons vs automatic discounts

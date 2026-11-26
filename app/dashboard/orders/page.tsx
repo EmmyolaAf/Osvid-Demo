@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { getOrdersFromDb, updateOrderStatusInDb, updateOrderInDb, deleteOrderFromDb } from "@/lib/firebase/firestore";
+import { getOrdersFromDb, subscribeToOrders, updateOrderStatusInDb, updateOrderInDb, deleteOrderFromDb } from "@/lib/firebase/firestore";
 import { Order, OrderStatus } from "@/types/auth";
 import {
   ShoppingBag,
@@ -106,6 +106,11 @@ export default function OrdersManagementPage() {
 
   useEffect(() => {
     loadOrders();
+    const unsubscribe = subscribeToOrders((realtimeOrders) => {
+      setOrders(realtimeOrders);
+      setLoading(false);
+    });
+    return () => unsubscribe();
   }, []);
 
   const handleStatusChange = async (

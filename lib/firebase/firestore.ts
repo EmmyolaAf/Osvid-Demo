@@ -16,6 +16,7 @@ import {
   serverTimestamp,
   Timestamp,
   writeBatch,
+  onSnapshot,
 } from "firebase/firestore";
 import { auth, db } from "./client";
 import {
@@ -2106,4 +2107,246 @@ export async function createManualOrderInDb(
     console.error("Create manual order error:", err);
     return { success: false, error: err?.message || "Failed to create manual order." };
   }
+}
+
+// ==========================================
+// REAL-TIME INSTANT LIVE SUBSCRIPTIONS
+// ==========================================
+
+export function subscribeToProducts(
+  callback: (products: Product[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  const q = query(collection(db, "products"));
+  return onSnapshot(
+    q,
+    { includeMetadataChanges: false },
+    (snap) => {
+      const products = snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          name: data.name || "",
+          slug: data.slug || data.name?.toLowerCase().replace(/\s+/g, "-") || d.id,
+          description: data.description || "",
+          shortDescription: data.shortDescription || "",
+          productType: data.productType || "simple",
+          price: Number(data.price) || 0,
+          discountPrice: data.discountPrice !== undefined && data.discountPrice !== null ? Number(data.discountPrice) : undefined,
+          stockQuantity: Number(data.stockQuantity) || 0,
+          reservedQuantity: Number(data.reservedQuantity) || 0,
+          manageStock: data.manageStock !== false,
+          stockStatus: data.stockStatus || "in_stock",
+          category: data.category || "General",
+          categorySlug: data.categorySlug || data.category?.toLowerCase().replace(/\s+/g, "-"),
+          imageUrl: data.imageUrl || "/images/placeholder.webp",
+          galleryImages: Array.isArray(data.galleryImages) ? data.galleryImages : [],
+          unit: data.unit || "kg",
+          sku: data.sku || "",
+          isFeatured: Boolean(data.isFeatured),
+          features: Array.isArray(data.features) ? data.features : [],
+          specifications: data.specifications || {},
+          tags: Array.isArray(data.tags) ? data.tags : [],
+          suggestedProductIds: Array.isArray(data.suggestedProductIds) ? data.suggestedProductIds : [],
+          crossSellIds: Array.isArray(data.crossSellIds) ? data.crossSellIds : [],
+          upsellIds: Array.isArray(data.upsellIds) ? data.upsellIds : [],
+          pricingTierId: data.pricingTierId,
+          pricingTierName: data.pricingTierName,
+          pricingTiers: data.pricingTiers,
+          variations: Array.isArray(data.variations) ? data.variations : [],
+          pointsPerUnit: data.pointsPerUnit !== undefined ? Number(data.pointsPerUnit) : undefined,
+          pointsThreshold: data.pointsThreshold !== undefined ? Number(data.pointsThreshold) : undefined,
+          pointsDiscountPercentage: data.pointsDiscountPercentage !== undefined ? Number(data.pointsDiscountPercentage) : undefined,
+          isPointsEligible: data.isPointsEligible !== false,
+          isActive: data.isActive !== false,
+          createdAt: data.createdAt || new Date().toISOString(),
+          updatedAt: data.updatedAt || new Date().toISOString(),
+        } as Product;
+      });
+      products.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      callback(products);
+    },
+    (err) => {
+      console.warn("Real-time products subscription error:", err);
+      if (onError) onError(err);
+    }
+  );
+}
+
+export function subscribeToCategories(
+  callback: (categories: ProductCategory[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  const q = query(collection(db, "categories"), orderBy("name", "asc"));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const categories = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      })) as ProductCategory[];
+      callback(categories);
+    },
+    (err) => {
+      console.warn("Real-time categories subscription error:", err);
+      if (onError) onError(err);
+    }
+  );
+}
+
+export function subscribeToOrders(
+  callback: (orders: Order[]) => void,
+  statusFilter?: OrderStatus,
+  onError?: (err: any) => void
+): () => void {
+  let q = query(collection(db, "orders"), orderBy("createdAt", "desc"));
+  if (statusFilter) {
+    q = query(
+      collection(db, "orders"),
+      where("orderStatus", "==", statusFilter),
+      orderBy("createdAt", "desc")
+    );
+  }
+  return onSnapshot(
+    q,
+    (snap) => {
+      const orders = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      })) as Order[];
+      callback(orders);
+    },
+    (err) => {
+      console.warn("Real-time orders subscription error:", err);
+      if (onError) onError(err);
+    }
+  );
+}
+
+export function subscribeToDiscounts(
+  callback: (discounts: DiscountCode[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  const q = query(collection(db, "discounts"), orderBy("createdAt", "desc"));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const discounts = snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          code: (data.code || "").toUpperCase(),
+          description: data.description || "",
+          discountType: data.discountType || "percentage",
+          discountValue: Number(data.discountValue) || 0,
+          minOrderAmount: data.minOrderAmount !== undefined ? Number(data.minOrderAmount) : undefined,
+          maxUsageLimit: data.maxUsageLimit !== undefined ? Number(data.maxUsageLimit) : undefined,
+          usageCount: Number(data.usageCount) || 0,
+          isActive: data.isActive !== false,
+          expiryDate: data.expiryDate || undefined,
+          createdAt: data.createdAt || new Date().toISOString(),
+        } as DiscountCode;
+      });
+      callback(discounts);
+    },
+    (err) => {
+      console.warn("Real-time discounts subscription error:", err);
+      if (onError) onError(err);
+    }
+  );
+}
+
+export function subscribeToCustomers(
+  callback: (customers: CustomerProfile[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  const qUsers = query(collection(db, "users"), where("role", "==", "user"));
+  return onSnapshot(
+    qUsers,
+    async (usersSnap) => {
+      try {
+        const orders = await getOrdersFromDb();
+        const customerMap = new Map<string, CustomerProfile>();
+
+        usersSnap.docs.forEach((d) => {
+          const u = d.data() as UserProfile;
+          customerMap.set(u.email.toLowerCase(), {
+            uid: u.uid,
+            email: u.email,
+            displayName: u.displayName || "Customer",
+            phoneNumber: u.phoneNumber || "",
+            totalOrders: 0,
+            totalSpent: 0,
+            status: u.isActive ? "active" : "inactive",
+            createdAt: u.createdAt || new Date().toISOString(),
+          });
+        });
+
+        orders.forEach((o) => {
+          const email = (o.customerEmail || "").toLowerCase();
+          if (!email) return;
+
+          const existing = customerMap.get(email);
+          const orderTotal = o.paymentStatus === "paid" ? o.totalAmount || 0 : 0;
+
+          if (existing) {
+            existing.totalOrders += 1;
+            existing.totalSpent += orderTotal;
+            if (o.customerName && (!existing.displayName || existing.displayName === "Customer")) {
+              existing.displayName = o.customerName;
+            }
+            if (o.customerPhone && !existing.phoneNumber) {
+              existing.phoneNumber = o.customerPhone;
+            }
+          } else {
+            customerMap.set(email, {
+              uid: o.userId || `guest_${email}`,
+              email,
+              displayName: o.customerName || "Guest Buyer",
+              phoneNumber: o.customerPhone || "",
+              totalOrders: 1,
+              totalSpent: orderTotal,
+              status: "active",
+              createdAt: o.createdAt || new Date().toISOString(),
+            });
+          }
+        });
+
+        const list = Array.from(customerMap.values()).sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        callback(list);
+      } catch (e) {
+        if (onError) onError(e);
+      }
+    },
+    (err) => {
+      console.warn("Real-time customers subscription error:", err);
+      if (onError) onError(err);
+    }
+  );
+}
+
+export function subscribeToUserOrders(
+  userId: string,
+  email: string | undefined,
+  callback: (orders: Order[]) => void,
+  onError?: (err: any) => void
+): () => void {
+  const q = query(
+    collection(db, "orders"),
+    where("userId", "==", userId)
+  );
+  return onSnapshot(
+    q,
+    (snap) => {
+      const orders = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Order));
+      orders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      callback(orders);
+    },
+    (err) => {
+      console.warn("Real-time user orders subscription error:", err);
+      if (onError) onError(err);
+    }
+  );
 }

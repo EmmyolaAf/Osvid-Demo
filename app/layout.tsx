@@ -39,6 +39,11 @@ export default async function RootLayout({
       className="scroll-smooth scroll-pt-20"
       suppressHydrationWarning
     >
+      <head>
+        <meta httpEquiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0" />
+        <meta httpEquiv="Pragma" content="no-cache" />
+        <meta httpEquiv="Expires" content="0" />
+      </head>
       <body className={`${clashDisplay.variable} antialiased bg-white`}>
         <AuthProvider>
           <CartProvider>
