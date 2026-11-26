@@ -33,7 +33,7 @@ import { POST as emailRoutePost, getResendClient } from "@/app/api/email/route";
 import { POST as libEmailPost } from "@/lib/email";
 import { PRIMARY_SUPER_ADMIN_EMAIL } from "@/lib/server/auth";
 
-describe("OSVID Packet 5 — Production Runtime, Media, CI & Observability", () => {
+describe("OSVID Packet 5 - Production Runtime, Media, CI & Observability", () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {

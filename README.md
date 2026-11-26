@@ -1,4 +1,4 @@
-# OSVID CHEMICALS LTD. — Web Application
+# OSVID CHEMICALS LTD. - Web Application
 
 ![Next.js 16](https://img.shields.io/badge/Next.js-16.2.2-black)
 ![React 19](https://img.shields.io/badge/React-19-blue)

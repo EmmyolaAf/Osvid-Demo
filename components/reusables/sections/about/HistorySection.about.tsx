@@ -63,7 +63,7 @@ export default function HistorySectionAbout() {
                 <span className="font-semibold text-osvid-orange">
                   Founded in 2022
                 </span>
-                , OSVID began with a breakthrough in adhesive coating agents —
+                , OSVID began with a breakthrough in adhesive coating agents:
                 the{" "}
                 <span className="font-semibold text-gray-800 underline decoration-osvid-orange/30 decoration-2 underline-offset-4">
                   OSVID SEALANT POLISH (Acrylic Resin)

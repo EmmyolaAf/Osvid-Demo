@@ -58,7 +58,7 @@ export default async function AboutPage() {
             <MissionVisionCard
               icon="💡" // Lightbulb icon
               title="Our Vision"
-              content="To be Nigeria's most trusted and innovative solution provider — recognized for excellence in construction chemicals, customer value, and sustainable progress."
+              content="To be Nigeria's most trusted and innovative solution provider, recognized for excellence in construction chemicals, customer value, and sustainable progress."
               delay={100} // Overall card animation delay
             />
 
@@ -66,7 +66,7 @@ export default async function AboutPage() {
             <MissionVisionCard
               icon="🎯" // Target/Dartboard icon
               title="Our Mission"
-              content="To deliver world-class, reliable chemical solutions that empower builders and businesses to create stronger, safer, and longer-lasting structures — every time."
+              content="To deliver world-class, reliable chemical solutions that empower builders and businesses to create stronger, safer, and longer-lasting structures, every time."
               delay={200} // Overall card animation delay
             />
           </div>
@@ -136,7 +136,7 @@ export default async function AboutPage() {
                 icon: "🤝",
                 title: "Customer-First Approach",
                 description:
-                  "We build long-term partnerships — focused on trust, service, and satisfaction.",
+                  "We build long-term partnerships focused on trust, service, and satisfaction.",
               },
               {
                 icon: "🌍",
@@ -148,7 +148,7 @@ export default async function AboutPage() {
                 icon: "🧪",
                 title: "Innovation & Integrity",
                 description:
-                  "Our R&D never stops — and neither does our dedication to honest practices.",
+                  "Our R&D never stops, and neither does our dedication to honest practices.",
               },
             ].map((item, i) => (
               <div

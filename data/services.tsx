@@ -45,7 +45,7 @@ export const services: ServiceCategory[] = [
     id: 5,
     title: "OEM (Private Label Manufacturing)",
     description:
-      "Start your adhesive or sealant brand with our confidential OEM services — custom blends, branding, labeling, and full production support.",
+      "Start your adhesive or sealant brand with our confidential OEM services: custom blends, branding, labeling, and full production support.",
     slug: "oem-manufacturing",
     image: "https://oc0zbmw1i8.ufs.sh/f/zhN3yTMP32cOvTIJnrSOIWUTC0ndipjHQJEw3rFD8KS1BMxf",
   },
@@ -53,7 +53,7 @@ export const services: ServiceCategory[] = [
     id: 6,
     title: "Technical Consultation & Support",
     description:
-      "Expert guidance on product usage, surface preparation, troubleshooting, and achieving perfect application results — before, during, and after your projects.",
+      "Expert guidance on product usage, surface preparation, troubleshooting, and achieving perfect application results before, during, and after your projects.",
     slug: "technical-support",
     image: "https://oc0zbmw1i8.ufs.sh/f/zhN3yTMP32cO7MHjcU5aHJ8vfQEFC4bnsLWtRNGdUci5B1kM",
   },

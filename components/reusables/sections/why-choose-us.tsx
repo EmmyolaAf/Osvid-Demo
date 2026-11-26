@@ -19,7 +19,7 @@ export default function WhyChooseOsvid() {
     {
       title: "Customer-First Approach",
       description:
-        "We prioritize long-term partnerships over transactions — offering personalized guidance, tailored support, and reliable service at every stage.",
+        "We prioritize long-term partnerships over transactions, offering personalized guidance, tailored support, and reliable service at every stage.",
       icon: <FaHandshake className="text-orange-500" />,
       bgColor: "bg-orange-50",
     },

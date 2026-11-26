@@ -27,12 +27,12 @@ The Cloud Run service should run with a dedicated Google Cloud service account:
 `osvid-web-runtime@osvid-9d4d6.iam.gserviceaccount.com`
 
 **Required IAM Roles (Do NOT grant Owner or Editor):**
-1. `roles/datastore.user` — Read and write access to Cloud Firestore documents and transactions.
-2. `roles/firebaseauth.admin` (or `roles/identityplatform.admin`) — Verification of Firebase Auth ID tokens and administrative user resolution.
-3. `roles/storage.objectViewer` — Read access to Google Cloud Storage assets (if server-side media inspection is required).
+1. `roles/datastore.user` - Read and write access to Cloud Firestore documents and transactions.
+2. `roles/firebaseauth.admin` (or `roles/identityplatform.admin`) - Verification of Firebase Auth ID tokens and administrative user resolution.
+3. `roles/storage.objectViewer` - Read access to Google Cloud Storage assets (if server-side media inspection is required).
 
 ### Production Cloud Run Region
-> ⚠️ **MANUAL GATE — REGION UNKNOWN LOCALLY**:
+> ⚠️ **MANUAL GATE - REGION UNKNOWN LOCALLY**:
 > Local developer inspection did not have authenticated access to Google Cloud CLI (`gcloud`).
 > **Action Required**: Inspect Google Cloud Console for project `osvid-9d4d6` to confirm Firestore database location (commonly `europe-west1`, `europe-west2`, or `us-central1`).
 > Cloud Run service `osvid-web` MUST be provisioned in the same region or low-latency region relative to Firestore.
@@ -65,7 +65,7 @@ These variables must be passed as `--build-arg` during `docker build`:
 | `NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID` | Build-time (Optional) | Google Analytics 4 measurement ID (`G-...`) |
 | `NEXT_PUBLIC_BASE_URL` | Build-time | Canonical public URL (e.g. `https://osvid.com.ng`) |
 
-#### Example Docker Image Build (Placeholders Only — Do Not Commit Real Values)
+#### Example Docker Image Build (Placeholders Only - Do Not Commit Real Values)
 ```bash
 docker build \
   --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="<PUBLIC_FIREBASE_API_KEY>" \
@@ -100,7 +100,7 @@ Configure these variables directly on Cloud Run (via Google Cloud Secret Manager
 
 ### C. Staging Environment & Split-Environment Prevention
 - Staging browser Firebase configuration and server `FIREBASE_PROJECT_ID` **must** refer to the exact same Firebase project.
-- > ⚠️ **MANUAL GATE — SEPARATE STAGING FIREBASE PROJECT**:
+- > ⚠️ **MANUAL GATE - SEPARATE STAGING FIREBASE PROJECT**:
   > If a dedicated staging Firebase project has not yet been provisioned in Google Cloud Console, do **NOT** silently point staging browser builds to OSVID production Firebase (`osvid-9d4d6`).
   > Provision a distinct Firebase project (e.g. `osvid-staging`) before conducting full staging end-to-end testing.
 

@@ -2055,7 +2055,7 @@ export default function AdminCrmPage() {
                           <td className="py-2.5 px-3 text-slate-800 font-bold">{item.quantity}</td>
                           <td className="py-2.5 px-3 text-slate-600">{item.unit}</td>
                           <td className="py-2.5 px-3 text-slate-600">
-                            {item.targetPrice ? `₦${item.targetPrice.toLocaleString()}` : "—"}
+                            {item.targetPrice ? `₦${item.targetPrice.toLocaleString()}` : "-"}
                           </td>
                           <td className="py-2.5 px-3 text-right font-bold text-slate-900">
                             {item.quotedUnitPrice

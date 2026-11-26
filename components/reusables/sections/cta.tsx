@@ -60,7 +60,7 @@ const ContactInfoItem = ({
 
 export default function CTASection({
   heading = "Need Expert Advice?",
-  subheading = "Choosing the right chemical product can be tricky — but we're here to help!",
+  subheading = "Choosing the right chemical product can be tricky, but we're here to help!",
   formTitle = "Contact our team",
   formDescription = "We'll provide personalized recommendations based on your project.",
 }: CTASectionProps) {

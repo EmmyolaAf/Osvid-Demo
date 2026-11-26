@@ -50,7 +50,7 @@ export default async function Home() {
               OUR SERVICES
             </h2>
             <h2 className="text-4xl font-bold md:text-6xl">
-              We don&apos;t just sell it — we make it happen.
+              We don&apos;t just sell it, we make it happen.
             </h2>
           </div>
 

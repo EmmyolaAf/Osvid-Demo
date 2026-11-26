@@ -13,7 +13,7 @@ const companyData = {
   },
   chatLink: "https://wa.me/2349121090303",
   description:
-    "Build stronger with OSVID Chemicals Ltd — trusted experts in adhesives, sealants, surface finishing, epoxy flooring, and custom chemical solutions in Nigeria.",
+    "Build stronger with OSVID Chemicals Ltd. Trusted experts in adhesives, sealants, surface finishing, epoxy flooring, and custom chemical solutions in Nigeria.",
   keywords: [
     "OSVID Chemicals",
     "construction chemicals Nigeria",
@@ -26,7 +26,7 @@ const companyData = {
   openGraph: {
     title: "OSVID Chemicals Ltd | Your Trusted Partner for Surface Excellence",
     description:
-      "Premium adhesives, sealants, epoxy flooring, and chemical solutions crafted for Nigeria’s builders, manufacturers, and homeowners. OSVID — Progress You Can Trust.",
+      "Premium adhesives, sealants, epoxy flooring, and chemical solutions crafted for Nigeria’s builders, manufacturers, and homeowners. OSVID: Progress You Can Trust.",
     type: "website",
     locale: "en_NG",
     url: "https://osvidcompany.vercel.app", // Replace with actual domain when live

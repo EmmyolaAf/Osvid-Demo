@@ -1724,7 +1724,7 @@ export default function ProductsManagementPage() {
                               <p className="text-[10px] text-slate-400 capitalize">{m.actorRole}</p>
                             </td>
                             <td className="py-2.5 px-3 text-slate-600 max-w-[200px] truncate" title={m.reason}>
-                              {m.reason || "—"}
+                              {m.reason || "-"}
                               {m.orderId && (
                                 <span className="block text-[10px] font-mono text-slate-400">
                                   Order #{m.orderId.slice(0, 8)}

@@ -42,7 +42,7 @@ export type StorefrontResult<T> =
   | { success: true; data: T; error?: never }
   | { success: false; error: string; data?: never };
 
-function withTimeout<T>(promise: Promise<T>, ms = 4000): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms = 2500): Promise<T> {
   return Promise.race([
     promise,
     new Promise<never>((_, reject) =>
@@ -58,10 +58,12 @@ export async function getServerProducts(
   categorySlug?: string
 ): Promise<StorefrontResult<Product[]>> {
   try {
-    const snapshot = await adminDb
-      .collection("products")
-      .where("isActive", "==", true)
-      .get();
+    const snapshot = await withTimeout(
+      adminDb
+        .collection("products")
+        .where("isActive", "==", true)
+        .get()
+    );
     let products: Product[] = [];
 
     if (snapshot.docs.length > 0) {
@@ -147,12 +149,14 @@ export async function getServerProductBySlug(
       return { success: false, error: "Product slug is required." };
     }
 
-    const snapshot = await adminDb
-      .collection("products")
-      .where("slug", "==", slug)
-      .where("isActive", "==", true)
-      .limit(1)
-      .get();
+    const snapshot = await withTimeout(
+      adminDb
+        .collection("products")
+        .where("slug", "==", slug)
+        .where("isActive", "==", true)
+        .limit(1)
+        .get()
+    );
 
     if (!snapshot.empty) {
       const docSnap = snapshot.docs[0];
@@ -179,7 +183,7 @@ export async function getServerProductBySlug(
     }
 
     // Direct ID fallback lookup
-    const directDoc = await adminDb.collection("products").doc(slug).get();
+    const directDoc = await withTimeout(adminDb.collection("products").doc(slug).get());
     if (directDoc.exists) {
       const data = directDoc.data() || {};
       if (data.isActive === true) {
@@ -240,12 +244,14 @@ export async function getServerFeaturedProducts(
   limitCount: number = 6
 ): Promise<StorefrontResult<Product[]>> {
   try {
-    const snapshot = await adminDb
-      .collection("products")
-      .where("isActive", "==", true)
-      .where("isFeatured", "==", true)
-      .limit(limitCount)
-      .get();
+    const snapshot = await withTimeout(
+      adminDb
+        .collection("products")
+        .where("isActive", "==", true)
+        .where("isFeatured", "==", true)
+        .limit(limitCount)
+        .get()
+    );
 
     let products: Product[] = [];
     if (snapshot.docs.length > 0) {
@@ -297,10 +303,12 @@ export async function getServerProductCategories(): Promise<
   StorefrontResult<ProductCategory[]>
 > {
   try {
-    const snapshot = await adminDb
-      .collection("product_categories")
-      .orderBy("priority", "asc")
-      .get();
+    const snapshot = await withTimeout(
+      adminDb
+        .collection("product_categories")
+        .orderBy("priority", "asc")
+        .get()
+    );
 
     const categories: ProductCategory[] = snapshot.docs
       .filter((d: QueryDocumentSnapshot<DocumentData>) => d.data().isActive !== false)
@@ -408,10 +416,12 @@ export async function getServerProductCategories(): Promise<
  */
 export async function getServerServices(): Promise<StorefrontResult<Service[]>> {
   try {
-    const snapshot = await adminDb
-      .collection("services")
-      .orderBy("priority", "asc")
-      .get();
+    const snapshot = await withTimeout(
+      adminDb
+        .collection("services")
+        .orderBy("priority", "asc")
+        .get()
+    );
 
     const services: Service[] = snapshot.docs
       .filter((d: QueryDocumentSnapshot<DocumentData>) => {
@@ -451,11 +461,13 @@ export async function getServerServiceBySlug(
       return { success: false, error: "Service slug is required." };
     }
 
-    const snapshot = await adminDb
-      .collection("services")
-      .where("slug", "==", slug)
-      .limit(1)
-      .get();
+    const snapshot = await withTimeout(
+      adminDb
+        .collection("services")
+        .where("slug", "==", slug)
+        .limit(1)
+        .get()
+    );
 
     if (!snapshot.empty) {
       const docSnap = snapshot.docs[0];
@@ -475,7 +487,7 @@ export async function getServerServiceBySlug(
       }
     }
 
-    const directDoc = await adminDb.collection("services").doc(slug).get();
+    const directDoc = await withTimeout(adminDb.collection("services").doc(slug).get());
     if (directDoc.exists) {
       const data = directDoc.data() || {};
       if (data.isActive !== false && data.published !== false && data.isPublished !== false) {
@@ -510,10 +522,12 @@ export async function getServerServiceBySlug(
  */
 export async function getServerBlogPosts(): Promise<StorefrontResult<BlogPost[]>> {
   try {
-    const snapshot = await adminDb
-      .collection("blog_posts")
-      .orderBy("publishDate", "desc")
-      .get();
+    const snapshot = await withTimeout(
+      adminDb
+        .collection("blog_posts")
+        .orderBy("publishDate", "desc")
+        .get()
+    );
 
     const posts: BlogPost[] = snapshot.docs
       .filter((d: QueryDocumentSnapshot<DocumentData>) => {
@@ -561,11 +575,13 @@ export async function getServerBlogPostBySlug(
       return { success: false, error: "Blog slug is required." };
     }
 
-    const snapshot = await adminDb
-      .collection("blog_posts")
-      .where("slug", "==", slug)
-      .limit(1)
-      .get();
+    const snapshot = await withTimeout(
+      adminDb
+        .collection("blog_posts")
+        .where("slug", "==", slug)
+        .limit(1)
+        .get()
+    );
 
     if (!snapshot.empty) {
       const docSnap = snapshot.docs[0];

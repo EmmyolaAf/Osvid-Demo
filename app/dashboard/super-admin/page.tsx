@@ -1409,7 +1409,7 @@ export default function SuperAdminDashboard() {
                                         minute: "2-digit",
                                         second: "2-digit",
                                       })
-                                    : "—"}
+                                    : "-"}
                                 </td>
                                 <td className="px-4 py-3">
                                   <span
@@ -1439,7 +1439,7 @@ export default function SuperAdminDashboard() {
                                     {log.targetType}
                                   </div>
                                   <div className="font-mono text-[11px] text-slate-500 truncate max-w-[150px]">
-                                    {log.targetId || "—"}
+                                    {log.targetId || "-"}
                                   </div>
                                 </td>
                                 <td className="px-4 py-3">
