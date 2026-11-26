@@ -1158,16 +1158,16 @@ export default function ProductsManagementPage() {
                           </td>
 
                           <td className="py-3.5 px-5 text-right">
-                            <div className="flex items-center justify-end gap-1">
+                            <div className="flex items-center justify-end gap-1.5">
                               {canManageInventory && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => openHistoryModal(p.id)}
-                                  className="text-xs h-8 w-8 p-0 text-slate-500 hover:text-orange-600 rounded-lg"
+                                  className="h-9 w-9 p-0 text-slate-500 hover:text-orange-600 hover:bg-orange-50 rounded-xl transition-colors"
                                   title={`View Stock History for ${p.name}`}
                                 >
-                                  <History size={14} />
+                                  <History size={18} />
                                 </Button>
                               )}
                               {canManageProducts ? (
@@ -1176,20 +1176,20 @@ export default function ProductsManagementPage() {
                                     variant="ghost"
                                     size="sm"
                                     onClick={() => openEditProductModal(p)}
-                                    className="text-xs h-8 w-8 p-0 text-slate-600 hover:text-slate-900 rounded-lg"
+                                    className="h-9 w-9 p-0 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors"
                                     title="Edit Product"
                                   >
-                                    <Edit size={14} />
+                                    <Edit size={18} />
                                   </Button>
                                   {isPrivilegedAdmin && (
                                     <Button
                                       variant="ghost"
                                       size="sm"
                                       onClick={() => handleDeleteProduct(p.id, p.name)}
-                                      className="text-xs h-8 w-8 p-0 text-red-600 hover:bg-red-50 rounded-lg"
+                                      className="h-9 w-9 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-xl transition-colors"
                                       title="Delete Product (Admin Only)"
                                     >
-                                      <Trash2 size={14} />
+                                      <Trash2 size={18} />
                                     </Button>
                                   )}
                                 </>
@@ -1267,19 +1267,19 @@ export default function ProductsManagementPage() {
                         variant="outline"
                         size="sm"
                         onClick={() => openEditCategoryModal(c)}
-                        className="text-xs h-8 rounded-lg"
+                        className="text-xs h-8.5 rounded-xl font-bold gap-1"
                       >
-                        <Edit size={13} className="mr-1" /> Edit
+                        <Edit size={15} /> Edit
                       </Button>
                       {isPrivilegedAdmin && (
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => handleDeleteCategory(c.id, c.name)}
-                          className="text-xs h-8 text-red-600 hover:bg-red-50 rounded-lg"
+                          className="text-xs h-8.5 w-8.5 p-0 text-red-600 hover:bg-red-50 rounded-xl"
                           title="Delete Category (Admin Only)"
                         >
-                          <Trash2 size={13} />
+                          <Trash2 size={16} />
                         </Button>
                       )}
                     </div>
